@@ -1,0 +1,42 @@
+{
+  "name": "plan-markup-studio",
+  "productName": "Plan Markup Studio",
+  "version": "1.0.0",
+  "description": "Windows PDF markup, measurement, compare and drawing-set app (Bluebeam-style)",
+  "main": "electron/main.cjs",
+  "author": "Plan Markup Studio",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "start": "npm run build && electron .",
+    "electron": "electron .",
+    "test": "vitest run",
+    "dist": "npm run build && electron-builder --win nsis --publish never"
+  },
+  "build": {
+    "appId": "com.planmarkupstudio.app",
+    "productName": "Plan Markup Studio",
+    "files": ["dist/**", "electron/**", "package.json"],
+    "directories": { "output": "release" },
+    "win": { "target": ["nsis"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,583 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { saveWithState } from './core/annotations';
+import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure } from './core/types';
+import { PagePlan, buildFromPlan, mergePdfs, parseRanges, splitPdf } from './core/organize';
+import { PDFDocument } from 'pdf-lib';
+import { readState } from './core/annotations';
+import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, downloadName, pickFiles, saveBytes, stateOf } from './app/model';
+import { PageView } from './components/PageView';
+import { BookmarksPanel, Thumbnails } from './components/Thumbnails';
+import { MarkupsPanel } from './components/MarkupsPanel';
+import { MeasurePanel } from './components/MeasurePanel';
+import { OrganizePanel } from './components/OrganizePanel';
+import { SearchPanel, SheetsPanel } from './components/SheetsPanel';
+import { ComparePanel } from './components/ComparePanel';
+import { ProjectPanel } from './components/ProjectPanel';
+
+const MARKUP_TOOLS: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count', 'calibrate'];
+const HISTORY_LIMIT = 100;
+
+type RightTab = 'markups' | 'measure' | 'organize' | 'sheets' | 'search';
+type LeftTab = 'pages' | 'bookmarks' | 'project';
+
+const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
+
+export default function App() {
+  const [docs, setDocs] = useState<Doc[]>([]);
+  const [activeId, setActiveId] = useState('');
+  const [view, setView] = useState<'viewer' | 'compare'>('viewer');
+  const [tool, setTool] = useState<Tool>('select');
+  const [styles, setStyles] = useState<Record<string, Style>>({});
+  const [subject, setSubject] = useState('');
+  const [author, setAuthor] = useState(() => localStorage.getItem('pms.author') || 'User');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rightTab, setRightTab] = useState<RightTab>('markups');
+  const [leftTab, setLeftTab] = useState<LeftTab>('pages');
+  const [fit, setFit] = useState<{ mode: 'width' | 'page'; n: number }>({ mode: 'page', n: 0 });
+  const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
+  const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
+  const lastEdit = useRef<{ key: string; t: number } | null>(null);
+  const docsRef = useRef(docs);
+  docsRef.current = docs;
+
+  const active = docs.find((d) => d.id === activeId) ?? null;
+  const say = useCallback((m: string) => setMsg(m), []);
+
+  useEffect(() => localStorage.setItem('pms.author', author), [author]);
+
+  const updateDoc = useCallback((id: string, fn: (d: Doc) => Partial<Doc>) => {
+    setDocs((all) => all.map((d) => (d.id === id ? { ...d, ...fn(d) } : d)));
+  }, []);
+
+  const addDocs = useCallback(async (files: PickedFile[], activate = true) => {
+    for (const f of files) {
+      try {
+        const d = await createDoc(f.name, f.data, f.path);
+        setDocs((all) => [...all, d]);
+        if (activate) setActiveId(d.id);
+        setMsg(`Opened ${f.name} (${d.numPages} pages, ${d.markups.length} markups)`);
+      } catch (e) {
+        setMsg(`Could not open ${f.name}: ${(e as Error).message}`);
+      }
+    }
+  }, []);
+
+  const open = async () => addDocs(await pickFiles());
+
+  useEffect(() => {
+    window.api?.startupFiles().then((f) => { if (f.length) void addDocs(f); });
+  }, [addDocs]);
+
+  // ---- markup history -----
+  const commit = (id: string, markups: Markup[], key?: string) =>
+    updateDoc(id, (d) => {
+      const now = Date.now();
+      const coalesce = key && lastEdit.current?.key === key + id && now - lastEdit.current.t < 1500;
+      lastEdit.current = key ? { key: key + id, t: now } : null;
+      return {
+        markups,
+        undo: coalesce ? d.undo : [...d.undo.slice(-HISTORY_LIMIT + 1), d.markups],
+        redo: [],
+        dirty: true,
+      };
+    });
+
+  const beginEdit = () =>
+    active &&
+    updateDoc(active.id, (d) => ({ undo: [...d.undo.slice(-HISTORY_LIMIT + 1), d.markups], redo: [] }));
+  const live = (markups: Markup[]) => active && updateDoc(active.id, () => ({ markups, dirty: true }));
+
+  const undo = () =>
+    active &&
+    updateDoc(active.id, (d) =>
+      d.undo.length ? { markups: d.undo[d.undo.length - 1], undo: d.undo.slice(0, -1), redo: [...d.redo, d.markups], dirty: true } : {},
+    );
+  const redo = () =>
+    active &&
+    updateDoc(active.id, (d) =>
+      d.redo.length ? { markups: d.redo[d.redo.length - 1], redo: d.redo.slice(0, -1), undo: [...d.undo, d.markups], dirty: true } : {},
+    );
+
+  const createMarkup = (m: Markup) => {
+    if (!active) return;
+    commit(active.id, [...active.markups, m]);
+    setSelectedId(m.id);
+    if (m.type === 'text' || m.type === 'callout' || m.type === 'note') {
+      setTool('select');
+      setRightTab('markups');
+    }
+    if (isMeasure(m.type)) setRightTab('measure');
+  };
+
+  const updateMarkup = (id: string, patch: Partial<Markup>, key?: string) =>
+    active && commit(active.id, active.markups.map((m) => (m.id === id ? { ...m, ...patch } : m)), key);
+
+  const deleteMarkup = (id: string) => {
+    if (!active) return;
+    commit(active.id, active.markups.filter((m) => m.id !== id));
+    setSelectedId(null);
+  };
+
+  // ---- file ops -----
+  const bake = (d: Doc) => saveWithState(d.bytes, stateOf(d));
+
+  const save = async (as = false) => {
+    if (!active) return;
+    try {
+      const bytes = await bake(active);
+      const path = await saveBytes(active.name, bytes, 'pdf', as ? undefined : active.path);
+      if (!path) return;
+      updateDoc(active.id, () => ({ bytes, path, name: baseName(path), dirty: false }));
+      say(`Saved ${baseName(path)} with ${active.markups.length} markup annotation(s)`);
+    } catch (e) {
+      say('Save failed: ' + (e as Error).message);
+    }
+  };
+
+  const exportCsv = async (csv: string, name: string) => {
+    const path = await saveBytes(name, csv, 'csv');
+    if (path) say('Saved ' + path);
+  };
+
+  const closeDoc = (id: string) => {
+    const d = docs.find((x) => x.id === id);
+    if (d?.dirty && !window.confirm(`${d.name} has unsaved changes. Close anyway?`)) return;
+    const rest = docs.filter((x) => x.id !== id);
+    setDocs(rest);
+    if (activeId === id) setActiveId(rest[rest.length - 1]?.id ?? '');
+  };
+
+  // ---- organize -----
+  const replaceContent = async (d: Doc, bytes: Uint8Array, bookmarks: Doc['bookmarks'], page: number) => {
+    const fresh = await createDoc(d.name, bytes, d.path, true);
+    updateDoc(d.id, () => ({
+      bytes,
+      pdf: fresh.pdf,
+      numPages: fresh.numPages,
+      markups: fresh.markups,
+      calibrations: fresh.calibrations,
+      sheets: fresh.sheets,
+      bookmarks,
+      undo: [],
+      redo: [],
+      dirty: true,
+      page: Math.max(0, Math.min(fresh.numPages - 1, page)),
+      textCache: new Map(),
+    }));
+    setSelectedId(null);
+  };
+
+  const applyPlan = async (d: Doc, plan: PagePlan[], extras: Uint8Array[] = []) => {
+    try {
+      const baked = await bake(d);
+      const bytes = await buildFromPlan([baked, ...extras], plan);
+      const map = new Map<number, number>();
+      plan.forEach((s, i) => s.src === 0 && !map.has(s.index) && map.set(s.index, i));
+      const bookmarks = d.bookmarks.filter((b) => map.has(b.page)).map((b) => ({ ...b, page: map.get(b.page)! }));
+      await replaceContent(d, bytes, bookmarks, map.get(d.page) ?? d.page);
+      say(`Updated page layout (${plan.length} pages)`);
+    } catch (e) {
+      say('Organize failed: ' + (e as Error).message);
+    }
+  };
+
+  const openNew = async (name: string, bytes: Uint8Array) => {
+    const nd = await createDoc(name, bytes, undefined, true);
+    setDocs((all) => [...all, nd]);
+    setActiveId(nd.id);
+    setView('viewer');
+  };
+
+  const extract = async (d: Doc, indices: number[]) => {
+    const baked = await bake(d);
+    const bytes = await buildFromPlan([baked], indices.map((index) => ({ src: 0, index })));
+    await openNew(downloadName(d.name, '-extract'), bytes);
+    say(`Extracted ${indices.length} page(s) into a new tab. Use Save As to write it to disk.`);
+  };
+
+  const split = async (d: Doc, groups: number[][]) => {
+    try {
+      const baked = await bake(d);
+      const parts = await splitPdf(baked, groups);
+      const files = parts.map((data, i) => ({ name: downloadName(d.name, `-part${i + 1}`), data }));
+      const dir = window.api ? await window.api.saveMany({ files }) : null;
+      say(dir ? `Wrote ${files.length} files to ${dir}` : 'Split cancelled');
+    } catch (e) {
+      say('Split failed: ' + (e as Error).message);
+    }
+  };
+
+  const insert = async (d: Doc, sourceId: string, range: string, at: number) => {
+    try {
+      let srcBytes: Uint8Array | undefined;
+      if (sourceId === '__file') srcBytes = (await pickFiles())[0]?.data;
+      else {
+        const s = docs.find((x) => x.id === sourceId);
+        srcBytes = s ? await bake(s) : undefined;
+      }
+      if (!srcBytes) return;
+      const total = (await PDFDocument.load(srcBytes, { ignoreEncryption: true })).getPageCount();
+      const idx = range.trim() ? parseRanges(range, total).flat() : Array.from({ length: total }, (_, i) => i);
+      const plan: PagePlan[] = [];
+      for (let i = 0; i < d.numPages; i++) plan.push({ src: 0, index: i });
+      plan.splice(at, 0, ...idx.map((index) => ({ src: 1, index })));
+      await applyPlan(d, plan, [srcBytes]);
+    } catch (e) {
+      say('Insert failed: ' + (e as Error).message);
+    }
+  };
+
+  const mergeAll = async () => {
+    if (docs.length < 2) return say('Open at least two PDFs to merge');
+    const baked = await Promise.all(docs.map(bake));
+    await openNew('merged-set.pdf', await mergePdfs(baked));
+    say(`Merged ${docs.length} documents into a new tab`);
+  };
+
+  // ---- calibration -----
+  const setCal = (cal: Calibration, all: boolean) => {
+    if (!active) return;
+    updateDoc(active.id, (d) => {
+      const cals = { ...d.calibrations };
+      if (all) for (let i = 0; i < d.numPages; i++) cals[i] = cal;
+      else cals[d.page] = cal;
+      return { calibrations: cals, dirty: true };
+    });
+    setPending(null);
+    setTool('select');
+    say(`Scale set: 100 pt = ${(cal.unitsPerPoint * 100).toFixed(3)} ${cal.unit}`);
+  };
+
+  const goto = (i: number) =>
+    active && updateDoc(active.id, (d) => ({ page: Math.max(0, Math.min(d.numPages - 1, i)) }));
+  const setZoom = (z: number) => active && updateDoc(active.id, () => ({ zoom: z }));
+  const zoomBy = (f: number) => active && setZoom(Math.max(0.05, Math.min(8, (active.zoom || 1) * f)));
+
+  // ---- keyboard -----
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e) => {
+    const t = e.target as HTMLElement;
+    if (t && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      e.shiftKey ? redo() : undo();
+    } else if (mod && e.key.toLowerCase() === 'y') {
+      e.preventDefault();
+      redo();
+    } else if (mod && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      save(e.shiftKey);
+    } else if (mod && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      open();
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && tool === 'select') {
+      deleteMarkup(selectedId);
+    } else if (e.key === 'Escape') {
+      setTool('select');
+      setPending(null);
+    } else if (e.key === 'PageDown' && active) goto(active.page + 1);
+    else if (e.key === 'PageUp' && active) goto(active.page - 1);
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = [...e.dataTransfer.files].filter((f) => /\.pdf$/i.test(f.name));
+    const picked = await Promise.all(
+      files.map(async (f) => ({ name: f.name, path: '', data: new Uint8Array(await f.arrayBuffer()) })),
+    );
+    addDocs(picked);
+  };
+
+  // ---- style editing -----
+  const selected = active?.markups.find((m) => m.id === selectedId) ?? null;
+  const toolStyle: Style = { ...(styles[tool] ?? defaultStyle(tool)), subject };
+  const editingSelected = !!selected && tool === 'select';
+  const shown = editingSelected
+    ? { ...toolStyle, color: selected!.color, width: selected!.width, opacity: selected!.opacity, fill: !!selected!.fill, fillColor: selected!.fill ?? '#ffffff' }
+    : toolStyle;
+  const changeStyle = (patch: Partial<Style>) => {
+    if (editingSelected && selected) {
+      const mp: Partial<Markup> = {};
+      if (patch.color !== undefined) mp.color = patch.color;
+      if (patch.width !== undefined) mp.width = patch.width;
+      if (patch.opacity !== undefined) mp.opacity = patch.opacity;
+      if (patch.fill !== undefined || patch.fillColor !== undefined) {
+        const on = patch.fill ?? !!selected.fill;
+        mp.fill = on ? patch.fillColor ?? selected.fill ?? '#ffffff' : undefined;
+      }
+      if (patch.stamp !== undefined) mp.stamp = patch.stamp;
+      updateMarkup(selected.id, mp, 'style');
+    } else if (tool !== 'select' && tool !== 'hand') {
+      setStyles((s) => ({ ...s, [tool]: { ...(s[tool] ?? defaultStyle(tool)), ...patch } }));
+    }
+  };
+  const canStyle = editingSelected || !['select', 'hand', 'calibrate'].includes(tool);
+  const showStamp = tool === 'stamp' || selected?.type === 'stamp';
+
+  const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
+
+  const toolBtn = (t: Tool) => (
+    <button key={t} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active}>
+      {TOOL_LABEL[t]}
+    </button>
+  );
+
+  return (
+    <div className="app" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+      <div className="bar">
+        <button onClick={open} title="Ctrl+O">Open…</button>
+        <button onClick={() => save(false)} disabled={!active} title="Ctrl+S">Save</button>
+        <button onClick={() => save(true)} disabled={!active}>Save as…</button>
+        <span className="sep" />
+        <button onClick={undo} disabled={!active?.undo.length} title="Ctrl+Z">↶ Undo</button>
+        <button onClick={redo} disabled={!active?.redo.length} title="Ctrl+Y">↷ Redo</button>
+        <span className="sep" />
+        <button className={view === 'viewer' ? 'on' : ''} onClick={() => setView('viewer')}>Viewer</button>
+        <button className={view === 'compare' ? 'on' : ''} onClick={() => setView('compare')} disabled={docs.length === 0}>Compare</button>
+        {view === 'viewer' && active && (
+          <>
+            <span className="sep" />
+            <button onClick={() => goto(active.page - 1)}>◀</button>
+            <input
+              className="pg"
+              type="number"
+              min={1}
+              max={active.numPages}
+              value={active.page + 1}
+              onChange={(e) => goto((+e.target.value || 1) - 1)}
+            />
+            <span>/ {active.numPages}</span>
+            <button onClick={() => goto(active.page + 1)}>▶</button>
+            <span className="sep" />
+            <button onClick={() => zoomBy(1 / 1.25)}>－</button>
+            <span className="zoom">{Math.round((active.zoom || 1) * 100)}%</span>
+            <button onClick={() => zoomBy(1.25)}>＋</button>
+            <button onClick={() => setFit((f) => ({ mode: 'width', n: f.n + 1 }))}>Fit width</button>
+            <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))}>Fit page</button>
+          </>
+        )}
+        <span className="grow" />
+        <label className="author">
+          Author <input value={author} onChange={(e) => setAuthor(e.target.value)} />
+        </label>
+      </div>
+
+      {view === 'viewer' && (
+        <div className="bar tools">
+          {(['select', 'hand'] as Tool[]).map(toolBtn)}
+          <span className="sep" />
+          <span className="lbl">Markup</span>
+          {MARKUP_TOOLS.map(toolBtn)}
+          <span className="sep" />
+          <span className="lbl">Measure</span>
+          {MEASURE_TOOLS.map(toolBtn)}
+          <span className="sep" />
+          {canStyle && (
+            <>
+              <input type="color" title="Color" value={shown.color} onChange={(e) => changeStyle({ color: e.target.value })} />
+              <label title="Line width">
+                W <input type="range" min={1} max={12} value={shown.width} onChange={(e) => changeStyle({ width: +e.target.value })} />
+              </label>
+              <label title="Opacity">
+                α <input type="range" min={0.1} max={1} step={0.05} value={shown.opacity} onChange={(e) => changeStyle({ opacity: +e.target.value })} />
+              </label>
+              <label title="Fill">
+                Fill <input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} />
+              </label>
+              {showStamp && (
+                <select value={selected?.type === 'stamp' && editingSelected ? selected.stamp : shown.stamp} onChange={(e) => changeStyle({ stamp: e.target.value })}>
+                  {STAMPS.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="tabs">
+        {docs.map((d) => (
+          <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); setSelectedId(null); }}>
+            {d.name}
+            {d.dirty ? ' •' : ''}
+            <button
+              className="x"
+              onClick={(e) => {
+                e.stopPropagation();
+                closeDoc(d.id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="main">
+        {!active ? (
+          <div className="empty">
+            <h1>Plan Markup Studio</h1>
+            <p>Markups · Measurements · Compare revisions · Organize drawing sets</p>
+            <button className="primary big" onClick={open}>Open PDF…</button>
+            <p className="muted">or drag PDF files onto this window</p>
+          </div>
+        ) : view === 'compare' ? (
+          <ComparePanel docs={docs} activeId={active.id} onOpenRevision={async () => addDocs(await pickFiles(), false)} onMessage={say} />
+        ) : (
+          <>
+            <div className="side left">
+              <div className="ptabs">
+                {(['pages', 'bookmarks', 'project'] as LeftTab[]).map((t) => (
+                  <button key={t} className={leftTab === t ? 'on' : ''} onClick={() => setLeftTab(t)}>
+                    {t === 'pages' ? 'Pages' : t === 'bookmarks' ? 'Bookmarks' : 'Project'}
+                  </button>
+                ))}
+              </div>
+              {leftTab === 'pages' && <Thumbnails doc={active} onGoto={goto} />}
+              {leftTab === 'bookmarks' && (
+                <BookmarksPanel doc={active} onGoto={goto} onChange={(b) => updateDoc(active.id, () => ({ bookmarks: b, dirty: true }))} />
+              )}
+              {leftTab === 'project' && (
+                <ProjectPanel
+                  docs={docs}
+                  activeId={active.id}
+                  onActivate={setActiveId}
+                  onOpen={open}
+                  onClose={closeDoc}
+                  onRename={(id, name) => updateDoc(id, () => ({ name, dirty: true }))}
+                  onMove={(i, dir) =>
+                    setDocs((all) => {
+                      const j = i + dir;
+                      if (j < 0 || j >= all.length) return all;
+                      const n = all.slice();
+                      [n[i], n[j]] = [n[j], n[i]];
+                      return n;
+                    })
+                  }
+                  onMerge={mergeAll}
+                />
+              )}
+            </div>
+            <div className="center">
+              <PageView
+                key={active.id}
+                doc={active}
+                tool={tool}
+                style={toolStyle}
+                author={author}
+                selectedId={selectedId}
+                fit={fit}
+                onSelect={(id) => { setSelectedId(id); if (id) setRightTab((t) => (t === 'measure' || t === 'markups' ? t : 'markups')); }}
+                onCreate={createMarkup}
+                onBeginEdit={beginEdit}
+                onLive={live}
+                onZoom={setZoom}
+                onCalibrate={(a, b) => {
+                  setPending({ a, b });
+                  setRightTab('measure');
+                  say('Enter the known distance between the two picked points');
+                }}
+                onMessage={say}
+              />
+            </div>
+            <div className="side right">
+              <div className="ptabs">
+                {(
+                  [
+                    ['markups', `Markups (${countOf})`],
+                    ['measure', 'Measure'],
+                    ['organize', 'Organize'],
+                    ['sheets', 'Sheet index'],
+                    ['search', 'Search'],
+                  ] as [RightTab, string][]
+                ).map(([t, label]) => (
+                  <button key={t} className={rightTab === t ? 'on' : ''} onClick={() => setRightTab(t)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {rightTab === 'markups' && (
+                <MarkupsPanel
+                  doc={active}
+                  selectedId={selectedId}
+                  author={author}
+                  onSelect={(id) => {
+                    const m = active.markups.find((x) => x.id === id);
+                    if (m) {
+                      setSelectedId(id);
+                      setTool('select');
+                      goto(m.page);
+                    }
+                  }}
+                  onUpdate={updateMarkup}
+                  onDelete={deleteMarkup}
+                  onExport={(csv) => exportCsv(csv, downloadName(active.name, '-markups', 'csv'))}
+                />
+              )}
+              {rightTab === 'measure' && (
+                <MeasurePanel
+                  doc={active}
+                  pending={pending}
+                  subject={subject}
+                  onSubject={setSubject}
+                  onTool={(t) => { setTool(t); say('Click two points of a known length on the drawing'); }}
+                  onSetCal={setCal}
+                  onClearPending={() => setPending(null)}
+                  onExport={(csv) => exportCsv(csv, downloadName(active.name, '-takeoff', 'csv'))}
+                  onMessage={say}
+                />
+              )}
+              {rightTab === 'organize' && (
+                <OrganizePanel
+                  doc={active}
+                  docs={docs}
+                  onPlan={(plan) => applyPlan(active, plan)}
+                  onExtract={(idx) => extract(active, idx)}
+                  onSplit={(g) => split(active, g)}
+                  onInsert={(src, range, at) => insert(active, src, range, at)}
+                  onMessage={say}
+                />
+              )}
+              {rightTab === 'sheets' && (
+                <SheetsPanel
+                  doc={active}
+                  docs={docs}
+                  onChange={(page, patch: Partial<SheetMeta>) =>
+                    updateDoc(active.id, (d) => ({
+                      sheets: { ...d.sheets, [page]: { ...({ number: '', title: '', discipline: '', revision: '' } as SheetMeta), ...d.sheets[page], ...patch } },
+                      dirty: true,
+                    }))
+                  }
+                  onGoto={goto}
+                  onExport={(csv) => exportCsv(csv, 'sheet-index.csv')}
+                />
+              )}
+              {rightTab === 'search' && (
+                <SearchPanel
+                  docs={docs}
+                  activeId={active.id}
+                  onGoto={(id, page) => {
+                    setActiveId(id);
+                    updateDoc(id, () => ({ page }));
+                  }}
+                />
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="status">{msg}</div>
+    </div>
+  );
+}
+
+export type { MarkupType };
+void readState;
