@@ -17,6 +17,7 @@
   "build": {
     "appId": "com.planmarkupstudio.app",
     "productName": "Plan Markup Studio",
+    "publish": null,
     "files": ["dist/**", "electron/**", "package.json"],
     "directories": { "output": "release" },
     "win": { "target": ["nsis"] },
