@@ -29,3 +29,7 @@ Shortcuts: Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save as, Delete remove selecte
 - Annotations from other tools (without `/PMS` data) are kept in the file but not displayed or editable here.
 - Compare is raster-based (visual differences only).
 - The installer is unsigned.
+
+## Accounts
+
+On first launch you register (name, email, discipline, password of 8+ characters); later launches show a sign-in screen. Accounts are local to this PC (stored in the app's userData folder as users.json, passwords hashed with scrypt and a per-user salt). There is no password recovery, no server, and sign-in is required on every launch. The signed-in name is the default markup author; use Logout in the toolbar to switch users.
