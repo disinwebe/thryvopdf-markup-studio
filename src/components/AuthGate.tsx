@@ -1,15 +1,18 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react';
 import { DISCIPLINE_LIST } from '../core/types';
+import { ChangePassword, UserManagement } from './AccountPanels';
 
-type View = 'setup' | 'register' | 'login';
+type View = 'setup' | 'register' | 'login' | 'awaiting';
+type Actions = { logout: () => void; changePassword: () => void; manageUsers?: () => void };
 
-export default function AuthGate({ children }: { children: (user: AuthUser, logout: () => void) => ReactNode }) {
+export default function AuthGate({ children }: { children: (user: AuthUser, actions: Actions) => ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [st, setSt] = useState<AuthStatus | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
+  const [panel, setPanel] = useState<'password' | 'users' | null>(null);
   const [url, setUrl] = useState('');
   const [f, setF] = useState({ name: '', email: '', discipline: DISCIPLINE_LIST[0], password: '', confirm: '' });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -45,7 +48,10 @@ export default function AuthGate({ children }: { children: (user: AuthUser, logo
     e.preventDefault();
     run(async () => {
       const r = view === 'register' ? await window.api!.register(f) : await window.api!.login(f);
-      if (r.ok) {
+      if (r.ok && r.pending) {
+        setView('awaiting');
+        setInfo(r.message);
+      } else if (r.ok) {
         setUser(r.user);
         setF((s) => ({ ...s, password: '', confirm: '' }));
       } else setError(r.error);
@@ -55,6 +61,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, logo
   const logout = async () => {
     await window.api?.logout();
     setUser(null);
+    setPanel(null);
     await refresh();
   };
 
@@ -80,8 +87,41 @@ export default function AuthGate({ children }: { children: (user: AuthUser, logo
       await refresh();
     });
 
-  if (user) return <>{children(user, logout)}</>;
+  if (user?.mustChange)
+    return (
+      <div className="auth">
+        <div>
+          <ChangePassword forced onDone={setUser} />
+          <button type="button" className="link" onClick={logout}>Log out</button>
+        </div>
+      </div>
+    );
+  if (user) {
+    const actions: Actions = { logout, changePassword: () => setPanel('password'), manageUsers: user.role === 'admin' ? () => setPanel('users') : undefined };
+    return (
+      <>
+        {children(user, actions)}
+        {panel && (
+          <div className="modal">
+            {panel === 'password' ? <ChangePassword onDone={(u) => { setUser(u); setPanel(null); }} onCancel={() => setPanel(null)} /> : <UserManagement me={user} onClose={() => setPanel(null)} />}
+          </div>
+        )}
+      </>
+    );
+  }
   if (!view || !st) return null;
+
+  if (view === 'awaiting')
+    return (
+      <div className="auth">
+        <div className="auth-card">
+          <h1>Plan Markup Studio</h1>
+          <h2>Awaiting admin approval</h2>
+          <p>{info || 'Your registration was submitted.'} You can sign in once an administrator approves your account.</p>
+          <button className="primary" onClick={() => { setView('login'); setInfo(''); }}>Back to sign in</button>
+        </div>
+      </div>
+    );
 
   if (view === 'setup')
     return (
@@ -112,6 +152,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, logo
       <form className="auth-card" onSubmit={submit}>
         <h1>Plan Markup Studio</h1>
         <h2>{reg ? 'Create your account' : 'Sign in'}</h2>
+        {reg && st.mode === 'server' && <p className="muted small">New accounts must be approved by an administrator before you can sign in.</p>}
         {reg && (
           <label>
             Name
@@ -120,7 +161,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, logo
         )}
         <label>
           Email address
-          <input autoFocus={!reg} type="email" value={f.email} onChange={set('email')} autoComplete="email" />
+          <input autoFocus={!reg} type="text" value={f.email} onChange={set('email')} autoComplete="email" />
         </label>
         {reg && (
           <label>

@@ -40,7 +40,7 @@ Accounts can live on one central server PC so every client PC shares the same us
 
 **Server PC**
 1. Install Node.js 18+ and copy the `server` folder (single file, no dependencies) to the PC.
-2. Run `node server/server.cjs` (or `npm run server` from the repo). Settings (environment variables): `PMS_PORT` (default 8787), `PMS_HOST` (default 0.0.0.0), `PMS_USERS_FILE` (default `server/data/users.json`), `PMS_ADMIN_TOKEN` (enables `GET /api/users` with header `X-Admin-Token`), `PMS_SESSION_HOURS` (default 8), `PMS_TLS_KEY` / `PMS_TLS_CERT` (enable HTTPS).
+2. Run `node server/server.cjs` (or `npm run server` from the repo). Settings (environment variables): `PMS_PORT` (default 8787), `PMS_HOST` (default 0.0.0.0), `PMS_USERS_FILE` (default `server/data/users.json`), `PMS_ADMIN_TOKEN` `PMS_SESSION_HOURS` (default 8), `PMS_TLS_KEY` / `PMS_TLS_CERT` (enable HTTPS).
 3. Open the firewall for the port (elevated PowerShell): `New-NetFirewallRule -DisplayName "Plan Markup Studio" -Direction Inbound -Protocol TCP -LocalPort 8787 -Action Allow -Profile Domain,Private`
 4. To run at startup, use Task Scheduler ("At startup", run `node C:\pms\server\server.cjs` with the variables set) or a service wrapper such as NSSM.
 5. Back up the users file regularly.
@@ -48,3 +48,10 @@ Accounts can live on one central server PC so every client PC shares the same us
 **Client PCs**: install the app; on first launch enter the server address (e.g. `192.168.1.10:8787`), use *Test connection*, then register or sign in. The address is saved per Windows user; use *Change* on the login screen to edit it. "Use local accounts on this PC only" is an explicit offline fallback with a separate, non-shared account store.
 
 **Security**: the server hashes passwords with scrypt and per-user salt, locks an email+IP for 15 minutes after 5 failed logins, rate-limits registrations, and issues expiring session tokens. Over plain HTTP, passwords and tokens cross the LAN unencrypted: on untrusted networks enable TLS (`PMS_TLS_KEY`/`PMS_TLS_CERT`, certificate trusted by client PCs via the Windows certificate store, address `https://host:8787`). Anyone on the LAN can register (open registration), and the server session is not currently required to open files, which are local.
+
+### Default administrator and approval workflow
+
+- On first start the server creates the administrator account (user name `admin`) if no admin exists. The initial password is `PMS_ADMIN_PASSWORD` if set (8+ characters); otherwise a random one is generated, printed once on the server console and saved to `ADMIN-INITIAL-PASSWORD.txt` next to the users file (delete it after first login). There is no fixed default password. The admin **must change the password at first login**.
+- Registration is restricted: a new registration (name, email, discipline, password) is created as *pending* and shows "Awaiting admin approval". Pending, rejected and disabled users cannot sign in and get a clear message.
+- Administrators see **Users** (and **Password**) buttons in the toolbar. User management: approve/reject pending, disable/enable, change role (user/admin), reset password (a temporary password is shown once; the user must change it at next login) and delete. Rules are enforced on the server by role; the last active admin and yourself cannot be disabled, demoted or deleted. Disabling, resetting or deleting a user ends their sessions.
+- Existing accounts from an earlier server version become active users. Local-account mode has no roles or approval.

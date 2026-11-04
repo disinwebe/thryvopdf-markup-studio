@@ -23,7 +23,7 @@ type LeftTab = 'pages' | 'bookmarks' | 'project';
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+export default function App({ user, actions }: { user: AuthUser; actions: { logout: () => void; changePassword: () => void; manageUsers?: () => void } }) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
@@ -44,7 +44,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
   const active = docs.find((d) => d.id === activeId) ?? null;
   const logout = () => {
     if (docs.some((d) => d.dirty) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
-    onLogout();
+    actions.logout();
   };
   const say = useCallback((m: string) => setMsg(m), []);
 
@@ -370,7 +370,9 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
         <label className="author">
           Author <input value={author} onChange={(e) => setAuthor(e.target.value)} />
         </label>
-        <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}</span>
+        <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</span>
+        {actions.manageUsers && <button onClick={actions.manageUsers}>Users</button>}
+        {user.email && window.api && <button onClick={actions.changePassword}>Password</button>}
         <button onClick={logout}>Logout</button>
       </div>
 

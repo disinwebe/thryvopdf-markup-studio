@@ -4,4 +4,4 @@ import App from './App';
 import AuthGate from './components/AuthGate';
 import './styles.css';
 
-createRoot(document.getElementById('root')!).render(<AuthGate>{(user, logout) => <App user={user} onLogout={logout} />}</AuthGate>);
+createRoot(document.getElementById('root')!).render(<AuthGate>{(user, actions) => <App user={user} actions={actions} />}</AuthGate>);

@@ -108,6 +108,9 @@ app.whenReady().then(() => {
   ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
   ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
   ipcMain.handle('auth-logout', () => auth.logout());
+  ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
+  ipcMain.handle('auth-admin-list', () => auth.adminList());
+  ipcMain.handle('auth-admin-action', (e, a) => auth.adminAction(a || {}));
   ipcMain.handle('auth-test', (e, url) => auth.test(url));
   ipcMain.handle('auth-configure', (e, a) => auth.configure(a || {}));
   createWindow();

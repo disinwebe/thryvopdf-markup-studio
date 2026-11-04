@@ -50,9 +50,8 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
 
   const current = () => {
     if (cfg.mode === 'local') return local.current();
-    if (session && session.expiresAt > Date.now()) return session.user;
-    session = null;
-    return null;
+    if (session && session.expiresAt <= Date.now()) session = null;
+    return session && !session.user.mustChange ? session.user : null;
   };
 
   const adopt = (r) => {
@@ -60,6 +59,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
       session = { user: r.user, token: r.token, expiresAt: r.expiresAt };
       return { ok: true, user: r.user };
     }
+    if (r.ok && r.pending) return { ok: true, pending: true, message: r.message };
     return { ok: false, error: r.error || 'Request failed.' };
   };
 
@@ -106,6 +106,24 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     async login(a) {
       if (cfg.mode === 'local') return local.login(a);
       return adopt(await call(cfg.serverUrl, 'POST', '/api/login', { email: a.email, password: a.password }));
+    },
+
+    async changePassword({ current, password, confirm }) {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Not signed in to a server.' };
+      if (String(password ?? '') !== String(confirm ?? '')) return { ok: false, error: 'Passwords do not match.' };
+      const r = await call(cfg.serverUrl, 'POST', '/api/change-password', { current, password }, session.token);
+      if (r.ok) session.user = r.user;
+      return r.ok ? { ok: true, user: r.user } : { ok: false, error: r.error };
+    },
+
+    async adminList() {
+      if (!session) return { ok: false, error: 'Not signed in.' };
+      return call(cfg.serverUrl, 'GET', '/api/admin/users', null, session.token);
+    },
+
+    async adminAction(a) {
+      if (!session) return { ok: false, error: 'Not signed in.' };
+      return call(cfg.serverUrl, 'POST', '/api/admin/update', a, session.token);
     },
 
     async logout() {

@@ -9,6 +9,12 @@ interface AuthUser {
   name: string;
   email: string;
   discipline: string;
+  role?: 'admin' | 'user';
+  status?: string;
+  mustChange?: boolean;
+}
+interface ManagedUser extends AuthUser {
+  created?: string;
 }
 interface AuthStatus {
   mode: 'server' | 'local' | null;
@@ -19,7 +25,7 @@ interface AuthStatus {
   user: AuthUser | null;
   error?: string;
 }
-type AuthResult = { ok: true; user: AuthUser } | { ok: false; error: string };
+type AuthResult = { ok: true; user: AuthUser; pending?: undefined } | { ok: true; pending: true; message: string; user?: undefined } | { ok: false; error: string };
 
 interface Window {
   api?: {
@@ -33,6 +39,9 @@ interface Window {
     }): Promise<string | null>;
     saveMany(args: { files: { name: string; data: Uint8Array }[] }): Promise<string | null>;
     authStatus(): Promise<AuthStatus>;
+    changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
+    adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;
+    adminAction(args: { email: string; action: string; role?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string }>;
     testServer(url: string): Promise<{ ok: boolean; error?: string; url?: string; hasUsers?: boolean }>;
     configureAuth(args: { mode: 'server' | 'local'; serverUrl?: string }): Promise<{ ok: boolean; error?: string }>;
     register(args: { name: string; email: string; discipline: string; password: string; confirm: string }): Promise<AuthResult>;

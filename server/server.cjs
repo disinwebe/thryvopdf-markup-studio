@@ -10,8 +10,16 @@ const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const KEY_LEN = 64;
 const SCRYPT = { N: 16384, r: 8, p: 1 };
+const ADMIN_EMAIL = 'admin';
 const normEmail = (e) => String(e || '').trim().toLowerCase();
 const hashPassword = (pw, salt) => crypto.scryptSync(pw, salt, KEY_LEN, SCRYPT);
+const randomPassword = () => crypto.randomBytes(12).toString('base64url');
+
+const STATUS_MSG = {
+  pending: 'Your account is awaiting administrator approval.',
+  rejected: 'Your registration was rejected. Contact an administrator.',
+  disabled: 'This account is disabled. Contact an administrator.',
+};
 
 function createApp(opts = {}) {
   const file = opts.file || path.join(process.cwd(), 'pms-users.json');
@@ -19,7 +27,6 @@ function createApp(opts = {}) {
   const maxFails = opts.maxFails ?? 5;
   const lockMs = opts.lockMs ?? 15 * 60 * 1000;
   const regLimit = opts.regLimit ?? 20; // registrations per IP per hour
-  const adminToken = opts.adminToken || '';
   const now = opts.now || Date.now;
 
   let users = [];
@@ -29,36 +36,81 @@ function createApp(opts = {}) {
   } catch {
     /* new store */
   }
+  for (const u of users) {
+    u.role ||= 'user';
+    u.status ||= 'active'; // accounts created before approval existed
+  }
   const save = () => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ version: 1, users }, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify({ version: 2, users }, null, 2));
     fs.renameSync(tmp, file);
   };
-  const pub = (u) => ({ name: u.name, email: u.email, discipline: u.discipline });
+  const setPassword = (u, pw) => {
+    const salt = crypto.randomBytes(16);
+    u.salt = salt.toString('hex');
+    u.hash = hashPassword(pw, salt).toString('hex');
+  };
+  const view = (u) => ({ name: u.name, email: u.email, discipline: u.discipline, role: u.role, status: u.status, mustChange: !!u.mustChange });
+  const find = (email) => users.find((u) => u.email === normEmail(email));
 
-  const sessions = new Map(); // sha256(token) -> { user, expires }
+  // Seed the default administrator when none exists.
+  let seeded = null;
+  if (!users.some((u) => u.role === 'admin')) {
+    let pw = opts.adminPassword;
+    const generated = !pw;
+    if (pw && pw.length < MIN_PASSWORD) throw new Error(`PMS_ADMIN_PASSWORD must be at least ${MIN_PASSWORD} characters.`);
+    if (!pw) pw = randomPassword();
+    const admin = { name: 'Administrator', email: ADMIN_EMAIL, discipline: 'General', role: 'admin', status: 'active', mustChange: true, created: new Date().toISOString() };
+    setPassword(admin, pw);
+    users = users.filter((u) => u.email !== ADMIN_EMAIL).concat(admin);
+    save();
+    seeded = { email: ADMIN_EMAIL, password: generated ? pw : null, generated };
+    if (generated) {
+      seeded.file = path.join(path.dirname(file), 'ADMIN-INITIAL-PASSWORD.txt');
+      fs.writeFileSync(seeded.file, `Plan Markup Studio initial administrator login\r\nUser: ${ADMIN_EMAIL}\r\nPassword: ${pw}\r\nYou must change this password at first login. Delete this file afterwards.\r\n`);
+    }
+  }
+
+  const sessions = new Map(); // sha256(token) -> { email, expires }
   const fails = new Map(); // email|ip -> { n, until }
   const regs = new Map(); // ip -> { n, reset }
   const th = (t) => crypto.createHash('sha256').update(t).digest('hex');
   const bearer = (req) => (/^Bearer (.+)$/.exec(req.headers.authorization || '') || [])[1];
+  const dropSessions = (email, exceptHash) => {
+    for (const [k, s] of sessions) if (s.email === email && k !== exceptHash) sessions.delete(k);
+  };
 
   const newSession = (u) => {
     const token = crypto.randomBytes(32).toString('hex');
     const expires = now() + sessionTtlMs;
-    sessions.set(th(token), { user: pub(u), expires });
+    sessions.set(th(token), { email: u.email, expires });
     return { token, expiresAt: expires };
   };
+  // Resolves the live user so role/status changes apply immediately.
   const sessionOf = (req) => {
     const t = bearer(req);
     const s = t && sessions.get(th(t));
     if (!s) return null;
-    if (s.expires <= now()) {
+    const u = find(s.email);
+    if (s.expires <= now() || !u || u.status !== 'active') {
       sessions.delete(th(t));
       return null;
     }
-    return s;
+    return { user: u, expires: s.expires, hash: th(t) };
   };
+  const NO_SESSION = [401, { ok: false, error: 'Session expired. Sign in again.' }];
+  const authed = (fn) => (req, b, ip) => {
+    const s = sessionOf(req);
+    return s ? fn(s, b, ip) : NO_SESSION;
+  };
+  const adminOnly = (fn) =>
+    authed((s, b, ip) => {
+      if (s.user.role !== 'admin') return [403, { ok: false, error: 'Administrator access required.' }];
+      if (s.user.mustChange) return [403, { ok: false, error: 'Change your password first.' }];
+      return fn(s, b, ip);
+    });
+  const activeAdmins = () => users.filter((u) => u.role === 'admin' && u.status === 'active').length;
 
   const handlers = {
     'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0 }],
@@ -75,12 +127,12 @@ function createApp(opts = {}) {
       if (!EMAIL_RE.test(email)) return [400, { ok: false, error: 'Enter a valid email address.' }];
       if (!discipline) return [400, { ok: false, error: 'Select a discipline.' }];
       if (password.length < MIN_PASSWORD) return [400, { ok: false, error: `Password must be at least ${MIN_PASSWORD} characters.` }];
-      if (users.some((u) => u.email === email)) return [409, { ok: false, error: 'An account with this email already exists.' }];
-      const salt = crypto.randomBytes(16);
-      const user = { name, email, discipline, salt: salt.toString('hex'), hash: hashPassword(password, salt).toString('hex'), created: new Date().toISOString() };
+      if (find(email)) return [409, { ok: false, error: 'An account with this email already exists.' }];
+      const user = { name, email, discipline, role: 'user', status: 'pending', mustChange: false, created: new Date().toISOString() };
+      setPassword(user, password);
       users.push(user);
       save();
-      return [201, { ok: true, user: pub(user), ...newSession(user) }];
+      return [201, { ok: true, pending: true, message: STATUS_MSG.pending }];
     },
 
     'POST /api/login': (req, b, ip) => {
@@ -88,7 +140,7 @@ function createApp(opts = {}) {
       const key = email + '|' + ip;
       const f = fails.get(key);
       if (f && f.until > now()) return [429, { ok: false, error: 'Too many failed attempts. Try again later.' }];
-      const u = users.find((x) => x.email === email);
+      const u = find(email);
       const salt = Buffer.from(u ? u.salt : '00'.repeat(16), 'hex');
       const got = hashPassword(String(b.password ?? ''), salt);
       const want = Buffer.from(u ? u.hash : '00'.repeat(KEY_LEN), 'hex');
@@ -99,13 +151,11 @@ function createApp(opts = {}) {
         return [401, { ok: false, error: 'Incorrect email or password.' }];
       }
       fails.delete(key);
-      return [200, { ok: true, user: pub(u), ...newSession(u) }];
+      if (u.status !== 'active') return [403, { ok: false, status: u.status, error: STATUS_MSG[u.status] }];
+      return [200, { ok: true, user: view(u), ...newSession(u) }];
     },
 
-    'GET /api/session': (req) => {
-      const s = sessionOf(req);
-      return s ? [200, { ok: true, user: s.user, expiresAt: s.expires }] : [401, { ok: false, error: 'Session expired. Sign in again.' }];
-    },
+    'GET /api/session': authed((s) => [200, { ok: true, user: view(s.user), expiresAt: s.expires }]),
 
     'POST /api/logout': (req) => {
       const t = bearer(req);
@@ -113,13 +163,72 @@ function createApp(opts = {}) {
       return [200, { ok: true }];
     },
 
-    'GET /api/users': (req) => {
-      if (!adminToken) return [403, { ok: false, error: 'Admin access is disabled (set PMS_ADMIN_TOKEN).' }];
-      const given = Buffer.from(String(req.headers['x-admin-token'] || ''));
-      const want = Buffer.from(adminToken);
-      if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) return [401, { ok: false, error: 'Bad admin token.' }];
-      return [200, { ok: true, users: users.map((u) => ({ ...pub(u), created: u.created })) }];
-    },
+    'POST /api/change-password': authed((s, b) => {
+      const u = s.user;
+      const got = hashPassword(String(b.current ?? ''), Buffer.from(u.salt, 'hex'));
+      if (!crypto.timingSafeEqual(got, Buffer.from(u.hash, 'hex'))) return [401, { ok: false, error: 'Current password is incorrect.' }];
+      const pw = String(b.password ?? '');
+      if (pw.length < MIN_PASSWORD) return [400, { ok: false, error: `Password must be at least ${MIN_PASSWORD} characters.` }];
+      if (pw === String(b.current)) return [400, { ok: false, error: 'Choose a different password.' }];
+      setPassword(u, pw);
+      u.mustChange = false;
+      save();
+      dropSessions(u.email, s.hash);
+      return [200, { ok: true, user: view(u) }];
+    }),
+
+    'GET /api/admin/users': adminOnly(() => [200, { ok: true, users: users.map((u) => ({ ...view(u), created: u.created })) }]),
+
+    'POST /api/admin/update': adminOnly((s, b) => {
+      const u = find(b.email);
+      if (!u) return [404, { ok: false, error: 'User not found.' }];
+      const self = u === s.user;
+      const wasActiveAdmin = u.role === 'admin' && u.status === 'active';
+      const lastAdmin = wasActiveAdmin && activeAdmins() <= 1;
+      const bad = (m) => [400, { ok: false, error: m }];
+      switch (b.action) {
+        case 'approve':
+          if (u.status !== 'pending' && u.status !== 'rejected') return bad('Only pending or rejected users can be approved.');
+          u.status = 'active';
+          break;
+        case 'reject':
+          if (u.status !== 'pending') return bad('Only pending users can be rejected.');
+          u.status = 'rejected';
+          break;
+        case 'disable':
+          if (self || lastAdmin) return bad('You cannot disable yourself or the last administrator.');
+          if (u.status !== 'active') return bad('User is not active.');
+          u.status = 'disabled';
+          dropSessions(u.email);
+          break;
+        case 'enable':
+          if (u.status !== 'disabled') return bad('User is not disabled.');
+          u.status = 'active';
+          break;
+        case 'role':
+          if (b.role !== 'admin' && b.role !== 'user') return bad('Role must be admin or user.');
+          if (b.role !== 'admin' && (self || lastAdmin)) return bad('You cannot remove your own or the last administrator role.');
+          u.role = b.role;
+          break;
+        case 'reset': {
+          const temp = randomPassword();
+          setPassword(u, temp);
+          u.mustChange = true;
+          dropSessions(u.email);
+          save();
+          return [200, { ok: true, tempPassword: temp }];
+        }
+        case 'delete':
+          if (self || lastAdmin) return bad('You cannot delete yourself or the last administrator.');
+          users = users.filter((x) => x !== u);
+          dropSessions(u.email);
+          break;
+        default:
+          return bad('Unknown action.');
+      }
+      save();
+      return [200, { ok: true }];
+    }),
   };
 
   const listener = (req, res) => {
@@ -149,14 +258,14 @@ function createApp(opts = {}) {
       }
     });
   };
-  return { listener, userCount: () => users.length };
+  return { listener, seeded };
 }
 
-function start(opts = {}) {
-  const { listener } = createApp(opts);
+async function start(opts = {}) {
+  const { listener, seeded } = createApp(opts);
   const tls = opts.tlsKey && opts.tlsCert ? { key: fs.readFileSync(opts.tlsKey), cert: fs.readFileSync(opts.tlsCert) } : null;
   const srv = tls ? https.createServer(tls, listener) : http.createServer(listener);
-  return new Promise((resolve) => srv.listen(opts.port ?? 8787, opts.host || '0.0.0.0', () => resolve({ server: srv, port: srv.address().port, tls: !!tls })));
+  return new Promise((resolve) => srv.listen(opts.port ?? 8787, opts.host || '0.0.0.0', () => resolve({ server: srv, port: srv.address().port, tls: !!tls, seeded })));
 }
 
 module.exports = { createApp, start, MIN_PASSWORD, EMAIL_RE };
@@ -167,9 +276,20 @@ if (require.main === module) {
     port: Number(e.PMS_PORT || 8787),
     host: e.PMS_HOST || '0.0.0.0',
     file: e.PMS_USERS_FILE || path.join(__dirname, 'data', 'users.json'),
-    adminToken: e.PMS_ADMIN_TOKEN,
+    adminPassword: e.PMS_ADMIN_PASSWORD,
     tlsKey: e.PMS_TLS_KEY,
     tlsCert: e.PMS_TLS_CERT,
     sessionTtlMs: e.PMS_SESSION_HOURS ? Number(e.PMS_SESSION_HOURS) * 3600e3 : undefined,
-  }).then((r) => console.log(`Plan Markup Studio server listening on ${r.tls ? 'https' : 'http'}://0.0.0.0:${r.port}`));
+  }).then((r) => {
+    console.log(`Plan Markup Studio server listening on ${r.tls ? 'https' : 'http'}://0.0.0.0:${r.port}`);
+    if (r.seeded) {
+      console.log(`Default administrator created: user "${r.seeded.email}".`);
+      if (r.seeded.generated) console.log(`Initial password (shown once): ${r.seeded.password}\nAlso saved to ${r.seeded.file}`);
+      else console.log('Initial password: the value of PMS_ADMIN_PASSWORD.');
+      console.log('The administrator must change the password at first login.');
+    }
+  }).catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
 }

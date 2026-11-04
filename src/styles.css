@@ -67,3 +67,4 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 button.link { background: none; border: 0; color: var(--acc); }
 .who { color: var(--mut); }
 .auth-card .row { display: flex; gap: 8px; } .auth-card .ok { color: #2e8b57; font-size: 12px; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; } .usermgmt { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; max-width: 95vw; max-height: 85vh; overflow: auto; } .usermgmt table { border-collapse: collapse; width: 100%; font-size: 12px; } .usermgmt td, .usermgmt th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; } .usermgmt .acts button { margin-right: 4px; } .row.between { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
