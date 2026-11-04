@@ -10,6 +10,15 @@ interface AuthUser {
   email: string;
   discipline: string;
 }
+interface AuthStatus {
+  mode: 'server' | 'local' | null;
+  serverUrl: string;
+  configured: boolean;
+  online: boolean;
+  hasUsers: boolean;
+  user: AuthUser | null;
+  error?: string;
+}
 type AuthResult = { ok: true; user: AuthUser } | { ok: false; error: string };
 
 interface Window {
@@ -23,7 +32,9 @@ interface Window {
       path?: string;
     }): Promise<string | null>;
     saveMany(args: { files: { name: string; data: Uint8Array }[] }): Promise<string | null>;
-    authStatus(): Promise<{ hasUsers: boolean; user: AuthUser | null }>;
+    authStatus(): Promise<AuthStatus>;
+    testServer(url: string): Promise<{ ok: boolean; error?: string; url?: string; hasUsers?: boolean }>;
+    configureAuth(args: { mode: 'server' | 'local'; serverUrl?: string }): Promise<{ ok: boolean; error?: string }>;
     register(args: { name: string; email: string; discipline: string; password: string; confirm: string }): Promise<AuthResult>;
     login(args: { email: string; password: string }): Promise<AuthResult>;
     logout(): Promise<{ ok: true }>;

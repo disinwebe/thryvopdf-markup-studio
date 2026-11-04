@@ -66,3 +66,4 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 .auth-card input, .auth-card select { padding: 6px 8px; font-size: 13px; }
 button.link { background: none; border: 0; color: var(--acc); }
 .who { color: var(--mut); }
+.auth-card .row { display: flex; gap: 8px; } .auth-card .ok { color: #2e8b57; font-size: 12px; }

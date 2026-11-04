@@ -12,6 +12,7 @@
     "start": "npm run build && electron .",
     "electron": "electron .",
     "test": "vitest run",
+    "server": "node server/server.cjs",
     "dist": "npm run build && electron-builder --win nsis --publish never"
   },
   "build": {

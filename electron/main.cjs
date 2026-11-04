@@ -1,7 +1,7 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { createAuth } = require('./auth.cjs');
+const { createClient } = require('./client.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
 if (process.env.PMS_USER_DATA) app.setPath('userData', process.env.PMS_USER_DATA);
@@ -102,11 +102,14 @@ ipcMain.handle('save-many', guard(async (e, { files }) => {
 }));
 
 app.whenReady().then(() => {
-  auth = createAuth(path.join(app.getPath('userData'), 'users.json'));
+  const ud = app.getPath('userData');
+  auth = createClient({ configFile: path.join(ud, 'server.json'), localFile: path.join(ud, 'users.json'), fetch: net.fetch.bind(net) });
   ipcMain.handle('auth-status', () => auth.status());
   ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
   ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
   ipcMain.handle('auth-logout', () => auth.logout());
+  ipcMain.handle('auth-test', (e, url) => auth.test(url));
+  ipcMain.handle('auth-configure', (e, a) => auth.configure(a || {}));
   createWindow();
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
