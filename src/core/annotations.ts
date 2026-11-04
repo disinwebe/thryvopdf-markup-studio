@@ -1,0 +1,537 @@
+import {
+  PDFArray,
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFNumber,
+  PDFPage,
+  PDFRef,
+  PDFString,
+  StandardFonts,
+} from 'pdf-lib';
+import {
+  approxTextWidth,
+  arrowHead,
+  bbox,
+  boxCenter,
+  boxOf,
+  cloudPoints,
+  rectPoly,
+  wrapText,
+} from './geometry';
+import { DEFAULT_CAL, measureLabel } from './measurement';
+import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta } from './types';
+
+export interface PageGeom {
+  x0: number;
+  y0: number;
+  /** unrotated crop box size */
+  w: number;
+  h: number;
+  rotation: number;
+}
+
+const norm = (r: number) => ((Math.round(r / 90) * 90) % 360 + 360) % 360;
+
+export function pageGeom(page: PDFPage): PageGeom {
+  const box = page.getCropBox();
+  return { x0: box.x, y0: box.y, w: box.width, h: box.height, rotation: norm(page.getRotation().angle) };
+}
+
+export function viewSize(g: PageGeom) {
+  return g.rotation % 180 ? { w: g.h, h: g.w } : { w: g.w, h: g.h };
+}
+
+/** Viewport (scale 1, top-left origin) point -> PDF user space. */
+export function viewToPdf(p: Pt, g: PageGeom): Pt {
+  let x: number, y: number;
+  switch (g.rotation) {
+    case 90:
+      x = p.y;
+      y = p.x;
+      break;
+    case 180:
+      x = g.w - p.x;
+      y = p.y;
+      break;
+    case 270:
+      x = g.w - p.y;
+      y = g.h - p.x;
+      break;
+    default:
+      x = p.x;
+      y = g.h - p.y;
+  }
+  return { x: x + g.x0, y: y + g.y0 };
+}
+
+export function pdfToView(p: Pt, g: PageGeom): Pt {
+  const x = p.x - g.x0,
+    y = p.y - g.y0;
+  switch (g.rotation) {
+    case 90:
+      return { x: y, y: x };
+    case 180:
+      return { x: g.w - x, y };
+    case 270:
+      return { x: g.h - y, y: g.w - x };
+    default:
+      return { x, y: g.h - y };
+  }
+}
+
+const hex = (c: string): [number, number, number] => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(c);
+  if (!m) return [0, 0, 0];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255].map((v) => +v.toFixed(4)) as [
+    number,
+    number,
+    number,
+  ];
+};
+const f = (n: number) => +n.toFixed(3);
+const pdfDate = (iso: string) => {
+  const d = new Date(iso);
+  if (isNaN(+d)) return undefined;
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `D:${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+};
+const latin1 = (s: string) =>
+  s.replace(/[^\x20-\x7e\xa0-\xff]/g, '?').replace(/([\\()])/g, '\\$1');
+
+interface Built {
+  subtype: string;
+  ops: string;
+  rect: Rect; // pdf space
+  extra: Record<string, unknown>;
+  blend?: string;
+}
+
+const SUBTYPE: Record<string, string> = {
+  highlight: 'Highlight',
+  text: 'FreeText',
+  callout: 'FreeText',
+  cloud: 'Square',
+  rect: 'Square',
+  ellipse: 'Circle',
+  line: 'Line',
+  arrow: 'Line',
+  polyline: 'PolyLine',
+  pen: 'Ink',
+  stamp: 'Stamp',
+  note: 'Text',
+  'm-length': 'Line',
+  'm-polylength': 'PolyLine',
+  'm-area': 'Polygon',
+  'm-perimeter': 'Polygon',
+  'm-angle': 'PolyLine',
+  'm-count': 'Circle',
+};
+
+/** Build the appearance-stream operators and annotation-specific keys for a markup. */
+export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAULT_CAL): Built {
+  const cv = (p: Pt) => viewToPdf(p, g);
+  const col = hex(m.color);
+  const stroke = `${f(m.width)} w ${col.join(' ')} RG 1 J 1 j`;
+  const fillC = m.fill ? hex(m.fill) : null;
+  const path = (pts: Pt[], close = false) => {
+    const q = pts.map(cv);
+    return q.map((p, i) => `${f(p.x)} ${f(p.y)} ${i ? 'l' : 'm'}`).join(' ') + (close ? ' h' : '');
+  };
+  const textAngle = (g.rotation * Math.PI) / 180;
+  const tm = (p: Pt) => {
+    const q = cv(p);
+    const c = Math.cos(textAngle),
+      s = Math.sin(textAngle);
+    return `${f(c)} ${f(s)} ${f(-s)} ${f(c)} ${f(q.x)} ${f(q.y)} Tm`;
+  };
+  const textLines = (lines: string[], origin: Pt, size: number, color: number[]) =>
+    lines
+      .map(
+        (ln, i) =>
+          `BT /F1 ${size} Tf ${color.join(' ')} rg ${tm({ x: origin.x, y: origin.y + size * (i + 1) * 1.15 - size * 0.2 })} (${latin1(ln)}) Tj ET`,
+      )
+      .join('\n');
+
+  let ops = '';
+  let viewPts: Pt[] = m.points;
+  const extra: Record<string, unknown> = {};
+  let blend: string | undefined;
+  const label = (anchor: Pt) => {
+    const t = measureLabel(m, cal);
+    return t ? '\n' + textLines([t], { x: anchor.x + 4, y: anchor.y - 14 }, 10, col) : '';
+  };
+
+  switch (m.type) {
+    case 'highlight': {
+      const r = boxOf(m);
+      viewPts = rectPoly(r);
+      ops = `${col.join(' ')} rg ${path(viewPts, true)} f`;
+      blend = 'Multiply';
+      const q = viewPts.map(cv);
+      extra.QuadPoints = [q[0], q[1], q[3], q[2]].flatMap((p) => [f(p.x), f(p.y)]);
+      break;
+    }
+    case 'rect':
+    case 'cloud': {
+      const r = boxOf(m);
+      viewPts = m.type === 'cloud' ? cloudPoints(r) : rectPoly(r);
+      ops = `${stroke} ${fillC ? fillC.join(' ') + ' rg' : ''} ${path(viewPts, true)} ${fillC ? 'B' : 'S'}`;
+      break;
+    }
+    case 'ellipse': {
+      const r = boxOf(m);
+      const k = 0.5523;
+      const cx = r.x + r.w / 2,
+        cy = r.y + r.h / 2,
+        rx = r.w / 2,
+        ry = r.h / 2;
+      const P = (x: number, y: number) => {
+        const q = cv({ x, y });
+        return `${f(q.x)} ${f(q.y)}`;
+      };
+      ops =
+        `${stroke} ${fillC ? fillC.join(' ') + ' rg' : ''} ${P(cx + rx, cy)} m ` +
+        `${P(cx + rx, cy + ry * k)} ${P(cx + rx * k, cy + ry)} ${P(cx, cy + ry)} c ` +
+        `${P(cx - rx * k, cy + ry)} ${P(cx - rx, cy + ry * k)} ${P(cx - rx, cy)} c ` +
+        `${P(cx - rx, cy - ry * k)} ${P(cx - rx * k, cy - ry)} ${P(cx, cy - ry)} c ` +
+        `${P(cx + rx * k, cy - ry)} ${P(cx + rx, cy - ry * k)} ${P(cx + rx, cy)} c h ${fillC ? 'B' : 'S'}`;
+      viewPts = rectPoly(r);
+      break;
+    }
+    case 'line':
+    case 'arrow':
+    case 'm-length': {
+      const [a, b] = m.points;
+      ops = `${stroke} ${path([a, b])} S`;
+      if (m.type === 'arrow') {
+        const head = arrowHead(a, b, 8 + m.width * 2);
+        ops += ` ${col.join(' ')} rg ${path(head, true)} f`;
+        extra.LE = ['None', 'OpenArrow'];
+      }
+      if (m.type === 'm-length') ops += label({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      extra.L = [...[a, b].map(cv)].flatMap((p) => [f(p.x), f(p.y)]);
+      viewPts = [a, b];
+      break;
+    }
+    case 'polyline':
+    case 'm-polylength':
+    case 'm-angle': {
+      ops = `${stroke} ${path(m.points)} S`;
+      if (m.type !== 'polyline') ops += label(m.points[Math.floor(m.points.length / 2)] ?? m.points[0]);
+      extra.Vertices = m.points.map(cv).flatMap((p) => [f(p.x), f(p.y)]);
+      break;
+    }
+    case 'pen': {
+      ops = `${stroke} ${path(m.points)} S`;
+      extra.InkList = [m.points.map(cv).flatMap((p) => [f(p.x), f(p.y)])];
+      break;
+    }
+    case 'm-area':
+    case 'm-perimeter': {
+      const fc = m.type === 'm-area' ? fillC ?? col : null;
+      ops = `${stroke} ${fc ? fc.join(' ') + ' rg' : ''} ${path(m.points, true)} ${fc ? 'B' : 'S'}`;
+      const bb = bbox(m.points);
+      ops += label({ x: bb.x + bb.w / 2 - 20, y: bb.y + bb.h / 2 });
+      extra.Vertices = m.points.map(cv).flatMap((p) => [f(p.x), f(p.y)]);
+      break;
+    }
+    case 'm-count': {
+      const p = m.points[0];
+      const r = 6,
+        k = 0.5523 * r;
+      const P = (x: number, y: number) => {
+        const q = cv({ x, y });
+        return `${f(q.x)} ${f(q.y)}`;
+      };
+      ops =
+        `${col.join(' ')} rg ${P(p.x + r, p.y)} m ${P(p.x + r, p.y + k)} ${P(p.x + k, p.y + r)} ${P(p.x, p.y + r)} c ` +
+        `${P(p.x - k, p.y + r)} ${P(p.x - r, p.y + k)} ${P(p.x - r, p.y)} c ${P(p.x - r, p.y - k)} ${P(p.x - k, p.y - r)} ${P(p.x, p.y - r)} c ` +
+        `${P(p.x + k, p.y - r)} ${P(p.x + r, p.y - k)} ${P(p.x + r, p.y)} c f`;
+      viewPts = [
+        { x: p.x - r, y: p.y - r },
+        { x: p.x + r, y: p.y + r },
+      ];
+      break;
+    }
+    case 'text':
+    case 'callout': {
+      const r = boxOf(m);
+      const size = m.fontSize ?? 12;
+      const lines = wrapText(m.text ?? '', Math.max(10, r.w - 8), size);
+      viewPts = rectPoly(r);
+      ops = `${stroke} ${fillC ? fillC.join(' ') + ' rg' : '1 1 1 rg'} ${path(viewPts, true)} B\n`;
+      ops += textLines(lines, { x: r.x + 4, y: r.y + 3 }, size, col);
+      if (m.type === 'callout' && m.points[2]) {
+        const tip = m.points[2];
+        const c = boxCenter(m);
+        const edge = clampToRect(c, tip, r);
+        ops += `\n${stroke} ${path([edge, tip])} S ${col.join(' ')} rg ${path(arrowHead(edge, tip, 7 + m.width), true)} f`;
+        viewPts = [...viewPts, tip];
+        extra.CL = [edge, tip].map(cv).flatMap((p) => [f(p.x), f(p.y)]);
+        extra.IT = 'FreeTextCallout';
+      }
+      extra.DA = `/Helv ${size} Tf ${col.join(' ')} rg`;
+      break;
+    }
+    case 'stamp': {
+      const r = boxOf(m);
+      const t = (m.stamp ?? m.text ?? 'STAMP').toUpperCase();
+      const size = Math.max(6, Math.min(r.h * 0.5, (r.w - 10) / Math.max(1, t.length * 0.62)));
+      viewPts = rectPoly(r);
+      ops = `${f(Math.max(2, m.width))} w ${col.join(' ')} RG ${path(viewPts, true)} S\n`;
+      const tw = approxTextWidth(t, size);
+      ops += textLines([t], { x: r.x + (r.w - tw) / 2, y: r.y + (r.h - size * 1.15) / 2 + 0.5 }, f(size), col);
+      extra.Name = 'Draft';
+      break;
+    }
+    case 'note': {
+      const p = m.points[0];
+      const r = { x: p.x - 10, y: p.y - 10, w: 20, h: 20 };
+      viewPts = rectPoly(r);
+      ops = `1 0.93 0.4 rg 0.4 0.3 0 RG 1 w ${path(viewPts, true)} B 0.4 0.3 0 RG ${path([
+        { x: p.x - 6, y: p.y - 4 },
+        { x: p.x + 6, y: p.y - 4 },
+      ])} S ${path([
+        { x: p.x - 6, y: p.y },
+        { x: p.x + 6, y: p.y },
+      ])} S ${path([
+        { x: p.x - 6, y: p.y + 4 },
+        { x: p.x + 2, y: p.y + 4 },
+      ])} S`;
+      extra.Name = 'Note';
+      break;
+    }
+  }
+
+  const pad = m.width / 2 + 12;
+  const bb = bbox(viewPts.map(cv));
+  const rect = { x: bb.x - pad, y: bb.y - pad, w: bb.w + pad * 2, h: bb.h + pad * 2 };
+  return { subtype: SUBTYPE[m.type] ?? 'Square', ops, rect, extra, blend };
+}
+
+function clampToRect(from: Pt, to: Pt, r: Rect): Pt {
+  const dx = to.x - from.x,
+    dy = to.y - from.y;
+  let t = 1;
+  if (dx > 0) t = Math.min(t, (r.x + r.w - from.x) / dx);
+  else if (dx < 0) t = Math.min(t, (r.x - from.x) / dx);
+  if (dy > 0) t = Math.min(t, (r.y + r.h - from.y) / dy);
+  else if (dy < 0) t = Math.min(t, (r.y - from.y) / dy);
+  return { x: from.x + dx * t, y: from.y + dy * t };
+}
+
+const KEY_MARKUP = PDFName.of('PMS');
+const KEY_PAGE = PDFName.of('PMSPage');
+
+export interface DocState {
+  markups: Markup[];
+  calibrations: Record<number, Calibration>;
+  sheets: Record<number, SheetMeta>;
+  bookmarks: Bookmark[];
+}
+
+export async function writeAnnotations(
+  doc: PDFDocument,
+  markups: Markup[],
+  calibrations: Record<number, Calibration> = {},
+): Promise<void> {
+  const ctx = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = doc.getPages();
+  for (const page of pages) removeOwnAnnots(page);
+  const byPage = new Map<number, Markup[]>();
+  for (const m of markups) byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
+  for (const [idx, list] of byPage) {
+    const page = pages[idx];
+    if (!page) continue;
+    const g = pageGeom(page);
+    for (const m of list) {
+      const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL);
+      const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
+      const ap = ctx.stream('/GS0 gs\n' + b.ops, {
+        Type: 'XObject',
+        Subtype: 'Form',
+        BBox: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
+        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs } }),
+      });
+      const apRef = ctx.register(ap);
+      const dict: Record<string, unknown> = {
+        Type: 'Annot',
+        Subtype: b.subtype,
+        Rect: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
+        F: 4,
+        C: hex(m.color),
+        CA: m.opacity,
+        BS: { W: m.width, S: 'S' },
+        AP: { N: apRef },
+        ...b.extra,
+      };
+      if (m.type === 'cloud') dict.BE = { S: 'C', I: 2 };
+      const annot = ctx.obj(dict as never) as unknown as PDFDict;
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(m.text ?? ''));
+      annot.set(PDFName.of('T'), PDFHexString.fromText(m.author));
+      annot.set(PDFName.of('NM'), PDFString.of(m.id));
+      annot.set(PDFName.of('Subj'), PDFHexString.fromText(m.subject || m.type));
+      const d = pdfDate(m.date);
+      if (d) annot.set(PDFName.of('M'), PDFString.of(d));
+      annot.set(KEY_MARKUP, PDFHexString.fromText(JSON.stringify(m)));
+      page.node.addAnnot(ctx.register(annot));
+    }
+  }
+  pages.forEach((page, i) => {
+    const cal = calibrations[i];
+    if (cal) setPageData(page, { cal });
+  });
+}
+
+function removeOwnAnnots(page: PDFPage) {
+  const annots = page.node.Annots();
+  if (!annots) return;
+  const keep: PDFRef[] = [];
+  for (let i = 0; i < annots.size(); i++) {
+    const raw = annots.get(i);
+    const d = annots.lookupMaybe(i, PDFDict);
+    if (d?.has(KEY_MARKUP)) continue;
+    if (raw instanceof PDFRef) keep.push(raw);
+  }
+  page.node.set(PDFName.of('Annots'), page.doc.context.obj(keep));
+}
+
+function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta } {
+  const v = page.node.get(KEY_PAGE);
+  const s = v instanceof PDFString || v instanceof PDFHexString ? v.decodeText() : undefined;
+  try {
+    return s ? JSON.parse(s) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setPageData(page: PDFPage, patch: { cal?: Calibration; sheet?: SheetMeta }) {
+  const merged = { ...pageData(page), ...patch };
+  page.node.set(KEY_PAGE, PDFHexString.fromText(JSON.stringify(merged)));
+}
+
+export async function readState(doc: PDFDocument): Promise<DocState> {
+  const markups: Markup[] = [];
+  const calibrations: Record<number, Calibration> = {};
+  const sheets: Record<number, SheetMeta> = {};
+  doc.getPages().forEach((page, i) => {
+    const annots = page.node.Annots();
+    if (annots) {
+      for (let k = 0; k < annots.size(); k++) {
+        const d = annots.lookupMaybe(k, PDFDict);
+        const v = d?.get(KEY_MARKUP);
+        if (v instanceof PDFString || v instanceof PDFHexString) {
+          try {
+            const m = JSON.parse(v.decodeText()) as Markup;
+            markups.push({ ...m, page: i, comments: m.comments ?? [] });
+          } catch {
+            /* skip unreadable annotation */
+          }
+        }
+      }
+    }
+    const pd = pageData(page);
+    if (pd.cal) calibrations[i] = pd.cal;
+    if (pd.sheet) sheets[i] = pd.sheet;
+  });
+  return { markups, calibrations, sheets, bookmarks: readBookmarks(doc) };
+}
+
+export function writeSheets(doc: PDFDocument, sheets: Record<number, SheetMeta>) {
+  doc.getPages().forEach((p, i) => sheets[i] && setPageData(p, { sheet: sheets[i] }));
+}
+
+/** Writes markups, calibration, sheet metadata and bookmarks, returning the saved PDF bytes. */
+export async function saveWithState(bytes: Uint8Array, state: DocState): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  await writeAnnotations(doc, state.markups, state.calibrations);
+  writeSheets(doc, state.sheets);
+  writeBookmarks(doc, state.bookmarks);
+  return doc.save();
+}
+
+export function writeBookmarks(doc: PDFDocument, bookmarks: Bookmark[]) {
+  const ctx = doc.context;
+  const pages = doc.getPages();
+  const valid = bookmarks.filter((b) => pages[b.page]);
+  if (!valid.length) {
+    doc.catalog.delete(PDFName.of('Outlines'));
+    return;
+  }
+  interface Node {
+    b: Bookmark;
+    ref: PDFRef;
+    dict: PDFDict;
+    kids: Node[];
+  }
+  const outlineRef = ctx.nextRef();
+  const roots: Node[] = [];
+  const stack: Node[] = [];
+  for (const b of valid) {
+    const dict = ctx.obj({}) as PDFDict;
+    const node: Node = { b, ref: ctx.register(dict), dict, kids: [] };
+    const level = Math.min(b.level, stack.length);
+    stack.length = level;
+    (level ? stack[level - 1].kids : roots).push(node);
+    stack.push(node);
+  }
+  const count = (n: Node): number => 1 + n.kids.reduce((s, k) => s + count(k), 0);
+  const link = (nodes: Node[], parent: PDFRef) => {
+    nodes.forEach((n, i) => {
+      n.dict.set(PDFName.of('Title'), PDFHexString.fromText(n.b.title));
+      n.dict.set(PDFName.of('Parent'), parent);
+      n.dict.set(PDFName.of('Dest'), ctx.obj([pages[n.b.page].ref, 'Fit']));
+      if (i > 0) n.dict.set(PDFName.of('Prev'), nodes[i - 1].ref);
+      if (i < nodes.length - 1) n.dict.set(PDFName.of('Next'), nodes[i + 1].ref);
+      if (n.kids.length) {
+        n.dict.set(PDFName.of('First'), n.kids[0].ref);
+        n.dict.set(PDFName.of('Last'), n.kids[n.kids.length - 1].ref);
+        n.dict.set(PDFName.of('Count'), PDFNumber.of(n.kids.reduce((s, k) => s + count(k), 0)));
+        link(n.kids, n.ref);
+      }
+    });
+  };
+  link(roots, outlineRef);
+  const outline = ctx.obj({
+    Type: 'Outlines',
+    First: roots[0].ref,
+    Last: roots[roots.length - 1].ref,
+    Count: roots.reduce((s, k) => s + count(k), 0),
+  });
+  ctx.assign(outlineRef, outline);
+  doc.catalog.set(PDFName.of('Outlines'), outlineRef);
+}
+
+export function readBookmarks(doc: PDFDocument): Bookmark[] {
+  const out: Bookmark[] = [];
+  const pageRefs = doc.getPages().map((p) => p.ref.toString());
+  const outlines = doc.catalog.lookupMaybe(PDFName.of('Outlines'), PDFDict);
+  if (!outlines) return out;
+  const walk = (first: PDFDict | undefined, level: number) => {
+    let cur = first;
+    let guard = 0;
+    while (cur && guard++ < 5000) {
+      const t = cur.get(PDFName.of('Title'));
+      const title = t instanceof PDFString || t instanceof PDFHexString ? t.decodeText() : 'Bookmark';
+      let dest = cur.lookup(PDFName.of('Dest'));
+      if (!dest) {
+        const a = cur.lookupMaybe(PDFName.of('A'), PDFDict);
+        dest = a?.lookup(PDFName.of('D'));
+      }
+      if (dest instanceof PDFArray) {
+        const ref = dest.get(0);
+        const idx = ref ? pageRefs.indexOf(ref.toString()) : -1;
+        if (idx >= 0) out.push({ title, page: idx, level });
+      }
+      walk(cur.lookupMaybe(PDFName.of('First'), PDFDict), level + 1);
+      cur = cur.lookupMaybe(PDFName.of('Next'), PDFDict);
+    }
+  };
+  walk(outlines.lookupMaybe(PDFName.of('First'), PDFDict), 0);
+  return out;
+}
