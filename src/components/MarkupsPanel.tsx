@@ -68,7 +68,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} onClick={() => p.onSelect(m.id)}>
             <span className="swatch" style={{ background: m.color }} />
             <div className="grow">
-              <b className="review-no">#{nums.get(m.id)}</b> <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
+              {m.type !== 'line' && <b className="review-no">#{nums.get(m.id)}</b>} <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
               <div className="muted small">
                 {(m.subject || m.text || m.stamp || '').slice(0, 40)} · {m.author} · {new Date(m.date).toLocaleDateString()}
                 {m.comments.length ? ` · 💬${m.comments.length}` : ''}
@@ -161,6 +161,8 @@ function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; d
       <div className="muted small">
         {m.author} · {new Date(m.date).toLocaleString()}
       </div>
+      {m.type !== 'line' && (
+        <>
       <div className="muted small" title="Internal annotation ID, saved as /NM in the PDF">Comment #{numberMarkups(doc.markups).get(m.id)} · internal ID: {m.id}</div>
       <h4>Comments</h4>
       {m.comments.map((c) => (
@@ -206,6 +208,8 @@ function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; d
           }}
         />
       </div>
+        </>
+      )}
     </div>
   );
 }

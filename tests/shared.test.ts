@@ -79,9 +79,14 @@ describe('shared documents', () => {
     expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('bad id!')] })).code).toBe(400);
     expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('m3', { points: [{ x: NaN, y: 1 }] })] })).code).toBe(400);
     expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [{ ...mk('m7'), comments: undefined }] })).code).toBe(400);
+    expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('line-drawing', { type: 'line' })] })).code).toBe(200);
+    expect((await call('POST', `/api/docs/${id}/ops`, ann, {
+      upserts: [mk('line-comment', { type: 'line', comments: [{ id: 'c1', author: 'A', date: '2026-01-01', text: 'not review' }] })],
+    })).code).toBe(400);
+    expect((await call('POST', `/api/docs/${id}/ops`, ann, { deletes: ['line-drawing'] })).code).toBe(200);
     const s = await call('GET', `/api/docs/${id}/state`, bob);
     expect(s.markups).toHaveLength(1);
-    expect(s.version).toBe(1);
+    expect(s.version).toBe(3);
     expect(validMarkup(mk('ok'))).toBeFalsy();
   });
 

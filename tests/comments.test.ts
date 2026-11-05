@@ -49,6 +49,54 @@ describe('annotation IDs and comments in the PDF', () => {
     expect([after.get('b'), after.get('a')]).toEqual([1, 2]);
   });
 
+  it('does not number plain line drawings', () => {
+    const line = mk('line-id', [], { type: 'line' });
+    const markup = mk('markup-id', []);
+    expect(numberMarkups([line, markup])).toEqual(new Map([['markup-id', 1]]));
+  });
+
+  it('persists a plain line as page drawing content, not as a review annotation', async () => {
+    const line = mk('line-id', [], {
+      type: 'line',
+      points: [{ x: 10, y: 20 }, { x: 120, y: 75 }],
+      color: '#123456',
+      width: 3,
+    });
+    const source = await PDFDocument.create();
+    const sourcePage = source.addPage([400, 300]);
+    sourcePage.drawText('Keep existing page content', { x: 10, y: 200 });
+    const sourceContents = sourcePage.node.Contents() as PDFArray;
+    const originalRefs = Array.from({ length: sourceContents.size() }, (_, i) => String(sourceContents.get(i)));
+    const once = await saveWithState(await source.save(), { markups: [line], calibrations: {}, sheets: {}, bookmarks: [] });
+    const first = await PDFDocument.load(once);
+    expect(first.getPages()[0].node.Annots()?.size()).toBe(0);
+    expect(first.getPages()[0].node.Contents()).toBeInstanceOf(PDFArray);
+    const firstRefs = first.getPages()[0].node.Contents() as PDFArray;
+    expect(originalRefs.every((ref) => Array.from({ length: firstRefs.size() }, (_, i) => String(firstRefs.get(i))).includes(ref))).toBe(true);
+    expect((await readState(first)).markups).toEqual([{ ...line, comments: [] }]);
+
+    const twice = await saveWithState(once, await readState(first));
+    const second = await PDFDocument.load(twice);
+    expect(second.getPages()[0].node.Annots()?.size()).toBe(0);
+    const secondContents = second.getPages()[0].node.Contents() as PDFArray;
+    expect(secondContents.size()).toBeGreaterThan(0);
+    const firstGeneratedRefs = new Set(
+      Array.from({ length: (first.getPages()[0].node.Contents() as PDFArray).size() }, (_, i) =>
+        String((first.getPages()[0].node.Contents() as PDFArray).get(i)),
+      ).filter((ref) => !originalRefs.includes(ref)),
+    );
+    const secondRefs = Array.from({ length: secondContents.size() }, (_, i) => String(secondContents.get(i)));
+    expect(originalRefs.every((ref) => secondRefs.includes(ref))).toBe(true);
+    expect(secondRefs.some((ref) => firstGeneratedRefs.has(ref))).toBe(false);
+    expect((await readState(second)).markups).toHaveLength(1);
+    const third = await PDFDocument.load(await saveWithState(twice, await readState(second)));
+    const thirdContents = third.getPages()[0].node.Contents() as PDFArray;
+    expect(thirdContents.size()).toBe(secondContents.size());
+    const thirdRefs = Array.from({ length: thirdContents.size() }, (_, i) => String(thirdContents.get(i)));
+    expect(originalRefs.every((ref) => thirdRefs.includes(ref))).toBe(true);
+    expect(thirdRefs.some((ref) => secondRefs.filter((x) => !originalRefs.includes(x)).includes(ref))).toBe(false);
+  });
+
   it('draws the visible number tag into the appearance stream and keeps ids distinct from numbers', async () => {
     const out = await saveWithState(await blank(), { markups: [mk('uuid-1', [])], calibrations: {}, sheets: {}, bookmarks: [] });
     const doc = await PDFDocument.load(out);

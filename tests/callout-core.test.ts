@@ -7,14 +7,14 @@ import { Markup } from '../src/core/types';
 import { PDFDocument } from 'pdf-lib';
 
 const m = (extra: Partial<Markup> = {}): Markup => ({
-  id: 'a', page: 0, type: 'line', points: [{ x: 10, y: 10 }, { x: 90, y: 60 }], color: '#f00', width: 2, opacity: 1,
+  id: 'a', page: 0, type: 'arrow', points: [{ x: 10, y: 10 }, { x: 90, y: 60 }], color: '#f00', width: 2, opacity: 1,
   status: 'None', author: 'Ann', date: '2024-01-01T00:00:00Z',
   comments: [{ id: 'c1', author: 'Ann', authorEmail: 'ann@x', date: '2024-01-02T00:00:00Z', text: 'Check the beam size here please' }], ...extra,
 });
 
 describe('comment callout geometry', () => {
   it('connects the leader to the last point of line-like annotations', () => {
-    const l = calloutLayout(m())!;
+    const l = calloutLayout(m({ type: 'line' }))!;
     expect(l.anchor).toEqual({ x: 90, y: 60 });
     expect(l.rows[0].head).toBe('Ann');
   });

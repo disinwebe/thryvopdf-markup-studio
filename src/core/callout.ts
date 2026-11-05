@@ -22,6 +22,7 @@ export interface CalloutLayout {
 
 /** The annotation's end point: its last point, or for box-like shapes the border point nearest the comment box. */
 export function anchorOf(m: Pick<Markup, 'type' | 'points'>, toward: Pt): Pt {
+  if (m.type === 'arrow') return m.points[0] ?? { x: 0, y: 0 };
   const last = m.points[m.points.length - 1] ?? { x: 0, y: 0 };
   if (m.type === 'callout' || !BOX_TYPES.includes(m.type)) return last;
   const r = boxOf(m);

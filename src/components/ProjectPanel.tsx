@@ -43,7 +43,7 @@ export function ProjectPanel(p: {
               </b>
             )}
             <div className="muted small">
-              {d.numPages} sheets · {d.markups.length} markups{d.dirty ? ' · unsaved' : ''}
+              {d.numPages} sheets · {d.markups.filter((m) => m.type !== 'line').length} markups{d.dirty ? ' · unsaved' : ''}
             </div>
           </div>
           <div className="mini" onClick={(e) => e.stopPropagation()}>

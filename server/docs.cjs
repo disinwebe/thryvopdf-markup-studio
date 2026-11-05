@@ -23,6 +23,7 @@ function validMarkup(m) {
   if (!Number.isFinite(m.width) || !Number.isFinite(m.opacity)) return 'Invalid width or opacity.';
   if (typeof m.author !== 'string' || typeof m.date !== 'string' || typeof m.status !== 'string') return 'Missing author, date or status.';
   if (!Array.isArray(m.comments)) return 'Invalid comments.';
+  if (m.type === 'line' && m.comments.length) return 'Plain line drawings cannot have comments.';
   const seen = new Set();
   for (const c of m.comments) {
     if (!c || typeof c !== 'object' || Array.isArray(c)) return 'Invalid comment.';

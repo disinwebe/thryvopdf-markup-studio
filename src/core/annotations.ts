@@ -9,6 +9,7 @@ import {
   PDFRef,
   PDFString,
   StandardFonts,
+  rgb,
 } from 'pdf-lib';
 import {
   approxTextWidth,
@@ -376,6 +377,7 @@ function clampToRect(from: Pt, to: Pt, r: Rect): Pt {
 const KEY_MARKUP = PDFName.of('PMS');
 const KEY_PAGE = PDFName.of('PMSPage');
 const KEY_REPLY = PDFName.of('PMSReply');
+const KEY_LINE_STREAMS = PDFName.of('PMSLineStreams');
 
 export interface DocState {
   markups: Markup[];
@@ -392,7 +394,11 @@ export async function writeAnnotations(
   const ctx = doc.context;
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const pages = doc.getPages();
-  for (const page of pages) removeOwnAnnots(page);
+  for (const page of pages) {
+    removeOwnAnnots(page);
+    removeLineContent(page);
+    setPageData(page, { lines: [] });
+  }
   for (const page of pages) nameForeignAnnots(page);
   const numbers = numberMarkups(markups);
   const byPage = new Map<number, Markup[]>();
@@ -401,7 +407,11 @@ export async function writeAnnotations(
     const page = pages[idx];
     if (!page) continue;
     const g = pageGeom(page);
+    const lines = list.filter((m) => m.type === 'line');
+    setPageData(page, { lines: lines.map((m) => ({ ...m, comments: [] })) });
+    writeLineContent(page, g, lines);
     for (const m of list) {
+      if (m.type === 'line') continue;
       const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL, numbers.get(m.id));
       const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
       const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1 });
@@ -455,6 +465,66 @@ export async function writeAnnotations(
   });
 }
 
+/** Removes the last app-generated drawing stream before it is regenerated on save. */
+function removeLineContent(page: PDFPage) {
+  const refs = page.node.lookupMaybe(KEY_LINE_STREAMS, PDFArray);
+  const contents = page.node.Contents();
+  if (refs && contents instanceof PDFArray) {
+    const owned = new Set<string>();
+    for (let i = 0; i < refs.size(); i++) {
+      const ref = refs.get(i);
+      if (ref instanceof PDFRef) owned.add(ref.toString());
+    }
+    for (let i = contents.size() - 1; i >= 0; i--) {
+      const ref = contents.get(i);
+      if (ref instanceof PDFRef && owned.has(ref.toString())) contents.remove(i);
+    }
+  }
+  page.node.delete(KEY_LINE_STREAMS);
+}
+
+/** Plain line tools are PDF page content, not review annotations. */
+function writeLineContent(page: PDFPage, g: PageGeom, lines: Markup[]) {
+  const drawable = lines.filter((m) => m.points.length >= 2);
+  if (!drawable.length) return;
+  const initialContents = page.node.Contents();
+  const existing = new Set<string>();
+  const rawContents = page.node.get(PDFName.of('Contents'));
+  if (rawContents instanceof PDFRef) existing.add(rawContents.toString());
+  if (rawContents instanceof PDFArray) {
+    for (let i = 0; i < rawContents.size(); i++) {
+      const ref = rawContents.get(i);
+      if (ref instanceof PDFRef) existing.add(ref.toString());
+    }
+  }
+  if (initialContents instanceof PDFArray) {
+    for (let i = 0; i < initialContents.size(); i++) {
+      const ref = initialContents.get(i);
+      if (ref instanceof PDFRef) existing.add(ref.toString());
+    }
+  }
+  for (const m of drawable) {
+    page.drawLine({
+      start: viewToPdf(m.points[0], g),
+      end: viewToPdf(m.points[1], g),
+      thickness: m.width,
+      color: rgb(...hex(m.color)),
+      opacity: m.opacity,
+    });
+  }
+  const contents = page.node.Contents();
+  if (!(contents instanceof PDFArray)) {
+    throw new Error('Could not persist plain line drawing content.');
+  }
+  const created: PDFRef[] = [];
+  for (let i = 0; i < contents.size(); i++) {
+    const ref = contents.get(i);
+    if (ref instanceof PDFRef && !existing.has(ref.toString())) created.push(ref);
+  }
+  if (!created.length) throw new Error('Could not identify plain line drawing content.');
+  page.node.set(KEY_LINE_STREAMS, page.doc.context.obj(created));
+}
+
 /** Gives annotations from other tools a stable /NM when they have none, never reusing a name already present. */
 function nameForeignAnnots(page: PDFPage) {
   const annots = page.node.Annots();
@@ -494,7 +564,7 @@ function removeOwnAnnots(page: PDFPage) {
   page.node.set(PDFName.of('Annots'), page.doc.context.obj(keep));
 }
 
-function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta } {
+function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta; lines?: Markup[] } {
   const v = page.node.get(KEY_PAGE);
   const s = v instanceof PDFString || v instanceof PDFHexString ? v.decodeText() : undefined;
   try {
@@ -504,7 +574,7 @@ function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta } {
   }
 }
 
-function setPageData(page: PDFPage, patch: { cal?: Calibration; sheet?: SheetMeta }) {
+function setPageData(page: PDFPage, patch: { cal?: Calibration; sheet?: SheetMeta; lines?: Markup[] }) {
   const merged = { ...pageData(page), ...patch };
   page.node.set(KEY_PAGE, PDFHexString.fromText(JSON.stringify(merged)));
 }
@@ -530,6 +600,7 @@ export async function readState(doc: PDFDocument): Promise<DocState> {
       }
     }
     const pd = pageData(page);
+    if (pd.lines) markups.push(...pd.lines.map((m) => ({ ...m, page: i, comments: [] })));
     if (pd.cal) calibrations[i] = pd.cal;
     if (pd.sheet) sheets[i] = pd.sheet;
   });
