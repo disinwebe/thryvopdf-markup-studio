@@ -156,9 +156,10 @@ function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Do
       <div className="muted small">
         {m.author} · {new Date(m.date).toLocaleString()}
       </div>
+      <div className="muted small" title="Annotation ID, saved as /NM in the PDF">ID: {m.id}</div>
       <h4>Comments</h4>
       {m.comments.map((c) => (
-        <div key={c.id} className="comment">
+        <div key={c.id} className="comment" title={'Comment ID ' + c.id}>
           <b>{c.author}</b> <span className="muted small">{new Date(c.date).toLocaleString()}</span>
           <div>{c.text}</div>
         </div>

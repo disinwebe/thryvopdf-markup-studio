@@ -21,7 +21,7 @@ import {
   wrapText,
 } from './geometry';
 import { DEFAULT_CAL, measureLabel } from './measurement';
-import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta } from './types';
+import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
 
 export interface PageGeom {
   x0: number;
@@ -325,6 +325,7 @@ function clampToRect(from: Pt, to: Pt, r: Rect): Pt {
 
 const KEY_MARKUP = PDFName.of('PMS');
 const KEY_PAGE = PDFName.of('PMSPage');
+const KEY_REPLY = PDFName.of('PMSReply');
 
 export interface DocState {
   markups: Markup[];
@@ -342,6 +343,7 @@ export async function writeAnnotations(
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const pages = doc.getPages();
   for (const page of pages) removeOwnAnnots(page);
+  for (const page of pages) nameForeignAnnots(page);
   const byPage = new Map<number, Markup[]>();
   for (const m of markups) byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
   for (const [idx, list] of byPage) {
@@ -371,20 +373,70 @@ export async function writeAnnotations(
       };
       if (m.type === 'cloud') dict.BE = { S: 'C', I: 2 };
       const annot = ctx.obj(dict as never) as unknown as PDFDict;
-      annot.set(PDFName.of('Contents'), PDFHexString.fromText(m.text ?? ''));
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(contentsOf(m)));
       annot.set(PDFName.of('T'), PDFHexString.fromText(m.author));
       annot.set(PDFName.of('NM'), PDFString.of(m.id));
       annot.set(PDFName.of('Subj'), PDFHexString.fromText(m.subject || m.type));
       const d = pdfDate(m.date);
       if (d) annot.set(PDFName.of('M'), PDFString.of(d));
       annot.set(KEY_MARKUP, PDFHexString.fromText(JSON.stringify(m)));
-      page.node.addAnnot(ctx.register(annot));
+      const parentRef = ctx.register(annot);
+      page.node.addAnnot(parentRef);
+      // Each comment becomes a standard reply (/IRT + /RT /R) so other PDF readers show the thread under its markup.
+      for (const c of m.comments) {
+        const at = b.rect;
+        const reply = ctx.obj({
+          Type: 'Annot',
+          Subtype: 'Text',
+          Rect: [f(at.x), f(at.y + at.h - 18), f(at.x + 18), f(at.y + at.h)],
+          F: 28,
+          Name: 'Comment',
+          C: hex(m.color),
+          IRT: parentRef,
+          RT: 'R',
+          State: 'Unmarked',
+          StateModel: 'Review',
+        } as never) as unknown as PDFDict;
+        reply.set(PDFName.of('Contents'), PDFHexString.fromText(c.text));
+        reply.set(PDFName.of('T'), PDFHexString.fromText(c.author));
+        reply.set(PDFName.of('NM'), PDFString.of(m.id + ':' + c.id));
+        const cd = pdfDate(c.date);
+        if (cd) reply.set(PDFName.of('M'), PDFString.of(cd));
+        reply.set(KEY_REPLY, PDFString.of(m.id));
+        page.node.addAnnot(ctx.register(reply));
+      }
     }
   }
   pages.forEach((page, i) => {
     const cal = calibrations[i];
     if (cal) setPageData(page, { cal });
   });
+}
+
+/** Gives annotations from other tools a stable /NM when they have none, never reusing a name already present. */
+function nameForeignAnnots(page: PDFPage) {
+  const annots = page.node.Annots();
+  if (!annots) return;
+  const isStr = (v: unknown): v is PDFString | PDFHexString => v instanceof PDFString || v instanceof PDFHexString;
+  const seen = new Set<string>();
+  for (let i = 0; i < annots.size(); i++) {
+    const nm = annots.lookupMaybe(i, PDFDict)?.get(PDFName.of('NM'));
+    if (isStr(nm)) seen.add(nm.decodeText());
+  }
+  for (let i = 0; i < annots.size(); i++) {
+    const d = annots.lookupMaybe(i, PDFDict);
+    if (!d || d.has(KEY_MARKUP) || d.has(KEY_REPLY) || isStr(d.get(PDFName.of('NM')))) continue;
+    let id = 'ext-' + uid();
+    while (seen.has(id)) id = 'ext-' + uid();
+    seen.add(id);
+    d.set(PDFName.of('NM'), PDFString.of(id));
+  }
+}
+
+/** /Contents carries the markup's own text followed by its comment thread, so any viewer shows the comments. */
+export function contentsOf(m: Markup): string {
+  const thread = m.comments.map((c) => c.author + ': ' + c.text).join('\n');
+  return [m.text ?? '', thread].filter(Boolean).join('\n\n');
 }
 
 function removeOwnAnnots(page: PDFPage) {
@@ -394,7 +446,7 @@ function removeOwnAnnots(page: PDFPage) {
   for (let i = 0; i < annots.size(); i++) {
     const raw = annots.get(i);
     const d = annots.lookupMaybe(i, PDFDict);
-    if (d?.has(KEY_MARKUP)) continue;
+    if (d?.has(KEY_MARKUP) || d?.has(KEY_REPLY)) continue;
     if (raw instanceof PDFRef) keep.push(raw);
   }
   page.node.set(PDFName.of('Annots'), page.doc.context.obj(keep));
@@ -439,6 +491,17 @@ export async function readState(doc: PDFDocument): Promise<DocState> {
     if (pd.cal) calibrations[i] = pd.cal;
     if (pd.sheet) sheets[i] = pd.sheet;
   });
+  // Every markup and comment must have an ID that is unique within the document.
+  const seen = new Set<string>();
+  for (const m of markups) {
+    if (!m.id || seen.has(m.id)) m.id = uid();
+    seen.add(m.id);
+    const cs = new Set<string>();
+    for (const c of m.comments) {
+      if (!c.id || cs.has(c.id)) c.id = uid();
+      cs.add(c.id);
+    }
+  }
   return { markups, calibrations, sheets, bookmarks: readBookmarks(doc) };
 }
 

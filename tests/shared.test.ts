@@ -199,6 +199,19 @@ describe('shared documents', () => {
     expect((await call('GET', '/api/health')).docs).toBe(true);
   });
 
+  it('keeps annotation and comment ids stable through sync and restart-style reads', async () => {
+    const up = await call('POST', '/api/docs?name=ids.pdf', ann, undefined, PDF);
+    const base = mk('stable-1', [{ id: 'cm1', author: 'x', date: 'd', text: 'one' }]);
+    await call('POST', `/api/docs/${up.doc.id}/ops`, ann, { upserts: [base] });
+    const seen = (await call('GET', `/api/docs/${up.doc.id}/state`, bob)).markups[0];
+    await call('POST', `/api/docs/${up.doc.id}/ops`, bob, { upserts: [{ ...seen, comments: [...seen.comments, { id: 'cm2', author: 'y', date: 'd', text: 'two' }] }] });
+    const m = (await call('GET', `/api/docs/${up.doc.id}/state`, ann)).markups;
+    expect(m).toHaveLength(1);
+    expect(m[0].id).toBe('stable-1');
+    expect(m[0].comments.map((c: any) => [c.id, c.author])).toEqual([['cm1', 'Ann Lee'], ['cm2', 'Bob Ray']]);
+    await call('DELETE', `/api/docs/${up.doc.id}`, ann);
+  });
+
   it('only the owner or an admin can delete', async () => {
     expect((await call('DELETE', `/api/docs/${id}`, bob)).code).toBe(403);
     expect((await call('DELETE', `/api/docs/${id}`, ann)).ok).toBe(true);

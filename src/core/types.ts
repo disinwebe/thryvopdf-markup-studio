@@ -98,6 +98,10 @@ export const BOX_TYPES: MarkupType[] = ['highlight', 'text', 'callout', 'cloud',
 
 export const STAMPS = ['APPROVED', 'REJECTED', 'DRAFT', 'FOR REVIEW', 'REVISED', 'VOID', 'CONFIDENTIAL', 'AS BUILT'];
 
-export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+export const uid = () => {
+  const b = new Uint32Array(2);
+  (globalThis.crypto ?? { getRandomValues: (a: Uint32Array) => a.map(() => Math.random() * 2 ** 32) }).getRandomValues(b);
+  return b[0].toString(36) + b[1].toString(36) + Date.now().toString(36).slice(-3);
+};
 
 export const DISCIPLINE_LIST = ['General', 'Architectural', 'Structural', 'Civil', 'Mechanical', 'Electrical', 'Plumbing', 'Fire Protection', 'Landscape', 'Interior'];
