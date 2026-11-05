@@ -28,7 +28,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           const hay = [m.type, m.text, m.subject, m.author, m.status, ...m.comments.map((c) => c.text)].join(' ').toLowerCase();
           return hay.includes(q.toLowerCase());
         })
-        .sort((a, b) => a.page - b.page || a.date.localeCompare(b.date)),
+        .sort((a, b) => a.page - b.page || (a.date ?? '').localeCompare(b.date ?? '')),
     [doc.markups, q, status, scope, doc.page],
   );
   const sel = doc.markups.find((m) => m.id === p.selectedId) ?? null;

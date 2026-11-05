@@ -108,6 +108,7 @@ app.whenReady().then(() => {
   ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
   ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
   ipcMain.handle('auth-logout', () => auth.logout());
+  ipcMain.handle('shared-docs', (e, a) => (auth.docs ? auth.docs(a || {}) : { ok: false, error: 'Shared documents are unavailable.' }));
   ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
   ipcMain.handle('auth-admin-list', () => auth.adminList());
   ipcMain.handle('auth-admin-action', (e, a) => auth.adminAction(a || {}));

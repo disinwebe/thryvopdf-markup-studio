@@ -13,6 +13,9 @@ import { OrganizePanel } from './components/OrganizePanel';
 import { SearchPanel, SheetsPanel } from './components/SheetsPanel';
 import { ComparePanel } from './components/ComparePanel';
 import { ProjectPanel } from './components/ProjectPanel';
+import { SharedLibrary, SharedListing } from './components/SharedLibrary';
+import { useSharedSync } from './app/useSharedSync';
+import { syncedOf } from './app/shared';
 
 const MARKUP_TOOLS: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count', 'calibrate'];
@@ -23,7 +26,7 @@ type LeftTab = 'pages' | 'bookmarks' | 'project';
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App({ user, actions }: { user: AuthUser; actions: { logout: () => void; changePassword: () => void; manageUsers?: () => void } }) {
+export default function App({ user, actions }: { user: AuthUser; actions: { serverMode?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void } }) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
@@ -37,13 +40,15 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
   const [fit, setFit] = useState<{ mode: 'width' | 'page'; n: number }>({ mode: 'page', n: 0 });
   const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
   const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [library, setLibrary] = useState(false);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
 
   const active = docs.find((d) => d.id === activeId) ?? null;
-  const logout = () => {
-    if (docs.some((d) => d.dirty) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
+  const logout = async () => {
+    if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
+    await leaveAll();
     actions.logout();
   };
   const say = useCallback((m: string) => setMsg(m), []);
@@ -52,6 +57,8 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
   const updateDoc = useCallback((id: string, fn: (d: Doc) => Partial<Doc>) => {
     setDocs((all) => all.map((d) => (d.id === id ? { ...d, ...fn(d) } : d)));
   }, []);
+
+  const { cid, leaveAll } = useSharedSync(docs, docsRef, updateDoc);
 
   const addDocs = useCallback(async (files: PickedFile[], activate = true) => {
     for (const f of files) {
@@ -138,6 +145,58 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
     }
   };
 
+  const openShared = async (info: SharedListing) => {
+    const have = docsRef.current.find((d) => d.shared?.id === info.id);
+    if (have) {
+      setActiveId(have.id);
+      setLibrary(false);
+      return;
+    }
+    const r = await window.api!.sharedDocs({ op: 'open', id: info.id });
+    if (!r.ok) return say(r.expired ? 'Session expired. Log out and sign in again.' : 'Could not open shared document: ' + (r.error || 'unknown error'));
+    try {
+      const base = await createDoc(r.name || info.name, new Uint8Array(r.bytes));
+      const d: Doc = {
+        ...base,
+        markups: r.markups,
+        dirty: false,
+        shared: { id: info.id, version: r.version, pr: r.pr, synced: syncedOf(r.markups), collaborators: r.presence || [], status: 'live' },
+      };
+      setDocs((all) => [...all, d]);
+      setActiveId(d.id);
+      setView('viewer');
+      setLibrary(false);
+      say(`Opened shared document ${d.name}: ${d.numPages} pages, ${d.markups.length} markups. Changes sync live.`);
+    } catch (e) {
+      say('Could not open shared document: ' + (e as Error).message);
+    }
+  };
+
+  const uploadActive = async (): Promise<boolean> => {
+    if (!active) return false;
+    if (active.shared) {
+      say('This tab is already a shared document.');
+      return false;
+    }
+    try {
+      const bytes = await bake(active);
+      const up = await window.api!.sharedDocs({ op: 'upload', name: active.name, bytes });
+      if (!up.ok) {
+        say('Upload failed: ' + (up.error || 'unknown error'));
+        return false;
+      }
+      if (active.markups.length) {
+        const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: active.markups, cid });
+        if (!r.ok) say('Uploaded, but copying existing markups failed: ' + r.error);
+      }
+      say(`Uploaded ${active.name} to the server. Open it from the list to collaborate; this tab stays a local copy.`);
+      return true;
+    } catch (e) {
+      say('Upload failed: ' + (e as Error).message);
+      return false;
+    }
+  };
+
   const exportCsv = async (csv: string, name: string) => {
     const path = await saveBytes(name, csv, 'csv');
     if (path) say('Saved ' + path);
@@ -172,6 +231,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
   };
 
   const applyPlan = async (d: Doc, plan: PagePlan[], extras: Uint8Array[] = []) => {
+    if (d.shared) return say('Page changes are not available on shared documents (they would desync collaborators). Extract the pages to a local copy first.');
     try {
       const baked = await bake(d);
       const bytes = await buildFromPlan([baked, ...extras], plan);
@@ -371,6 +431,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
           Author <input value={author} onChange={(e) => setAuthor(e.target.value)} />
         </label>
         <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</span>
+        {actions.serverMode && <button onClick={() => setLibrary(true)} title="Documents stored on the server">Shared…</button>}
         {actions.manageUsers && <button onClick={actions.manageUsers}>Users</button>}
         {user.email && window.api && <button onClick={actions.changePassword}>Password</button>}
         <button onClick={logout}>Logout</button>
@@ -413,6 +474,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
       <div className="tabs">
         {docs.map((d) => (
           <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); setSelectedId(null); }}>
+            {d.shared && <span title="Shared document on the server">☁ </span>}
             {d.name}
             {d.dirty ? ' •' : ''}
             <button
@@ -427,6 +489,17 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
           </div>
         ))}
       </div>
+
+      {active?.shared && (
+        <div className={'collab' + (active.shared.status === 'live' ? '' : ' warn')} role="status">
+          <b>☁ Shared document</b> - edits sync live.
+          {active.shared.status === 'live' ? (
+            <span> Working now: {active.shared.collaborators.map((c) => (c.email === user.email ? 'You' : c.name) + (c.discipline ? ` (${c.discipline})` : '')).join(', ') || '-'}</span>
+          ) : (
+            <span> {active.shared.status === 'expired' ? 'Session expired.' : 'Offline.'} {active.shared.error}</span>
+          )}
+        </div>
+      )}
 
       <div className="main">
         {!active ? (
@@ -582,6 +655,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { logo
         )}
       </div>
       <div className="status">{msg}</div>
+      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} />}
     </div>
   );
 }

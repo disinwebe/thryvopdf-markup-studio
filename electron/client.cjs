@@ -32,17 +32,20 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     fs.writeFileSync(configFile, JSON.stringify(cfg, null, 2));
   };
 
-  async function call(base, method, url, body, token) {
-    const headers = { 'Content-Type': 'application/json' };
+  async function call(base, method, url, body, token, o = {}) {
+    const headers = o.bytes ? { 'Content-Type': 'application/octet-stream' } : { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = 'Bearer ' + token;
     let res;
     try {
-      res = await f(base + url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      res = await f(base + url, { method, headers, body: o.bytes ? Buffer.from(body) : body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(o.timeout || TIMEOUT_MS) });
     } catch (e) {
       return { ok: false, offline: true, error: `Cannot reach the server at ${base}. Check the address, that the server is running, and the firewall/network.` };
     }
+    if (o.download && res.ok) return { ok: true, bytes: new Uint8Array(await res.arrayBuffer()), name: decodeURIComponent(res.headers.get('x-doc-name') || '') };
     try {
-      return await res.json();
+      const j = await res.json();
+      if (res.status === 401 && token) j.expired = true;
+      return j;
     } catch {
       return { ok: false, error: `Unexpected response from ${base}. Is this a Plan Markup Studio server?` };
     }
@@ -124,6 +127,28 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     async adminAction(a) {
       if (!session) return { ok: false, error: 'Not signed in.' };
       return call(cfg.serverUrl, 'POST', '/api/admin/update', a, session.token);
+    },
+
+    async docs(a = {}) {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Shared documents need a signed-in server connection.' };
+      const t = session.token;
+      const u = cfg.serverUrl;
+      const id = encodeURIComponent(a.id || '');
+      switch (a.op) {
+        case 'list': return call(u, 'GET', '/api/docs', null, t);
+        case 'upload': return call(u, 'POST', '/api/docs?name=' + encodeURIComponent(a.name || 'document.pdf'), a.bytes, t, { bytes: true, timeout: 120000 });
+        case 'open': {
+          const file = await call(u, 'GET', '/api/docs/' + id + '/file', null, t, { download: true, timeout: 120000 });
+          if (!file.ok) return file;
+          const st = await call(u, 'GET', '/api/docs/' + id + '/state', null, t);
+          return st.ok ? { ...st, bytes: file.bytes } : st;
+        }
+        case 'ops': return call(u, 'POST', '/api/docs/' + id + '/ops', { upserts: a.upserts || [], deletes: a.deletes || [], cid: a.cid }, t);
+        case 'poll': return call(u, 'GET', '/api/docs/' + id + '/events?since=' + Number(a.since) + '&pr=' + Number(a.pr || 0), null, t, { timeout: 40000 });
+        case 'leave': return call(u, 'POST', '/api/docs/' + id + '/leave', {}, t);
+        case 'delete': return call(u, 'DELETE', '/api/docs/' + id, null, t);
+        default: return { ok: false, error: 'Unknown operation.' };
+      }
     },
 
     async logout() {

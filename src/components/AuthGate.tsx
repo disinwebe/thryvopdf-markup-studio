@@ -3,7 +3,7 @@ import { DISCIPLINE_LIST } from '../core/types';
 import { ChangePassword, UserManagement } from './AccountPanels';
 
 type View = 'setup' | 'register' | 'login' | 'awaiting';
-type Actions = { logout: () => void; changePassword: () => void; manageUsers?: () => void };
+type Actions = { serverMode?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void };
 
 export default function AuthGate({ children }: { children: (user: AuthUser, actions: Actions) => ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -97,7 +97,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
       </div>
     );
   if (user) {
-    const actions: Actions = { logout, changePassword: () => setPanel('password'), manageUsers: user.role === 'admin' ? () => setPanel('users') : undefined };
+    const actions: Actions = { serverMode: st?.mode === 'server', logout, changePassword: () => setPanel('password'), manageUsers: user.role === 'admin' ? () => setPanel('users') : undefined };
     return (
       <>
         {children(user, actions)}
