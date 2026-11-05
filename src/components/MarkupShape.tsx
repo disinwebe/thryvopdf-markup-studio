@@ -190,20 +190,20 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
           <line x1={co.edge.x} y1={co.edge.y} x2={co.anchor.x} y2={co.anchor.y} stroke="#e11d48" strokeWidth={1.2} />
           <circle cx={co.anchor.x} cy={co.anchor.y} r={2.5} fill="#e11d48" />
           <rect x={co.x} y={co.y} width={co.w} height={co.h} fill="#fff" stroke="#e11d48" strokeWidth={1.2} rx={3} />
-          {tag && <text x={co.x + 5} y={co.y + 11} fontSize={9} fontWeight={700} fill="#e11d48">#{tag}</text>}
+          {tag && <text x={co.x + 5} y={co.y + 11} fontSize={co.fs} fontWeight={700} fill="#e11d48">#{tag}</text>}
           {(() => {
-            let y = co.y + 5 + 13;
+            let y = co.y + 5 + co.headH / 0.9;
             return co.rows.map((r, i) => {
-              const head = y + 9;
+              const head = y + co.fs;
               const out = (
                 <g key={i}>
-                  <text x={co.x + 5} y={head} fontSize={8.5} fontWeight={700} fill="#9f1239">{r.head}</text>
+                  <text x={co.x + 5} y={head} fontSize={co.headFs} fontWeight={700} fill="#9f1239">{r.head}</text>
                   {r.lines.map((ln, j) => (
-                    <text key={j} x={co.x + 5} y={head + 11 * (j + 1)} fontSize={9} fill="#222">{ln}</text>
+                    <text key={j} x={co.x + 5} y={head + co.lineH * (j + 1)} fontSize={co.fs} fill="#222">{ln}</text>
                   ))}
                 </g>
               );
-              y += 13 * 0.9 + r.lines.length * 11 + 3;
+              y += co.headH + r.lines.length * co.lineH + co.rowGap;
               return out;
             });
           })()}

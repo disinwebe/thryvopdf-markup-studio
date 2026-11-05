@@ -137,7 +137,7 @@ export function SharedLibrary({
           <button onClick={() => run(load)} disabled={busy}>Refresh</button>
         </div>
         {staged && (
-          <div className="uploads" aria-label="Upload details">
+          <div className="upload-form" aria-label="Upload details">
             <b>{staged.kind === 'current' ? 'Upload current tab' : `Upload ${staged.items.length} PDF(s)`}</b>
             <label>
               Group

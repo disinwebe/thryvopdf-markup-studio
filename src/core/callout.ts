@@ -1,10 +1,9 @@
 import { bbox, boxOf, wrapText } from './geometry';
+import { getCommentSize } from './commentSize';
 import { BOX_TYPES, Markup, Pt } from './types';
 
 export const CALLOUT_W = 150;
 const PAD = 5;
-const HEAD = 13;
-const LINE = 11;
 const MAX_SHOWN = 4;
 
 export interface CalloutLayout {
@@ -18,6 +17,12 @@ export interface CalloutLayout {
   edge: Pt;
   rows: { head: string; lines: string[] }[];
   hidden: number;
+  /** comment text size and the derived metrics used to draw rows */
+  fs: number;
+  headFs: number;
+  headH: number;
+  lineH: number;
+  rowGap: number;
 }
 
 /** The annotation's end point: its last point, or for box-like shapes the border point nearest the comment box. */
@@ -41,13 +46,15 @@ export function defaultCalloutPos(m: Pick<Markup, 'points'>): Pt {
   return { x: b.x + b.w + 30, y: b.y - 10 };
 }
 
-export function calloutLayout(m: Markup): CalloutLayout | null {
+export function calloutLayout(m: Markup, fs: number = getCommentSize()): CalloutLayout | null {
   if (!m.comments.length) return null;
+  const HEAD = (fs * 13) / 9;
+  const LINE = (fs * 11) / 9;
   const pos = m.callout ?? defaultCalloutPos(m);
   const shown = m.comments.slice(-MAX_SHOWN);
   const rows = shown.map((c) => ({
     head: c.author + (c.edited ? ' (edited)' : ''),
-    lines: wrapText(c.text, CALLOUT_W - PAD * 2, 9),
+    lines: wrapText(c.text, CALLOUT_W - PAD * 2, fs),
   }));
   const h = PAD * 2 + HEAD + rows.reduce((s, r) => s + HEAD * 0.9 + r.lines.length * LINE + 3, 0);
   const box = { x: pos.x, y: pos.y, w: CALLOUT_W, h };
@@ -57,7 +64,7 @@ export function calloutLayout(m: Markup): CalloutLayout | null {
   const ey = Math.min(Math.max(anchor.y, box.y), box.y + box.h);
   let edge = { x: ex, y: ey };
   if (ex > box.x && ex < box.x + box.w && ey > box.y && ey < box.y + box.h) edge = centre;
-  return { ...box, anchor, edge, rows, hidden: m.comments.length - shown.length };
+  return { ...box, anchor, edge, rows, hidden: m.comments.length - shown.length, fs, headFs: fs * (8.5 / 9), headH: HEAD * 0.9, lineH: LINE, rowGap: 3 };
 }
 
 export const hitCallout = (m: Markup, p: Pt): boolean => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Doc } from '../app/model';
 import { groupByProject } from '../app/upload';
+import { SHARED_REFRESH_MS, startPolling } from '../app/shortcuts';
 import type { SharedListing } from './SharedLibrary';
 
 export function ProjectPanel(p: {
@@ -28,6 +29,8 @@ export function ProjectPanel(p: {
   }, []);
   useEffect(() => {
     void loadShared();
+    // Auto-refresh only while this tab is mounted (visible) and the window is not hidden.
+    return startPolling(() => void loadShared(), SHARED_REFRESH_MS, () => !document.hidden);
   }, [loadShared]);
   return (
     <div className="panel-body">
@@ -72,7 +75,7 @@ export function ProjectPanel(p: {
       {p.onOpenShared && (
         <div className="shared-groups">
           <div className="row">
-            <b>Shared documents</b>
+            <b>Shared documents</b> <span className="muted small">(auto-refresh every 5 min)</span>
             <span className="grow" />
             <button onClick={() => void loadShared()} title="Reload the shared list">Refresh</button>
           </div>

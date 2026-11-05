@@ -340,15 +340,15 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
       cv({ x: co.x + co.w, y: co.y + co.h }),
       cv({ x: co.x, y: co.y + co.h }),
     ];
-    let y = co.y + 5 + 13;
+    let y = co.y + 5 + co.headH / 0.9;
     let txt = '';
     for (const r of co.rows) {
-      const head = y + 9;
-      txt += `BT /F1 8.5 Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + 5, y: head })} (${latin1(r.head)}) Tj ET\n`;
+      const head = y + co.fs;
+      txt += `BT /F1 ${f(co.headFs)} Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + 5, y: head })} (${latin1(r.head)}) Tj ET\n`;
       r.lines.forEach((ln, j) => {
-        txt += `BT /F1 9 Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + 5, y: head + 11 * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
+        txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + 5, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
       });
-      y += 13 * 0.9 + r.lines.length * 11 + 3;
+      y += co.headH + r.lines.length * co.lineH + co.rowGap;
     }
     ops += `\nq /GS1 gs 0.882 0.114 0.282 RG 1.2 w ${f(E.x)} ${f(E.y)} m ${f(A.x)} ${f(A.y)} l S `;
     ops += `1 1 1 rg ${path(corners, true)} B\n${txt}Q`;

@@ -18,8 +18,15 @@ import { SharedLibrary, SharedListing } from './components/SharedLibrary';
 import { useSharedSync } from './app/useSharedSync';
 import { syncedOf } from './app/shared';
 import { useTheme } from './app/theme';
+import { toolForKey } from './app/shortcuts';
+import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN, getCommentSize, setCommentSize } from './core/commentSize';
 
-const MARKUP_TOOLS: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const TOOL_HINT: Partial<Record<Tool, string>> = {
+  select: 'Select (V)',
+  hand: 'Pan (H to toggle, or hold Space while using another tool)',
+  line: 'Drawing-only line (not a comment)',
+};
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count', 'calibrate'];
 const HISTORY_LIMIT = 100;
 
@@ -37,6 +44,11 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   const [subject, setSubject] = useState('');
   const author = user.name;
   const [theme, setTheme] = useTheme();
+  const [commentSize, setCommentSizeState] = useState(getCommentSize);
+  const changeCommentSize = (n: number) => {
+    setCommentSize(n);
+    setCommentSizeState(getCommentSize());
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RightTab>('markups');
   const [leftTab, setLeftTab] = useState<LeftTab>('pages');
@@ -328,7 +340,12 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
     const t = e.target as HTMLElement;
     if (t && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key.toLowerCase() === 'z') {
+    const next = active ? toolForKey(e, tool) : null;
+    if (next) {
+      e.preventDefault();
+      setTool(next);
+      setPending(null);
+    } else if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault();
       e.shiftKey ? redo() : undo();
     } else if (mod && e.key.toLowerCase() === 'y') {
@@ -392,7 +409,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
 
   const toolBtn = (t: Tool) => (
-    <button key={t} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active}>
+    <button key={t} title={TOOL_HINT[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active}>
       {TOOL_LABEL[t]}
     </button>
   );
@@ -432,6 +449,10 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
           </>
         )}
         <span className="grow" />
+        <label title="Comment text size on the drawing and in saved PDFs">
+          Comment text
+          <input type="number" min={COMMENT_SIZE_MIN} max={COMMENT_SIZE_MAX} value={commentSize} onChange={(e) => changeCommentSize(+e.target.value)} style={{ width: 48 }} />
+        </label>
         <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Switch between light and dark theme">
           {theme === 'dark' ? '☀ Light' : '🌙 Dark'}
         </button>

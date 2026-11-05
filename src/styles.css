@@ -76,3 +76,10 @@ button.link { background: none; border: 0; color: var(--acc); }
 :root[data-theme=light] .ok { color: #15803d; } :root[data-theme=light] .warn { color: #b45309; } :root[data-theme=light] .danger { color: #b91c1c; }
 .uploads { max-height: 160px; overflow: auto; margin: 6px 0; font-size: 12px; border: 1px solid var(--line); padding: 4px 8px; border-radius: 4px; } .usermgmt tr th[colspan] { background: var(--ctl); }
 .review-no{color:#e11d48}
+
+.upload-form { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.upload-form label { display: flex; flex-direction: column; gap: 3px; }
+.upload-form select, .upload-form input, .upload-form textarea { width: 100%; box-sizing: border-box; }
+.shared-groups .item { font-size: 12px; padding: 3px 6px; }
+.shared-groups .group-title { font-size: 12px; margin-top: 8px; }
+.shared-groups .small { font-size: 11px; }
