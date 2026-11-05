@@ -504,7 +504,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       <div className="main">
         {!active ? (
           <div className="empty">
-            <h1>Plan Markup Studio</h1>
+            <h1>ThryvoPDF Markup Studio</h1>
             <p>Markups · Measurements · Compare revisions · Organize drawing sets</p>
             <button className="primary big" onClick={open}>Open PDF…</button>
             <p className="muted">or drag PDF files onto this window</p>

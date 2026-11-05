@@ -115,7 +115,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
     return (
       <div className="auth">
         <div className="auth-card">
-          <h1>Plan Markup Studio</h1>
+          <h1>ThryvoPDF Markup Studio</h1>
           <h2>Awaiting admin approval</h2>
           <p>{info || 'Your registration was submitted.'} You can sign in once an administrator approves your account.</p>
           <button className="primary" onClick={() => { setView('login'); setInfo(''); }}>Back to sign in</button>
@@ -127,7 +127,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
     return (
       <div className="auth">
         <form className="auth-card" onSubmit={connect}>
-          <h1>Plan Markup Studio</h1>
+          <h1>ThryvoPDF Markup Studio</h1>
           <h2>Connect to your company server</h2>
           <label>
             Server address
@@ -150,7 +150,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
   return (
     <div className="auth">
       <form className="auth-card" onSubmit={submit}>
-        <h1>Plan Markup Studio</h1>
+        <h1>ThryvoPDF Markup Studio</h1>
         <h2>{reg ? 'Create your account' : 'Sign in'}</h2>
         {reg && st.mode === 'server' && <p className="muted small">New accounts must be approved by an administrator before you can sign in.</p>}
         {reg && (

@@ -4,7 +4,9 @@ const path = require('path');
 const { createClient } = require('./client.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
-if (process.env.PMS_USER_DATA) app.setPath('userData', process.env.PMS_USER_DATA);
+// Keep the pre-rename data folder so existing installs keep their settings and accounts.
+app.setName('ThryvoPDF Markup Studio');
+app.setPath('userData', process.env.PMS_USER_DATA || path.join(app.getPath('appData'), 'Plan Markup Studio'));
 const allowed = new Set();
 
 function startupPaths() {
@@ -17,7 +19,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 1500,
     height: 950,
-    title: 'Plan Markup Studio',
+    title: 'ThryvoPDF Markup Studio',
     backgroundColor: '#1e1f22',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

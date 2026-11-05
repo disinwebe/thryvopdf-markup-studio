@@ -1,4 +1,4 @@
-// Plan Markup Studio central auth server. Zero dependencies (Node >= 18).
+// ThryvoPDF Markup Studio central auth server. Zero dependencies (Node >= 18).
 // Run:  node server/server.cjs      (config via environment variables, see README)
 const crypto = require('crypto');
 const fs = require('fs');
@@ -69,7 +69,7 @@ function createApp(opts = {}) {
     seeded = { email: ADMIN_EMAIL, password: generated ? pw : null, generated };
     if (generated) {
       seeded.file = path.join(path.dirname(file), 'ADMIN-INITIAL-PASSWORD.txt');
-      fs.writeFileSync(seeded.file, `Plan Markup Studio initial administrator login\r\nUser: ${ADMIN_EMAIL}\r\nPassword: ${pw}\r\nYou must change this password at first login. Delete this file afterwards.\r\n`);
+      fs.writeFileSync(seeded.file, `ThryvoPDF Markup Studio initial administrator login\r\nUser: ${ADMIN_EMAIL}\r\nPassword: ${pw}\r\nYou must change this password at first login. Delete this file afterwards.\r\n`);
     }
   }
 
@@ -329,7 +329,7 @@ if (require.main === module) {
     tlsCert: e.PMS_TLS_CERT,
     sessionTtlMs: e.PMS_SESSION_HOURS ? Number(e.PMS_SESSION_HOURS) * 3600e3 : undefined,
   }).then((r) => {
-    console.log(`Plan Markup Studio server listening on ${r.tls ? 'https' : 'http'}://0.0.0.0:${r.port}`);
+    console.log(`ThryvoPDF Markup Studio server listening on ${r.tls ? 'https' : 'http'}://0.0.0.0:${r.port}`);
     if (r.seeded) {
       console.log(`Default administrator created: user "${r.seeded.email}".`);
       if (r.seeded.generated) console.log(`Initial password (shown once): ${r.seeded.password}\nAlso saved to ${r.seeded.file}`);

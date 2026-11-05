@@ -1,10 +1,10 @@
 {
   "name": "plan-markup-studio",
-  "productName": "Plan Markup Studio",
+  "productName": "ThryvoPDF Markup Studio",
   "version": "1.0.0",
   "description": "Windows PDF markup, measurement, compare and drawing-set app (Bluebeam-style)",
   "main": "electron/main.cjs",
-  "author": "Plan Markup Studio",
+  "author": "ThryvoPDF Markup Studio",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "com.planmarkupstudio.app",
-    "productName": "Plan Markup Studio",
+    "productName": "ThryvoPDF Markup Studio",
     "publish": null,
     "files": ["dist/**", "electron/**", "package.json"],
     "directories": { "output": "release" },

@@ -1,4 +1,4 @@
-# Plan Markup Studio
+# ThryvoPDF Markup Studio
 
 A Windows desktop app for construction/drawing PDFs, in the spirit of Bluebeam: markups, measurements, revision compare and drawing-set organization. Built with Electron, React, TypeScript, Vite, PDF.js (rendering) and pdf-lib (editing).
 
@@ -41,7 +41,7 @@ Accounts can live on one central server PC so every client PC shares the same us
 **Server PC**
 1. Install Node.js 18+ and copy the `server` folder (single file, no dependencies) to the PC.
 2. Run `node server/server.cjs` (or `npm run server` from the repo). Settings (environment variables): `PMS_PORT` (default 8787), `PMS_HOST` (default 0.0.0.0), `PMS_USERS_FILE` (default `server/data/users.json`), `PMS_ADMIN_PASSWORD` (initial admin password, see below), `PMS_SESSION_HOURS` (default 8), `PMS_TLS_KEY` / `PMS_TLS_CERT` (enable HTTPS).
-3. Open the firewall for the port (elevated PowerShell): `New-NetFirewallRule -DisplayName "Plan Markup Studio" -Direction Inbound -Protocol TCP -LocalPort 8787 -Action Allow -Profile Domain,Private`
+3. Open the firewall for the port (elevated PowerShell): `New-NetFirewallRule -DisplayName "ThryvoPDF Markup Studio" -Direction Inbound -Protocol TCP -LocalPort 8787 -Action Allow -Profile Domain,Private`
 4. To run at startup, use Task Scheduler ("At startup", run `node C:\pms\server\server.cjs` with the variables set) or a service wrapper such as NSSM.
 5. Back up the users file regularly.
 
@@ -60,7 +60,7 @@ Accounts can live on one central server PC so every client PC shares the same us
 
 Available in server mode only; local PDFs and local-account mode work exactly as before.
 
-- **Upload / open**: click **Shared…** in the toolbar. *Upload current tab* stores a copy of the PDF (with its existing markups) on the central server; **Open** loads that server copy into a tab marked with a cloud symbol. Any signed-in, approved user can open any shared document; only the uploader or an administrator can delete it. Uploads must be PDFs (150 MB max).
+- **Upload / open**: click **Sharedï¿½** in the toolbar. *Upload current tab* stores a copy of the PDF (with its existing markups) on the central server; **Open** loads that server copy into a tab marked with a cloud symbol. Any signed-in, approved user can open any shared document; only the uploader or an administrator can delete it. Uploads must be PDFs (150 MB max).
 - **Live sync**: markup additions, edits and deletions are sent to the server a fraction of a second after you make them and appear on every other open copy within about a second. Each markup keeps its author and date. A banner under the tabs shows who is working in the document (name and discipline) and turns amber when you are offline or your session expired (unsynced changes stay in the tab and are retried).
 - **Conflicts**: the server is authoritative and applies changes one at a time (each bumps the document version). Markups have unique ids, so simultaneous additions never collide. If two people edit the *same* markup at the same moment, the last change to reach the server wins and replaces the other, so ownership of a markup is not locked.
 - **Persistence**: shared PDFs and their markups are stored in `docs/` next to the users file (default `server/data/docs`), one `.pdf` and one `.json` per document. **Back up the whole `server/data` folder** (users + docs).

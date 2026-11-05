@@ -47,7 +47,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
       if (res.status === 401 && token) j.expired = true;
       return j;
     } catch {
-      return { ok: false, error: `Unexpected response from ${base}. Is this a Plan Markup Studio server?` };
+      return { ok: false, error: `Unexpected response from ${base}. Is this a ThryvoPDF Markup Studio server?` };
     }
   }
 
