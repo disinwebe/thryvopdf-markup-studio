@@ -91,12 +91,12 @@ describe('shared documents', () => {
   });
 
   it('syncs ops between two clients, serialized by version', async () => {
-    const a = await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('m4')] });
-    const b = await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [mk('m5')], deletes: ['m1'] });
+    const a = await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('m4')], deletes: ['m1'] });
+    const b = await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [mk('m5')] });
     expect(b.version).toBe(a.version + 1);
     const ev = await call('GET', `/api/docs/${id}/events?since=${a.version - 1}&pr=0`, ann);
     expect(ev.ops.map((o: any) => [o.v, o.by])).toEqual([[a.version, 'Ann Lee'], [b.version, 'Bob Ray']]);
-    expect(ev.ops[1].deletes).toEqual(['m1']);
+    expect(ev.ops[0].deletes).toEqual(['m1']);
     const st = await call('GET', `/api/docs/${id}/state`, ann);
     expect(st.markups.map((m: any) => m.id).sort()).toEqual(['m4', 'm5']);
   });

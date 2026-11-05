@@ -241,13 +241,14 @@ function createApp(opts = {}) {
     });
   const docRoutes = [
     ['GET', /^\/api\/docs$/, ready(() => docs.list())],
-    ['POST', /^\/api\/docs$/, ready((u, b, req, url) => docs.upload(u, url.searchParams.get('name') || 'document.pdf', b, { project: url.searchParams.get('project'), rel: url.searchParams.get('rel') }))],
+    ['POST', /^\/api\/docs$/, ready((u, b, req, url) => docs.upload(u, url.searchParams.get('name') || 'document.pdf', b, { project: url.searchParams.get('project'), rel: url.searchParams.get('rel'), description: url.searchParams.get('description') }))],
     ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1]))],
     ['GET', /^\/api\/docs\/([\w-]+)\/state$/, ready((u, b, req, url, m) => docs.state(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/ops$/, ready((u, b, req, url, m) => docs.ops(m[1], u, b))],
     ['GET', /^\/api\/docs\/([\w-]+)\/events$/, ready((u, b, req, url, m) => docs.events(m[1], u, Number(url.searchParams.get('since')), Number(url.searchParams.get('pr') || 0)))],
     ['POST', /^\/api\/docs\/([\w-]+)\/leave$/, ready((u, b, req, url, m) => docs.leave(m[1], u))],
-    ['DELETE', /^\/api\/docs\/([\w-]+)$/, ready((u, b, req, url, m) => docs.remove(m[1], u))],
+    ['POST', /^\/api\/docs\/([\w-]+)\/meta$/, ready((u, b, req, url, m) => docs.meta(m[1], u, b))],
+  ['DELETE', /^\/api\/docs\/([\w-]+)$/, ready((u, b, req, url, m) => docs.remove(m[1], u))],
   ];
 
   const listener = (req, res) => {

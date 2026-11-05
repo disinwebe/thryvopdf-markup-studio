@@ -149,7 +149,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
       const id = encodeURIComponent(a.id || '');
       switch (a.op) {
         case 'list': return call(u, 'GET', '/api/docs', null, t);
-        case 'upload': return call(u, 'POST', '/api/docs?name=' + encodeURIComponent(a.name || 'document.pdf') + '&project=' + encodeURIComponent(a.project || '') + '&rel=' + encodeURIComponent(a.rel || ''), a.bytes, t, { bytes: true, timeout: 120000 });
+        case 'upload': return call(u, 'POST', '/api/docs?name=' + encodeURIComponent(a.name || 'document.pdf') + '&project=' + encodeURIComponent(a.project || '') + '&rel=' + encodeURIComponent(a.rel || '') + '&description=' + encodeURIComponent(a.description || ''), a.bytes, t, { bytes: true, timeout: 120000 });
         case 'open': {
           const file = await call(u, 'GET', '/api/docs/' + id + '/file', null, t, { download: true, timeout: 120000 });
           if (!file.ok) return file;
@@ -159,7 +159,8 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
         case 'ops': return call(u, 'POST', '/api/docs/' + id + '/ops', { upserts: a.upserts || [], deletes: a.deletes || [], cid: a.cid }, t);
         case 'poll': return call(u, 'GET', '/api/docs/' + id + '/events?since=' + Number(a.since) + '&pr=' + Number(a.pr || 0), null, t, { timeout: 40000 });
         case 'leave': return call(u, 'POST', '/api/docs/' + id + '/leave', {}, t);
-        case 'delete': return call(u, 'DELETE', '/api/docs/' + id, null, t);
+        case 'meta': return call(u, 'POST', '/api/docs/' + id + '/meta', { project: a.project, description: a.description }, t);
+    case 'delete': return call(u, 'DELETE', '/api/docs/' + id, null, t);
         default: return { ok: false, error: 'Unknown operation.' };
       }
     },

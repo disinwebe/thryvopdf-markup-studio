@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { anchorOf, calloutLayout, defaultCalloutPos, hitCallout, moveCallout } from '../src/core/callout';
 import { canDeleteComment, canDeleteMarkup, canEditComment } from '../src/core/comments';
 import { translate } from '../src/core/geometry';
@@ -46,10 +46,10 @@ describe('comment permissions (client mirror)', () => {
   const ann = { name: 'Ann', email: 'ann@x', role: 'user' };
   const bob = { name: 'Bob', email: 'bob@x', role: 'user' };
   const adm = { name: 'Root', email: 'root@x', role: 'admin' };
-  it('author edits and deletes; others cannot; admin may only delete', () => {
+  it('author edits and deletes; others cannot; admin may only delete comments, never the markup', () => {
     expect([canEditComment(c, ann), canDeleteComment(c, ann)]).toEqual([true, true]);
     expect([canEditComment(c, bob), canDeleteComment(c, bob)]).toEqual([false, false]);
     expect([canEditComment(c, adm), canDeleteComment(c, adm)]).toEqual([false, true]);
-    expect([canDeleteMarkup(m(), bob), canDeleteMarkup(m(), ann), canDeleteMarkup(m(), adm)]).toEqual([false, true, true]);
+    expect([canDeleteMarkup(m(), bob), canDeleteMarkup(m(), ann), canDeleteMarkup(m(), adm)]).toEqual([false, true, false]);
   });
 });

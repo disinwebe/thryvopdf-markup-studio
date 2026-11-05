@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Doc, TOOL_LABEL } from '../app/model';
 import { defaultSubject, measureLabel, DEFAULT_CAL, toCsv } from '../core/measurement';
-import { Actor, canDeleteComment, canEditComment } from '../core/comments';
+import { Actor, canDeleteComment, canDeleteMarkup, canEditComment } from '../core/comments';
 import { numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 
@@ -93,7 +93,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; d
     <div className="props">
       <h4>
         {TOOL_LABEL[m.type]} properties
-        <button className="danger" onClick={() => onDelete(m.id)}>Delete</button>
+        <button className="danger" disabled={!canDeleteMarkup(m, user)} title={canDeleteMarkup(m, user) ? undefined : "Only the author can delete this markup"} onClick={() => onDelete(m.id)}>Delete</button>
       </h4>
       {isMeasure(m.type) && <div className="muted">{measureLabel(m, cal) || '1 item'}</div>}
       <label>

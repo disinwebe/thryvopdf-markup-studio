@@ -1,4 +1,4 @@
-﻿import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,13 +100,16 @@ describe('comment callouts: authorization and sync', () => {
     expect((await state(ann)).find((x: any) => x.id === 'm1').comments).toHaveLength(2);
   });
 
-  it('lets an author delete their own comment, and an administrator moderate', async () => {
+  it('lets an author delete their own comment; only the markup author may delete the markup (admin cannot)', async () => {
     let m = (await state(bob)).find((x: any) => x.id === 'm1');
     expect((await ops(bob, { upserts: [{ ...m, comments: m.comments.filter((c: any) => c.id !== 'c2') }] })).code).toBe(200);
     m = (await state(ann)).find((x: any) => x.id === 'm1');
     expect(m.comments.map((c: any) => c.id)).toEqual(['c1']);
     expect((await ops(bob, { deletes: ['m1'] })).code).toBe(403);
-    expect((await ops(admin, { deletes: ['m1'] })).code).toBe(200);
+    const denied = await ops(admin, { deletes: ['m1'] });
+    expect(denied.code).toBe(403);
+    expect(denied.current[0].id).toBe('m1');
+    expect((await ops(ann, { deletes: ['m1'] })).code).toBe(200);
     expect(await state(ann)).toHaveLength(0);
   });
 });

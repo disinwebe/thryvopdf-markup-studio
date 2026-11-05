@@ -114,7 +114,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
 
   const createMarkup = (m: Markup) => {
     if (!active) return;
-    commit(active.id, [...active.markups, m]);
+    commit(active.id, [...active.markups, { ...m, authorEmail: user.email }]);
     setSelectedId(m.id);
     if (m.type === 'text' || m.type === 'callout' || m.type === 'note') {
       setTool('select');
@@ -130,7 +130,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
     if (!active) return;
     const target = active.markups.find((m) => m.id === id);
     if (target && !canDeleteMarkup(target, user)) {
-      window.alert('This markup has comments by other users. Only their authors (or an administrator) can delete them.');
+      window.alert('Only the author of a markup can delete it.');
       return;
     }
     commit(active.id, active.markups.filter((m) => m.id !== id));
@@ -180,7 +180,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
     }
   };
 
-  const uploadActive = async (): Promise<{ ok: boolean; message: string }> => {
+  const uploadActive = async (project = '', description = ''): Promise<{ ok: boolean; message: string }> => {
     const fail = (message: string) => {
       say(message);
       return { ok: false, message };
@@ -189,7 +189,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
     if (active.shared) return fail('This tab is already a shared document.');
     try {
       const bytes = await bake(active);
-      const up = await window.api!.sharedDocs({ op: 'upload', name: active.name, bytes });
+      const up = await window.api!.sharedDocs({ op: 'upload', name: active.name, bytes, project, description });
       if (!up.ok) return fail('Upload failed: ' + (up.error || 'unknown error'));
       for (let i = 0; i < active.markups.length; i += 500) {
         const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: active.markups.slice(i, i + 500), cid });
@@ -536,6 +536,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                   activeId={active.id}
                   onActivate={setActiveId}
                   onOpen={open}
+                  onOpenShared={openShared}
                   onClose={closeDoc}
                   onRename={(id, name) => updateDoc(id, () => ({ name, dirty: true }))}
                   onMove={(i, dir) =>

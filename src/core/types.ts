@@ -59,6 +59,8 @@ export interface Markup {
   stamp?: string;
   status: Status;
   author: string;
+  /** stamped when created; deletion is limited to the author */
+  authorEmail?: string;
   date: string;
   subject?: string;
   comments: Comment[];

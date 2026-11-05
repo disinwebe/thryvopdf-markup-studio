@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Doc } from '../app/model';
+import { groupByProject } from '../app/upload';
+import type { SharedListing } from './SharedLibrary';
 
 export function ProjectPanel(p: {
   docs: Doc[];
   activeId: string;
   onActivate(id: string): void;
   onOpen(): void;
+  onOpenShared?(d: SharedListing): Promise<void>;
   onClose(id: string): void;
   onRename(id: string, name: string): void;
   onMove(i: number, dir: number): void;
@@ -13,6 +16,19 @@ export function ProjectPanel(p: {
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [shared, setShared] = useState<SharedListing[]>([]);
+  const [sharedErr, setSharedErr] = useState('');
+  const loadShared = useCallback(async () => {
+    if (!window.api?.sharedDocs) return;
+    const r = await window.api.sharedDocs({ op: 'list' });
+    if (r.ok) {
+      setShared(r.docs || []);
+      setSharedErr('');
+    } else setSharedErr(r.expired ? 'Session expired. Log out and sign in again.' : r.error || 'Shared documents unavailable.');
+  }, []);
+  useEffect(() => {
+    void loadShared();
+  }, [loadShared]);
   return (
     <div className="panel-body">
       <div className="row">
@@ -53,6 +69,31 @@ export function ProjectPanel(p: {
           </div>
         </div>
       ))}
+      {p.onOpenShared && (
+        <div className="shared-groups">
+          <div className="row">
+            <b>Shared documents</b>
+            <span className="grow" />
+            <button onClick={() => void loadShared()} title="Reload the shared list">Refresh</button>
+          </div>
+          {sharedErr && <div className="danger small">{sharedErr}</div>}
+          {!sharedErr && !shared.length && <div className="muted small">No shared documents yet.</div>}
+          {groupByProject(shared).map((g) => (
+            <div key={'g:' + g.project} className="group">
+              <div className="group-title"><b>{g.project || 'Ungrouped'}</b> <span className="muted small">({g.docs.length})</span></div>
+              {g.docs.map((d) => (
+                <div key={d.id} className="item" onClick={() => void p.onOpenShared!(d)} title={d.description || 'Open shared document'}>
+                  <div className="grow">
+                    <span>{d.rel ? d.rel + '/' : ''}{d.name}</span>
+                    {d.description && <div className="muted small">{d.description}</div>}
+                    <div className="muted small">{d.markups} markups{d.users.length ? ' \u00b7 working: ' + d.users.join(', ') : ''}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -16,4 +16,5 @@ export const canEditComment = ownsComment;
 export const canDeleteComment = (c: Comment, u: Actor): boolean => ownsComment(c, u) || u.role === 'admin';
 
 /** A markup can be removed only if every comment on it may be deleted by the user. */
-export const canDeleteMarkup = (m: Markup, u: Actor): boolean => m.comments.every((c) => canDeleteComment(c, u));
+/** Only the author of a markup can delete it (administrators do not bypass this). */
+export const canDeleteMarkup = (m: Markup, u: Actor): boolean => (m.authorEmail ? m.authorEmail === u.email : m.author === u.name);
