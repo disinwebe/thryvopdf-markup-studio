@@ -183,6 +183,22 @@ describe('shared documents', () => {
     await call('DELETE', `/api/docs/${up.doc.id}`, ann);
   });
 
+  it('upload route accepts every query shape the client sends (regression: "Not found.")', async () => {
+    const name = 'NAR-FPS-ST-DWG-0001.001.pdf';
+    const qs = [
+      `name=${encodeURIComponent(name)}&project=&rel=`,
+      `name=${encodeURIComponent(name)}&project=${encodeURIComponent('NAR FPS')}&rel=${encodeURIComponent('Struct/L1')}`,
+      `name=${encodeURIComponent(name)}`,
+    ];
+    for (const q of qs) {
+      const r = await call('POST', '/api/docs?' + q, ann, undefined, PDF);
+      expect(r.code).toBe(201);
+      expect(r.doc.name).toBe(name);
+      await call('DELETE', `/api/docs/${r.doc.id}`, ann);
+    }
+    expect((await call('GET', '/api/health')).docs).toBe(true);
+  });
+
   it('only the owner or an admin can delete', async () => {
     expect((await call('DELETE', `/api/docs/${id}`, bob)).code).toBe(403);
     expect((await call('DELETE', `/api/docs/${id}`, ann)).ok).toBe(true);

@@ -45,6 +45,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     try {
       const j = await res.json();
       if (res.status === 401 && token) j.expired = true;
+      if (res.status === 404 && j.error === 'Not found.') return { ok: false, error: `The server at ${base} does not support this feature (). It is probably running an older server version: update and restart the server on the server PC.` };
       return j;
     } catch {
       return { ok: false, error: `Unexpected response from ${base}. Is this a ThryvoPDF Markup Studio server?` };

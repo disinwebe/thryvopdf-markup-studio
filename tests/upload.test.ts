@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { groupByProject, runUploads, toRows } from '../src/app/upload';
 
@@ -34,5 +38,26 @@ describe('project grouping', () => {
     ]);
     expect(g.map((x) => x.project)).toEqual(['Annex', 'Tower', '']);
     expect(g[1].docs.map((d) => d.name)).toEqual(['a.pdf', 'b.pdf']);
+  });
+});
+
+describe('older server without shared documents', () => {
+  it('explains the 404 instead of a bare "Not found."', async () => {
+    const { createClient } = createRequire(import.meta.url)('../electron/client.cjs');
+    const dir = mkdtempSync(join(tmpdir(), 'pms-old-'));
+    const json = (code: number, body: object) => ({ status: code, ok: code < 400, headers: new Headers(), json: async () => body });
+    const fake = async (url: string) => {
+      const p = new URL(url).pathname;
+      if (p === '/api/health') return json(200, { ok: true, hasUsers: true });
+      if (p === '/api/login') return json(200, { ok: true, token: 't', expiresAt: Date.now() + 1e6, user: { name: 'A', email: 'a@x', status: 'active' } });
+      return json(404, { ok: false, error: 'Not found.' });
+    };
+    const c = createClient({ configFile: join(dir, 'c.json'), localFile: join(dir, 'l.json'), fetch: fake });
+    await c.configure({ mode: 'server', serverUrl: 'http://old:8787' });
+    await c.login({ email: 'a@x', password: 'p' });
+    const r = await c.docs({ op: 'upload', name: 'a.pdf', bytes: Buffer.from('%PDF-1.4'), project: 'P', rel: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/older server version/);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

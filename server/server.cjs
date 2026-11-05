@@ -114,7 +114,7 @@ function createApp(opts = {}) {
   const activeAdmins = () => users.filter((u) => u.role === 'admin' && u.status === 'active').length;
 
   const handlers = {
-    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0 }],
+    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true }],
 
     'POST /api/register': (req, b, ip) => {
       const r = regs.get(ip);

@@ -78,3 +78,5 @@ Use the **Light/Dark** button in the top bar to switch themes; the choice is rem
 ## Uploading to the shared library
 
 In **Shared...** use **Upload PDFs...** (multi-select) or **Upload project folder...** (every PDF in the folder and its subfolders; the folder name becomes the project, subfolder paths are kept and shown in the list). An optional *Project name* overrides the grouping. Uploads run one file at a time with per-file success/error; non-PDFs, files over 150 MB and unauthenticated requests are rejected by the server. **Upload current tab** now reports its result inside the dialog and handles markups of any size. Limits: max 500 PDFs per selection; folders are flat records with a path label (no server-side folder permissions); duplicates are not detected.
+
+> If uploading shows **Not found** / *does not support this feature*, the server PC is running an older server build. Copy the current `server` folder there and restart it (shared documents need the server from this version).
