@@ -45,7 +45,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     try {
       const j = await res.json();
       if (res.status === 401 && token) j.expired = true;
-      if (res.status === 404 && j.error === 'Not found.') return { ok: false, error: `The server at ${base} does not support this feature (). It is probably running an older server version: update and restart the server on the server PC.` };
+      if (res.status === 404 && j.error === 'Not found.') return { ok: false, notFound: true, route: method + ' ' + url.split('?')[0], error: 'The server at ' + base + ' does not know the route ' + method + ' ' + url.split('?')[0] + '.' };
       return j;
     } catch {
       return { ok: false, error: `Unexpected response from ${base}. Is this a ThryvoPDF Markup Studio server?` };
@@ -131,6 +131,18 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     },
 
     async docs(a = {}) {
+      const r = await this.docsRaw(a);
+      if (!r || !r.notFound) return r;
+      const h = await call(cfg.serverUrl, 'GET', '/api/health');
+      const hint = !h.ok
+        ? 'The server did not answer /api/health correctly (' + (h.error || 'no response') + '), so the address, port or a proxy in front of it may be wrong.'
+        : h.docs === true
+          ? 'The server reports shared-document support, so something between this PC and the server (proxy, different service on that port, or a path prefix) is changing the request.'
+          : 'The server answers /api/health but does not report docs:true, so it is running an older build. Replace its server folder with the current one and restart it.';
+      return { ok: false, error: r.error + ' ' + hint };
+    },
+
+    async docsRaw(a = {}) {
       if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Shared documents need a signed-in server connection.' };
       const t = session.token;
       const u = cfg.serverUrl;

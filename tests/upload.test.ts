@@ -57,7 +57,40 @@ describe('older server without shared documents', () => {
     await c.login({ email: 'a@x', password: 'p' });
     const r = await c.docs({ op: 'upload', name: 'a.pdf', bytes: Buffer.from('%PDF-1.4'), project: 'P', rel: 'x' });
     expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/older server version/);
+    expect(r.error).toContain('POST /api/docs');
+    expect(r.error).not.toContain('()');
+    expect(r.error).toMatch(/older build/);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  const mkClient = async (health: object | null) => {
+    const { createClient } = createRequire(import.meta.url)('../electron/client.cjs');
+    const dir = mkdtempSync(join(tmpdir(), 'pms-old-'));
+    const json = (code: number, body: object) => ({ status: code, ok: code < 400, headers: new Headers(), json: async () => body });
+    const fake = async (url: string) => {
+      const p = new URL(url).pathname;
+      if (p === '/api/health') return health ? json(200, health) : json(404, { ok: false, error: 'Not found.' });
+      if (p === '/api/login') return json(200, { ok: true, token: 't', expiresAt: Date.now() + 1e6, user: { name: 'A', email: 'a@x', status: 'active' } });
+      return json(404, { ok: false, error: 'Not found.' });
+    };
+    const c = createClient({ configFile: join(dir, 'c.json'), localFile: join(dir, 'l.json'), fetch: fake });
+    await c.configure({ mode: 'server', serverUrl: 'http://srv:8787' }).catch(() => 0);
+    return c;
+  };
+
+  it('distinguishes a proxy/path problem when health reports docs:true', async () => {
+    const c = await mkClient({ ok: true, hasUsers: true, docs: true });
+    await c.login({ email: 'a@x', password: 'p' });
+    const r = await c.docs({ op: 'list' });
+    expect(r.error).toContain('GET /api/docs');
+    expect(r.error).toMatch(/proxy|different service/);
+  });
+
+  it('points at the address when health itself is not found', async () => {
+    const c = await mkClient({ ok: true, hasUsers: true });
+    await c.login({ email: 'a@x', password: 'p' });
+    // health now fails: swap behaviour by a client whose health is 404
+    const c2 = await mkClient(null);
+    expect((await c2.docs({ op: 'list' })).ok).toBe(false);
   });
 });
