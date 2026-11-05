@@ -21,6 +21,25 @@ export interface Doc {
   /** 0 = fit page on first display */
   zoom: number;
   textCache: Map<number, string>;
+  /** Present when this tab is a copy of a document hosted on the server. */
+  shared?: SharedInfo;
+}
+
+export interface Collaborator {
+  name: string;
+  email: string;
+  discipline?: string;
+}
+
+export interface SharedInfo {
+  id: string;
+  version: number;
+  pr: number;
+  /** JSON of each markup as last known to the server, used to detect local changes. */
+  synced: Record<string, string>;
+  collaborators: Collaborator[];
+  status: 'live' | 'offline' | 'expired';
+  error?: string;
 }
 
 export const stateOf = (d: Doc): DocState => ({

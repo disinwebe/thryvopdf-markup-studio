@@ -122,7 +122,7 @@ export function wrapText(text: string, maxWidth: number, size: number): string[]
 }
 
 export function translate(m: Markup, dx: number, dy: number): Markup {
-  return { ...m, points: m.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+  return { ...m, points: m.points.map((p) => ({ x: p.x + dx, y: p.y + dy })), ...(m.callout ? { callout: { x: m.callout.x + dx, y: m.callout.y + dy } } : {}) };
 }
 
 /** Ramer-Douglas-Peucker simplification for freehand strokes. */
