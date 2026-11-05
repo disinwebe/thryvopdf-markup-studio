@@ -22,6 +22,7 @@ import {
 } from './geometry';
 import { DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
+import { TAG_R, numberMarkups, tagAnchor } from './numbering';
 
 export interface PageGeom {
   x0: number;
@@ -131,7 +132,7 @@ const SUBTYPE: Record<string, string> = {
 };
 
 /** Build the appearance-stream operators and annotation-specific keys for a markup. */
-export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAULT_CAL): Built {
+export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAULT_CAL, tag?: number): Built {
   const cv = (p: Pt) => viewToPdf(p, g);
   const col = hex(m.color);
   const stroke = `${f(m.width)} w ${col.join(' ')} RG 1 J 1 j`;
@@ -308,7 +309,24 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
 
   const pad = m.width / 2 + 12;
   const bb = bbox(viewPts.map(cv));
-  const rect = { x: bb.x - pad, y: bb.y - pad, w: bb.w + pad * 2, h: bb.h + pad * 2 };
+  let rect = { x: bb.x - pad, y: bb.y - pad, w: bb.w + pad * 2, h: bb.h + pad * 2 };
+  if (tag) {
+    // Visible review number, drawn at full opacity regardless of the markup's own opacity.
+    const a = tagAnchor(m);
+    const c = cv(a);
+    const k = TAG_R * 0.5523;
+    const r = TAG_R;
+    const circle = `${f(c.x + r)} ${f(c.y)} m ${f(c.x + r)} ${f(c.y + k)} ${f(c.x + k)} ${f(c.y + r)} ${f(c.x)} ${f(c.y + r)} c ${f(c.x - k)} ${f(c.y + r)} ${f(c.x - r)} ${f(c.y + k)} ${f(c.x - r)} ${f(c.y)} c ${f(c.x - r)} ${f(c.y - k)} ${f(c.x - k)} ${f(c.y - r)} ${f(c.x)} ${f(c.y - r)} c ${f(c.x + k)} ${f(c.y - r)} ${f(c.x + r)} ${f(c.y - k)} ${f(c.x + r)} ${f(c.y)} c h`;
+    const label = String(tag);
+    const size = label.length > 2 ? 7 : 9;
+    const w = label.length * size * 0.556;
+    ops += `\nq /GS1 gs 0.882 0.114 0.282 rg 1 1 1 RG 1 w ${circle} B\nBT /F1 ${size} Tf 1 1 1 rg ${tm({ x: a.x - w / 2, y: a.y + size * 0.35 })} (${label}) Tj ET Q`;
+    const x0 = Math.min(rect.x, c.x - r - 1);
+    const y0 = Math.min(rect.y, c.y - r - 1);
+    const x1 = Math.max(rect.x + rect.w, c.x + r + 1);
+    const y1 = Math.max(rect.y + rect.h, c.y + r + 1);
+    rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
   return { subtype: SUBTYPE[m.type] ?? 'Square', ops, rect, extra, blend };
 }
 
@@ -344,6 +362,7 @@ export async function writeAnnotations(
   const pages = doc.getPages();
   for (const page of pages) removeOwnAnnots(page);
   for (const page of pages) nameForeignAnnots(page);
+  const numbers = numberMarkups(markups);
   const byPage = new Map<number, Markup[]>();
   for (const m of markups) byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
   for (const [idx, list] of byPage) {
@@ -351,13 +370,14 @@ export async function writeAnnotations(
     if (!page) continue;
     const g = pageGeom(page);
     for (const m of list) {
-      const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL);
+      const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL, numbers.get(m.id));
       const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
+      const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1 });
       const ap = ctx.stream('/GS0 gs\n' + b.ops, {
         Type: 'XObject',
         Subtype: 'Form',
         BBox: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
-        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs } }),
+        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs, GS1: gs1 } }),
       });
       const apRef = ctx.register(ap);
       const dict: Record<string, unknown> = {
@@ -381,30 +401,20 @@ export async function writeAnnotations(
       if (d) annot.set(PDFName.of('M'), PDFString.of(d));
       annot.set(KEY_MARKUP, PDFHexString.fromText(JSON.stringify(m)));
       const parentRef = ctx.register(annot);
+      // One review item: the markup itself carries /Contents (text + thread), and a linked /Popup holds the comment window.
+      const popup = ctx.obj({
+        Type: 'Annot',
+        Subtype: 'Popup',
+        Rect: [f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h - 90), f(b.rect.x + b.rect.w + 180), f(b.rect.y + b.rect.h)],
+        F: 28,
+        Open: false,
+        Parent: parentRef,
+      } as never) as unknown as PDFDict;
+      popup.set(KEY_REPLY, PDFString.of(m.id));
+      const popupRef = ctx.register(popup);
+      annot.set(PDFName.of('Popup'), popupRef);
       page.node.addAnnot(parentRef);
-      // Each comment becomes a standard reply (/IRT + /RT /R) so other PDF readers show the thread under its markup.
-      for (const c of m.comments) {
-        const at = b.rect;
-        const reply = ctx.obj({
-          Type: 'Annot',
-          Subtype: 'Text',
-          Rect: [f(at.x), f(at.y + at.h - 18), f(at.x + 18), f(at.y + at.h)],
-          F: 28,
-          Name: 'Comment',
-          C: hex(m.color),
-          IRT: parentRef,
-          RT: 'R',
-          State: 'Unmarked',
-          StateModel: 'Review',
-        } as never) as unknown as PDFDict;
-        reply.set(PDFName.of('Contents'), PDFHexString.fromText(c.text));
-        reply.set(PDFName.of('T'), PDFHexString.fromText(c.author));
-        reply.set(PDFName.of('NM'), PDFString.of(m.id + ':' + c.id));
-        const cd = pdfDate(c.date);
-        if (cd) reply.set(PDFName.of('M'), PDFString.of(cd));
-        reply.set(KEY_REPLY, PDFString.of(m.id));
-        page.node.addAnnot(ctx.register(reply));
-      }
+      page.node.addAnnot(popupRef);
     }
   }
   pages.forEach((page, i) => {

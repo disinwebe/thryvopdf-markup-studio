@@ -1,6 +1,7 @@
 import { arrowHead, boxCenter, boxOf, cloudPoints, rectPoly, wrapText, approxTextWidth } from '../core/geometry';
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
+import { TAG_R, tagAnchor } from '../core/numbering';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
 const d = (p: Pt[], close = false) => 'M' + p.map((q) => `${q.x} ${q.y}`).join(' L') + (close ? ' Z' : '');
@@ -14,7 +15,7 @@ function Label({ text, x, y, color }: { text: string; x: number; y: number; colo
   );
 }
 
-export function MarkupShape({ m, cal, countNo }: { m: Markup; cal: Calibration; countNo?: number }) {
+export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibration; countNo?: number; tag?: number }) {
   const common = {
     stroke: m.color,
     strokeWidth: m.width,
@@ -178,7 +179,26 @@ export function MarkupShape({ m, cal, countNo }: { m: Markup; cal: Calibration; 
       break;
     }
   }
-  return <g opacity={m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}>{body}</g>;
+  const a = tag ? tagAnchor(m) : null;
+  const note = m.comments.length ? m.comments[m.comments.length - 1].text : '';
+  const short = note.length > 60 ? note.slice(0, 57) + '...' : note;
+  return (
+    <g>
+      <g opacity={m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}>{body}</g>
+      {a && tag && (
+        <g className="review-tag">
+          {short && (
+            <g>
+              <rect x={a.x + TAG_R + 2} y={a.y - TAG_R} width={approxTextWidth(short, 10) + 8} height={16} fill="#fff" stroke="#e11d48" strokeWidth={1} rx={2} />
+              <text x={a.x + TAG_R + 6} y={a.y + 4} fontSize={10} fill="#9f1239">{short}</text>
+            </g>
+          )}
+          <circle cx={a.x} cy={a.y} r={TAG_R} fill="#e11d48" stroke="#fff" strokeWidth={1} />
+          <text x={a.x} y={a.y + 3.5} fontSize={tag > 99 ? 7 : 9} fontWeight={700} fill="#fff" textAnchor="middle">{tag}</text>
+        </g>
+      )}
+    </g>
+  );
 }
 
 function clampEdge(from: Pt, to: Pt, r: { x: number; y: number; w: number; h: number }): Pt {

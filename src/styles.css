@@ -73,3 +73,4 @@ button.link { background: none; border: 0; color: var(--acc); }
 .collab.warn { background: var(--collab-w); border-color: var(--collab-wl); }
 :root[data-theme=light] .ok { color: #15803d; } :root[data-theme=light] .warn { color: #b45309; } :root[data-theme=light] .danger { color: #b91c1c; }
 .uploads { max-height: 160px; overflow: auto; margin: 6px 0; font-size: 12px; border: 1px solid var(--line); padding: 4px 8px; border-radius: 4px; } .usermgmt tr th[colspan] { background: var(--ctl); }
+.review-no{color:#e11d48}

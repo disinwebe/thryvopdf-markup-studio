@@ -5,6 +5,7 @@ import { DEFAULT_CAL } from '../core/measurement';
 import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas } from '../pdf/pdfjs';
 import { MarkupShape } from './MarkupShape';
+import { numberMarkups } from '../core/numbering';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
@@ -326,6 +327,7 @@ export function PageView(p: PageViewProps) {
     return map;
   }, [doc.markups]);
 
+  const tags = useMemo(() => numberMarkups(doc.markups), [doc.markups]);
   const cal = doc.calibrations[doc.page] ?? DEFAULT_CAL;
   const pageMarkups = doc.markups.filter((m) => m.page === doc.page);
 
@@ -361,7 +363,7 @@ export function PageView(p: PageViewProps) {
             style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           >
             {pageMarkups.map((m) => (
-              <MarkupShape key={m.id} m={m} cal={cal} countNo={countNos.get(m.id)} />
+              <MarkupShape key={m.id} m={m} cal={cal} countNo={countNos.get(m.id)} tag={tags.get(m.id)} />
             ))}
             {preview && (
               <g opacity={0.85}>

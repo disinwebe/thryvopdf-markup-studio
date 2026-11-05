@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Doc, TOOL_LABEL } from '../app/model';
 import { defaultSubject, measureLabel, DEFAULT_CAL, toCsv } from '../core/measurement';
+import { numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 
 export interface MarkupsPanelProps {
@@ -31,6 +32,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
         .sort((a, b) => a.page - b.page || (a.date ?? '').localeCompare(b.date ?? '')),
     [doc.markups, q, status, scope, doc.page],
   );
+  const nums = numberMarkups(doc.markups);
   const sel = doc.markups.find((m) => m.id === p.selectedId) ?? null;
 
   const exportCsv = () => {
@@ -64,7 +66,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} onClick={() => p.onSelect(m.id)}>
             <span className="swatch" style={{ background: m.color }} />
             <div className="grow">
-              <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
+              <b className="review-no">#{nums.get(m.id)}</b> <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
               <div className="muted small">
                 {(m.subject || m.text || m.stamp || '').slice(0, 40)} · {m.author} · {new Date(m.date).toLocaleDateString()}
                 {m.comments.length ? ` · 💬${m.comments.length}` : ''}
@@ -156,7 +158,7 @@ function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Do
       <div className="muted small">
         {m.author} · {new Date(m.date).toLocaleString()}
       </div>
-      <div className="muted small" title="Annotation ID, saved as /NM in the PDF">ID: {m.id}</div>
+      <div className="muted small" title="Internal annotation ID, saved as /NM in the PDF">Comment #{numberMarkups(doc.markups).get(m.id)} · internal ID: {m.id}</div>
       <h4>Comments</h4>
       {m.comments.map((c) => (
         <div key={c.id} className="comment" title={'Comment ID ' + c.id}>
