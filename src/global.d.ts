@@ -39,6 +39,8 @@ interface Window {
     }): Promise<string | null>;
     saveMany(args: { files: { name: string; data: Uint8Array }[] }): Promise<string | null>;
     authStatus(): Promise<AuthStatus>;
+    pickUploads(kind: 'files' | 'folder'): Promise<{ project: string; items: { token: string; name: string; rel: string; size: number }[]; truncated: boolean } | null>;
+    sharedDocs(args: { op: 'list' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta'; id?: string; name?: string; project?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
     adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;
     adminAction(args: { email: string; action: string; role?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string }>;

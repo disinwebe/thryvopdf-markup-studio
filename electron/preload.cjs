@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('api', {
   register: (args) => ipcRenderer.invoke('auth-register', args),
   login: (args) => ipcRenderer.invoke('auth-login', args),
   logout: () => ipcRenderer.invoke('auth-logout'),
+  pickUploads: (kind) => ipcRenderer.invoke('pick-uploads', kind),
+  sharedDocs: (args) => ipcRenderer.invoke('shared-docs', args),
   changePassword: (args) => ipcRenderer.invoke('auth-change-password', args),
   adminList: () => ipcRenderer.invoke('auth-admin-list'),
   adminAction: (args) => ipcRenderer.invoke('auth-admin-action', args),

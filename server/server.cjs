@@ -1,10 +1,11 @@
-// Plan Markup Studio central auth server. Zero dependencies (Node >= 18).
+// ThryvoPDF Markup Studio central auth server. Zero dependencies (Node >= 18).
 // Run:  node server/server.cjs      (config via environment variables, see README)
 const crypto = require('crypto');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const path = require('path');
+const { createDocs } = require('./docs.cjs');
 
 const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -68,7 +69,7 @@ function createApp(opts = {}) {
     seeded = { email: ADMIN_EMAIL, password: generated ? pw : null, generated };
     if (generated) {
       seeded.file = path.join(path.dirname(file), 'ADMIN-INITIAL-PASSWORD.txt');
-      fs.writeFileSync(seeded.file, `Plan Markup Studio initial administrator login\r\nUser: ${ADMIN_EMAIL}\r\nPassword: ${pw}\r\nYou must change this password at first login. Delete this file afterwards.\r\n`);
+      fs.writeFileSync(seeded.file, `ThryvoPDF Markup Studio initial administrator login\r\nUser: ${ADMIN_EMAIL}\r\nPassword: ${pw}\r\nYou must change this password at first login. Delete this file afterwards.\r\n`);
     }
   }
 
@@ -100,9 +101,9 @@ function createApp(opts = {}) {
     return { user: u, expires: s.expires, hash: th(t) };
   };
   const NO_SESSION = [401, { ok: false, error: 'Session expired. Sign in again.' }];
-  const authed = (fn) => (req, b, ip) => {
+  const authed = (fn) => (req, b, ip, ...rest) => {
     const s = sessionOf(req);
-    return s ? fn(s, b, ip) : NO_SESSION;
+    return s ? fn(s, b, ip, ...rest) : NO_SESSION;
   };
   const adminOnly = (fn) =>
     authed((s, b, ip) => {
@@ -113,7 +114,7 @@ function createApp(opts = {}) {
   const activeAdmins = () => users.filter((u) => u.role === 'admin' && u.status === 'active').length;
 
   const handlers = {
-    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0 }],
+    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true }],
 
     'POST /api/register': (req, b, ip) => {
       const r = regs.get(ip);
@@ -231,34 +232,82 @@ function createApp(opts = {}) {
     }),
   };
 
+  const docs = createDocs({ dir: opts.docsDir || path.join(path.dirname(file), 'docs'), now, pollMs: opts.pollMs, presenceTtlMs: opts.presenceTtlMs, maxUpload: opts.maxUpload });
+  const ready = (fn) =>
+    authed((s, b, ip, req, url, m) => {
+      if (s.user.status !== 'active') return [403, { ok: false, error: 'Account not active.' }];
+      if (s.user.mustChange) return [403, { ok: false, error: 'Change your password first.' }];
+      return fn(s.user, b, req, url, m);
+    });
+  const docRoutes = [
+    ['GET', /^\/api\/docs$/, ready(() => docs.list())],
+    ['POST', /^\/api\/docs$/, ready((u, b, req, url) => docs.upload(u, url.searchParams.get('name') || 'document.pdf', b, { project: url.searchParams.get('project'), rel: url.searchParams.get('rel'), description: url.searchParams.get('description') }))],
+    ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1]))],
+    ['GET', /^\/api\/docs\/([\w-]+)\/state$/, ready((u, b, req, url, m) => docs.state(m[1], u))],
+    ['POST', /^\/api\/docs\/([\w-]+)\/ops$/, ready((u, b, req, url, m) => docs.ops(m[1], u, b))],
+    ['GET', /^\/api\/docs\/([\w-]+)\/events$/, ready((u, b, req, url, m) => docs.events(m[1], u, Number(url.searchParams.get('since')), Number(url.searchParams.get('pr') || 0)))],
+    ['POST', /^\/api\/docs\/([\w-]+)\/leave$/, ready((u, b, req, url, m) => docs.leave(m[1], u))],
+    ['POST', /^\/api\/docs\/([\w-]+)\/meta$/, ready((u, b, req, url, m) => docs.meta(m[1], u, b))],
+  ['DELETE', /^\/api\/docs\/([\w-]+)$/, ready((u, b, req, url, m) => docs.remove(m[1], u))],
+  ];
+
   const listener = (req, res) => {
-    const send = (code, body) => {
+    const send = (code, body, headers) => {
+      if (Buffer.isBuffer(body)) {
+        res.writeHead(code, { 'Cache-Control': 'no-store', ...headers });
+        return res.end(body);
+      }
       res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(body));
     };
-    const h = handlers[`${req.method} ${(req.url || '').split('?')[0]}`];
+    const url = new URL(req.url || '/', 'http://x');
+    let h = handlers[`${req.method} ${url.pathname}`];
+    let m = null;
+    let raw = false;
+    if (!h) {
+      for (const [meth, re, fn] of docRoutes) {
+        const mm = meth === req.method && re.exec(url.pathname);
+        if (mm) {
+          h = (rq, b, ip) => fn(rq, b, ip, rq, url, mm);
+          raw = meth === 'POST' && url.pathname === '/api/docs';
+          m = mm;
+          break;
+        }
+      }
+    }
     if (!h) return send(404, { ok: false, error: 'Not found.' });
-    let data = '';
+    const limit = raw ? docs.maxUpload : /^\/api\/docs\/[\w-]+\/ops$/.test(url.pathname) ? 16 * 1024 * 1024 : 16384;
+    const chunks = [];
+    let size = 0;
+    let tooBig = false;
     req.on('data', (c) => {
-      data += c;
-      if (data.length > 16384) req.destroy();
+      size += c.length;
+      if (size > limit) {
+        tooBig = true;
+        return;
+      }
+      chunks.push(c);
     });
-    req.on('end', () => {
+    req.on('end', async () => {
+      if (tooBig) return send(413, { ok: false, error: 'Request too large.' });
+      const buf = Buffer.concat(chunks);
       let body = {};
-      try {
-        if (data) body = JSON.parse(data);
-      } catch {
-        return send(400, { ok: false, error: 'Invalid JSON.' });
+      if (raw) body = buf;
+      else if (buf.length) {
+        try {
+          body = JSON.parse(buf.toString('utf8'));
+        } catch {
+          return send(400, { ok: false, error: 'Invalid JSON.' });
+        }
       }
       try {
-        const [code, out] = h(req, body || {}, req.socket.remoteAddress || '');
-        send(code, out);
+        const [code, out, headers] = await h(req, body || {}, req.socket.remoteAddress || '');
+        send(code, out, headers);
       } catch {
         send(500, { ok: false, error: 'Server error.' });
       }
     });
-  };
-  return { listener, seeded };
+  };  return { listener, seeded };
 }
 
 async function start(opts = {}) {
@@ -281,7 +330,7 @@ if (require.main === module) {
     tlsCert: e.PMS_TLS_CERT,
     sessionTtlMs: e.PMS_SESSION_HOURS ? Number(e.PMS_SESSION_HOURS) * 3600e3 : undefined,
   }).then((r) => {
-    console.log(`Plan Markup Studio server listening on ${r.tls ? 'https' : 'http'}://0.0.0.0:${r.port}`);
+    console.log(`ThryvoPDF Markup Studio server listening on ${r.tls ? 'https' : 'http'}://0.0.0.0:${r.port}`);
     if (r.seeded) {
       console.log(`Default administrator created: user "${r.seeded.email}".`);
       if (r.seeded.generated) console.log(`Initial password (shown once): ${r.seeded.password}\nAlso saved to ${r.seeded.file}`);
