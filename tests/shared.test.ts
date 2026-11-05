@@ -201,7 +201,7 @@ describe('shared documents', () => {
 
   it('keeps annotation and comment ids stable through sync and restart-style reads', async () => {
     const up = await call('POST', '/api/docs?name=ids.pdf', ann, undefined, PDF);
-    const base = mk('stable-1', [{ id: 'cm1', author: 'x', date: 'd', text: 'one' }]);
+    const base = mk('stable-1', { comments: [{ id: 'cm1', author: 'x', date: 'd', text: 'one' }] });
     await call('POST', `/api/docs/${up.doc.id}/ops`, ann, { upserts: [base] });
     const seen = (await call('GET', `/api/docs/${up.doc.id}/state`, bob)).markups[0];
     await call('POST', `/api/docs/${up.doc.id}/ops`, bob, { upserts: [{ ...seen, comments: [...seen.comments, { id: 'cm2', author: 'y', date: 'd', text: 'two' }] }] });
