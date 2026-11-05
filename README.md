@@ -74,3 +74,7 @@ The icon (`assets/icon.svg` is the editable source) shows a drawing sheet with a
 ## Theme and authorship
 
 Use the **Light/Dark** button in the top bar to switch themes; the choice is remembered. Markup and comment authors are always the signed-in user's name (there is no editable Author field), and in shared documents the server stamps authorship from the login session.
+
+## Uploading to the shared library
+
+In **Shared...** use **Upload PDFs...** (multi-select) or **Upload project folder...** (every PDF in the folder and its subfolders; the folder name becomes the project, subfolder paths are kept and shown in the list). An optional *Project name* overrides the grouping. Uploads run one file at a time with per-file success/error; non-PDFs, files over 150 MB and unauthenticated requests are rejected by the server. **Upload current tab** now reports its result inside the dialog and handles markups of any size. Limits: max 500 PDFs per selection; folders are flat records with a path label (no server-side folder permissions); duplicates are not detected.

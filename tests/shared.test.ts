@@ -158,6 +158,31 @@ describe('shared documents', () => {
     await call('POST', `/api/docs/${id}/ops`, bob, { deletes: ['au1'] });
   });
 
+  it('groups uploads into projects with sanitized relative folders', async () => {
+    const up = async (name: string, project: string, rel: string) =>
+      call('POST', `/api/docs?name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}&rel=${encodeURIComponent(rel)}`, ann, undefined, PDF);
+    const a = await up('A-101.pdf', 'Tower B', 'Arch/Level 1');
+    const b = await up('S-201.pdf', 'Tower B', '..\\..\\Struct//L2');
+    const c = await up('M-1.pdf', '<script>x', '');
+    expect(a.doc).toMatchObject({ project: 'Tower B', rel: 'Arch/Level 1' });
+    expect(b.doc.rel).toBe('Struct/L2');
+    expect(c.doc.project).toBe('_script_x');
+    const list = await call('GET', '/api/docs', bob);
+    expect(list.docs.filter((d: any) => d.project === 'Tower B')).toHaveLength(2);
+    expect((await call('POST', '/api/docs?name=bad.pdf&project=Tower%20B', ann, undefined, Buffer.from('not a pdf at all'))).code).toBe(400);
+    expect((await call('POST', '/api/docs?name=n.pdf&project=P', undefined, undefined, PDF)).code).toBe(401);
+    for (const x of [a, b, c]) await call('DELETE', `/api/docs/${x.doc.id}`, ann);
+  });
+
+  it('accepts a large markup batch (more than the old 16 KB limit)', async () => {
+    const up = await call('POST', '/api/docs?name=big.pdf', ann, undefined, PDF);
+    const many = Array.from({ length: 400 }, (_, i) => mk('big' + i, { text: 'x'.repeat(100) }));
+    const r = await call('POST', `/api/docs/${up.doc.id}/ops`, ann, { upserts: many });
+    expect(r.ok).toBe(true);
+    expect((await call('GET', `/api/docs/${up.doc.id}/state`, bob)).markups).toHaveLength(400);
+    await call('DELETE', `/api/docs/${up.doc.id}`, ann);
+  });
+
   it('only the owner or an admin can delete', async () => {
     expect((await call('DELETE', `/api/docs/${id}`, bob)).code).toBe(403);
     expect((await call('DELETE', `/api/docs/${id}`, ann)).ok).toBe(true);

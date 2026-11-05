@@ -241,7 +241,7 @@ function createApp(opts = {}) {
     });
   const docRoutes = [
     ['GET', /^\/api\/docs$/, ready(() => docs.list())],
-    ['POST', /^\/api\/docs$/, ready((u, b, req, url) => docs.upload(u, url.searchParams.get('name') || 'document.pdf', b))],
+    ['POST', /^\/api\/docs$/, ready((u, b, req, url) => docs.upload(u, url.searchParams.get('name') || 'document.pdf', b, { project: url.searchParams.get('project'), rel: url.searchParams.get('rel') }))],
     ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1]))],
     ['GET', /^\/api\/docs\/([\w-]+)\/state$/, ready((u, b, req, url, m) => docs.state(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/ops$/, ready((u, b, req, url, m) => docs.ops(m[1], u, b))],
@@ -275,7 +275,7 @@ function createApp(opts = {}) {
       }
     }
     if (!h) return send(404, { ok: false, error: 'Not found.' });
-    const limit = raw ? docs.maxUpload : 16384;
+    const limit = raw ? docs.maxUpload : /^\/api\/docs\/[\w-]+\/ops$/.test(url.pathname) ? 16 * 1024 * 1024 : 16384;
     const chunks = [];
     let size = 0;
     let tooBig = false;

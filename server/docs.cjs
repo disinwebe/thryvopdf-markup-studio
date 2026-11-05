@@ -33,6 +33,16 @@ const cleanName = (n) => {
   return s;
 };
 
+// Project names and relative folder paths come from the client; keep them printable, short and traversal-free.
+const cleanProject = (n) => String(n || '').replace(/[^\w .()\-+]/g, '_').replace(/^[ .]+|[ .]+$/g, '').slice(0, 80);
+const cleanRel = (r) =>
+  String(r || '')
+    .split(/[\\/]+/)
+    .map((s) => s.replace(/[^\w .()\-+]/g, '_').replace(/^\.+/, '').trim().slice(0, 80))
+    .filter(Boolean)
+    .slice(0, 12)
+    .join('/');
+
 function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000, maxUpload = 150 * 1024 * 1024 }) {
   fs.mkdirSync(dir, { recursive: true });
   const docs = new Map();
@@ -43,7 +53,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
       if (!ID_RE.test(j.id) || !fs.existsSync(path.join(dir, j.id + '.pdf'))) continue;
       docs.set(j.id, {
-        id: j.id, name: j.name, owner: j.owner, ownerName: j.ownerName, created: j.created, size: j.size,
+        id: j.id, name: j.name, owner: j.owner, ownerName: j.ownerName, created: j.created, size: j.size, project: j.project || '', rel: j.rel || '',
         version: j.version || 0, markups: new Map((j.markups || []).map((m) => [m.id, m])),
         log: [], logStart: j.version || 0, presence: new Map(), presenceRev: 0, waiters: [],
       });
@@ -54,7 +64,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
 
   const persist = (d) => {
     const f = path.join(dir, d.id + '.json');
-    const body = { id: d.id, name: d.name, owner: d.owner, ownerName: d.ownerName, created: d.created, size: d.size, version: d.version, markups: [...d.markups.values()] };
+    const body = { id: d.id, name: d.name, owner: d.owner, ownerName: d.ownerName, created: d.created, size: d.size, project: d.project, rel: d.rel, version: d.version, markups: [...d.markups.values()] };
     fs.writeFileSync(f + '.tmp', JSON.stringify(body));
     fs.renameSync(f + '.tmp', f);
   };
@@ -81,7 +91,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       else d.waiters.push(w);
     }
   };
-  const info = (d) => ({ id: d.id, name: d.name, owner: d.ownerName, size: d.size, created: d.created, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name) });
+  const info = (d) => ({ id: d.id, name: d.name, owner: d.ownerName, size: d.size, created: d.created, project: d.project, rel: d.rel, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name) });
   const get = (id) => docs.get(id) || null;
   const NOT_FOUND = [404, { ok: false, error: 'Shared document not found.' }];
 
@@ -89,10 +99,10 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
     list: () => [200, { ok: true, docs: [...docs.values()].map(info).sort((a, b) => b.created.localeCompare(a.created)) }],
     maxUpload,
 
-    upload(user, name, bytes) {
+    upload(user, name, bytes, meta = {}) {
       if (!Buffer.isBuffer(bytes) || bytes.length < 8 || !bytes.subarray(0, 1024).includes('%PDF-')) return [400, { ok: false, error: 'The file is not a PDF.' }];
       const id = crypto.randomBytes(12).toString('base64url');
-      const d = { id, name: cleanName(name), owner: user.email, ownerName: user.name, created: new Date(now()).toISOString(), size: bytes.length, version: 0, markups: new Map(), log: [], logStart: 0, presence: new Map(), presenceRev: 0, waiters: [] };
+      const d = { id, name: cleanName(name), owner: user.email, ownerName: user.name, created: new Date(now()).toISOString(), size: bytes.length, project: cleanProject(meta.project), rel: cleanRel(meta.rel), version: 0, markups: new Map(), log: [], logStart: 0, presence: new Map(), presenceRev: 0, waiters: [] };
       fs.writeFileSync(path.join(dir, id + '.pdf'), bytes);
       persist(d);
       docs.set(id, d);
@@ -192,4 +202,4 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
   };
 }
 
-module.exports = { createDocs, validMarkup };
+module.exports = { createDocs, validMarkup, cleanProject, cleanRel };

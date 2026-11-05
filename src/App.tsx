@@ -174,31 +174,28 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
     }
   };
 
-  const uploadActive = async (): Promise<boolean> => {
-    if (!active) return false;
-    if (active.shared) {
-      say('This tab is already a shared document.');
-      return false;
-    }
+  const uploadActive = async (): Promise<{ ok: boolean; message: string }> => {
+    const fail = (message: string) => {
+      say(message);
+      return { ok: false, message };
+    };
+    if (!active) return fail('Open a PDF tab first.');
+    if (active.shared) return fail('This tab is already a shared document.');
     try {
       const bytes = await bake(active);
       const up = await window.api!.sharedDocs({ op: 'upload', name: active.name, bytes });
-      if (!up.ok) {
-        say('Upload failed: ' + (up.error || 'unknown error'));
-        return false;
+      if (!up.ok) return fail('Upload failed: ' + (up.error || 'unknown error'));
+      for (let i = 0; i < active.markups.length; i += 500) {
+        const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: active.markups.slice(i, i + 500), cid });
+        if (!r.ok) return fail(`Uploaded ${active.name}, but copying existing markups failed: ${r.error || 'unknown error'}`);
       }
-      if (active.markups.length) {
-        const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: active.markups, cid });
-        if (!r.ok) say('Uploaded, but copying existing markups failed: ' + r.error);
-      }
-      say(`Uploaded ${active.name} to the server. Open it from the list to collaborate; this tab stays a local copy.`);
-      return true;
+      const message = `Uploaded ${active.name} with ${active.markups.length} markup(s). Open it from the list to collaborate; this tab stays a local copy.`;
+      say(message);
+      return { ok: true, message };
     } catch (e) {
-      say('Upload failed: ' + (e as Error).message);
-      return false;
+      return fail('Upload failed: ' + (e as Error).message);
     }
   };
-
   const exportCsv = async (csv: string, name: string) => {
     const path = await saveBytes(name, csv, 'csv');
     if (path) say('Saved ' + path);

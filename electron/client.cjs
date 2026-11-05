@@ -136,7 +136,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
       const id = encodeURIComponent(a.id || '');
       switch (a.op) {
         case 'list': return call(u, 'GET', '/api/docs', null, t);
-        case 'upload': return call(u, 'POST', '/api/docs?name=' + encodeURIComponent(a.name || 'document.pdf'), a.bytes, t, { bytes: true, timeout: 120000 });
+        case 'upload': return call(u, 'POST', '/api/docs?name=' + encodeURIComponent(a.name || 'document.pdf') + '&project=' + encodeURIComponent(a.project || '') + '&rel=' + encodeURIComponent(a.rel || ''), a.bytes, t, { bytes: true, timeout: 120000 });
         case 'open': {
           const file = await call(u, 'GET', '/api/docs/' + id + '/file', null, t, { download: true, timeout: 120000 });
           if (!file.ok) return file;

@@ -95,6 +95,52 @@ ipcMain.handle('save-file', guard(async (e, { defaultName, data, filters, path: 
   return write(r.filePath);
 }));
 
+// Files chosen for shared upload; the renderer refers to them by path and main reads them, so whole projects never cross IPC.
+const MAX_PICK = 500;
+const MAX_FILE = 150 * 1024 * 1024;
+const picked = new Map();
+const walkPdfs = (root) => {
+  const out = [];
+  const stack = [root];
+  while (stack.length && out.length < MAX_PICK) {
+    const dir = stack.pop();
+    let ents = [];
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const en of ents) {
+      const p = path.join(dir, en.name);
+      if (en.isDirectory()) stack.push(p);
+      else if (en.isFile() && /\.pdf$/i.test(en.name)) out.push(p);
+    }
+  }
+  return out.sort();
+};
+ipcMain.handle('pick-uploads', guard(async (e, kind) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  let files = [];
+  let root = '';
+  let project = '';
+  if (kind === 'folder') {
+    const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    root = r.filePaths[0];
+    project = path.basename(root);
+    files = walkPdfs(root);
+  } else {
+    const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'], filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+    if (r.canceled) return null;
+    files = r.filePaths;
+  }
+  const items = files.slice(0, MAX_PICK).map((p) => {
+    const token = require('crypto').randomUUID();
+    let size = 0;
+    try { size = fs.statSync(p).size; } catch { /* reported at upload */ }
+    picked.set(token, p);
+    const rel = root ? path.relative(root, path.dirname(p)).split(path.sep).filter(Boolean).join('/') : '';
+    return { token, name: path.basename(p), rel, size };
+  });
+  return { project, items, truncated: files.length > MAX_PICK };
+}));
+
 ipcMain.handle('save-many', guard(async (e, { files }) => {
   const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
     properties: ['openDirectory', 'createDirectory'],
@@ -111,7 +157,20 @@ app.whenReady().then(() => {
   ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
   ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
   ipcMain.handle('auth-logout', () => auth.logout());
-  ipcMain.handle('shared-docs', (e, a) => (auth.docs ? auth.docs(a || {}) : { ok: false, error: 'Shared documents are unavailable.' }));
+  ipcMain.handle('shared-docs', (e, a = {}) => {
+    if (!auth.docs) return { ok: false, error: 'Shared documents are unavailable.' };
+    if (a.op === 'upload' && a.token) {
+      const p = picked.get(a.token);
+      if (!p) return { ok: false, error: 'That file was not selected in this session.' };
+      try {
+        if (fs.statSync(p).size > MAX_FILE) return { ok: false, error: 'File is larger than the 150 MB upload limit.' };
+        a = { ...a, bytes: fs.readFileSync(p) };
+      } catch (err) {
+        return { ok: false, error: 'Could not read the file: ' + err.message };
+      }
+    }
+    return auth.docs(a);
+  });
   ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
   ipcMain.handle('auth-admin-list', () => auth.adminList());
   ipcMain.handle('auth-admin-action', (e, a) => auth.adminAction(a || {}));
