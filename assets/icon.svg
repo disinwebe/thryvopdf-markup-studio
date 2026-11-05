@@ -7,19 +7,21 @@
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <!-- blueprint grid -->
-  <g stroke="#5EEAD4" stroke-opacity="0.12" stroke-width="2">
-    <path d="M64 0V512M128 0V512M192 0V512M256 0V512M320 0V512M384 0V512M448 0V512"/>
-    <path d="M0 64H512M0 128H512M0 192H512M0 256H512M0 320H512M0 384H512M0 448H512"/>
+  <!-- plan sheet with folded corner -->
+  <path d="M104 64H348L416 132V448H104Z" fill="#F4F8FB"/>
+  <path d="M348 64V132H416Z" fill="#B7CAD6"/>
+  <!-- dimension line with ticks -->
+  <g stroke="#0C4A56" stroke-width="12" stroke-linecap="round">
+    <path d="M144 116H300"/>
+    <path d="M144 98V134M300 98V134"/>
   </g>
-  <!-- Y arms (Yvonne) meeting the shared stem -->
-  <g stroke="#FFFFFF" stroke-width="56" stroke-linecap="round" fill="none">
-    <path d="M130 134L256 296"/>
-    <path d="M382 134L256 296"/>
-    <path d="M256 296V372"/>
+  <!-- floor plan walls; the T junction is a quiet nod to the T of Thryvo -->
+  <g stroke="#0B1F3A" stroke-width="22" stroke-linecap="square" stroke-linejoin="miter" fill="none">
+    <path d="M148 186H372V402H148Z"/>
+    <path d="M148 294H260M260 186V294"/>
   </g>
-  <!-- T bar (Thirdy), drawn over the arm tops -->
-  <rect x="86" y="104" width="340" height="60" rx="30" fill="#2DD4BF"/>
-  <!-- markup pin: the family mark on the drawing -->
-  <circle cx="256" cy="436" r="28" fill="#F59E0B"/>
+  <!-- door swing -->
+  <path d="M296 402V346A56 56 0 0 1 352 402Z" fill="#2DD4BF" fill-opacity="0.35" stroke="#0C4A56" stroke-width="8"/>
+  <!-- redline revision cloud -->
+  <path d="M268 214 A20 20 0 0 1 308 214 A20 20 0 0 1 348 214 A20 20 0 0 1 388 214 A20 20 0 0 1 388 254 A20 20 0 0 1 388 294 A20 20 0 0 1 348 294 A20 20 0 0 1 308 294 A20 20 0 0 1 268 294 A20 20 0 0 1 268 254 A20 20 0 0 1 268 214Z" fill="none" stroke="#E11D48" stroke-width="12" stroke-linejoin="round"/>
 </svg>
