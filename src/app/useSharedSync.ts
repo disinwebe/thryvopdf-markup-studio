@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { uid } from '../core/types';
+import { Markup, uid } from '../core/types';
 import { Doc } from './model';
 import { applyOps, diffMarkups, syncedOf } from './shared';
 
@@ -41,6 +41,20 @@ export function useSharedSync(docs: Doc[], docsRef: { current: Doc[] }, updateDo
         for (const m of upserts) if (synced[m.id] === base[m.id]) synced[m.id] = JSON.stringify(m);
         for (const x of deletes) if (synced[x] === base[x]) delete synced[x];
         return { dirty: false, shared: { ...cur.shared, synced, status: 'live', error: undefined } };
+      });
+    } else if (r.forbidden) {
+      // The server refused (e.g. editing/deleting another user's comment): restore its authoritative copies and keep going.
+      const back = (r.current || []) as Markup[];
+      const gone = new Set((r.gone || []) as string[]);
+      updateDoc(id, (cur) => {
+        if (!cur.shared) return {};
+        const ids = new Set(back.map((m) => m.id));
+        const synced = { ...cur.shared.synced };
+        for (const m of back) synced[m.id] = JSON.stringify(m);
+        for (const g of gone) delete synced[g];
+        const kept = cur.markups.filter((m) => !gone.has(m.id)).map((m) => back.find((b) => b.id === m.id) ?? m);
+        for (const m of back) if (!ids.has(m.id) || !kept.some((k) => k.id === m.id)) kept.push(m);
+        return { markups: kept, shared: { ...cur.shared, synced, status: 'live', error: r.error } };
       });
     } else {
       retryAt.current.set(id, Date.now() + (r.offline ? 3000 : 10000));

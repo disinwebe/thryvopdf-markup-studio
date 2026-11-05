@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Doc, TOOL_LABEL } from '../app/model';
 import { defaultSubject, measureLabel, DEFAULT_CAL, toCsv } from '../core/measurement';
+import { Actor, canDeleteComment, canEditComment } from '../core/comments';
 import { numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 
@@ -8,6 +9,7 @@ export interface MarkupsPanelProps {
   doc: Doc;
   selectedId: string | null;
   author: string;
+  user: Actor;
   onSelect(id: string): void;
   onUpdate(id: string, patch: Partial<Markup>, key?: string): void;
   onDelete(id: string): void;
@@ -81,8 +83,9 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
   );
 }
 
-function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
+function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
   const [comment, setComment] = useState('');
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const upd = (patch: Partial<Markup>, key?: string) => onUpdate(m.id, patch, key);
   const cal = doc.calibrations[m.page] ?? DEFAULT_CAL;
   const hasFill = ['rect', 'ellipse', 'cloud', 'text', 'callout', 'm-area'].includes(m.type);
@@ -163,7 +166,31 @@ function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Do
       {m.comments.map((c) => (
         <div key={c.id} className="comment" title={'Comment ID ' + c.id}>
           <b>{c.author}</b> <span className="muted small">{new Date(c.date).toLocaleString()}</span>
-          <div>{c.text}</div>
+          {c.edited && <span className="muted small"> (edited)</span>}
+          {editing?.id === c.id ? (
+            <div>
+              <textarea value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
+              <div className="row">
+                <button
+                  onClick={() => {
+                    if (editing.text.trim()) upd({ comments: m.comments.map((x) => (x.id === c.id ? { ...x, text: editing.text.trim() } : x)) });
+                    setEditing(null);
+                  }}
+                >
+                  Save
+                </button>
+                <button onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div>{c.text}</div>
+          )}
+          {editing?.id !== c.id && (
+            <div className="row">
+              {canEditComment(c, user) && <button onClick={() => setEditing({ id: c.id, text: c.text })}>Edit</button>}
+              {canDeleteComment(c, user) && <button className="danger" onClick={() => upd({ comments: m.comments.filter((x) => x.id !== c.id) })}>Delete</button>}
+            </div>
+          )}
         </div>
       ))}
       <div className="row">
@@ -173,7 +200,7 @@ function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Do
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && comment.trim()) {
-              upd({ comments: [...m.comments, { id: uid(), author, date: new Date().toISOString(), text: comment.trim() }] });
+              upd({ comments: [...m.comments, { id: uid(), author, authorEmail: user.email, date: new Date().toISOString(), text: comment.trim() }] });
               setComment('');
             }
           }}

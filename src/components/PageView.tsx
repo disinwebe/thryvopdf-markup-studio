@@ -6,6 +6,7 @@ import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas } from '../pdf/pdfjs';
 import { MarkupShape } from './MarkupShape';
 import { numberMarkups } from '../core/numbering';
+import { calloutLayout, hitCallout, moveCallout } from '../core/callout';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
@@ -14,6 +15,7 @@ const MULTI: Tool[] = ['polyline', 'm-polylength', 'm-area', 'm-perimeter', 'm-a
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; sl: number; st: number }
   | { kind: 'move'; start: Pt; orig: Markup; began: boolean }
+  | { kind: 'callout'; start: Pt; orig: Markup; from: Pt; began: boolean }
   | { kind: 'handle'; key: HandleKey; orig: Markup; began: boolean }
   | { kind: 'two'; moved: boolean }
   | { kind: 'pen' };
@@ -209,6 +211,13 @@ export function PageView(p: PageViewProps) {
           return;
         }
       }
+      const box = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, pt));
+      if (box) {
+        p.onSelect(box.id);
+        const l = calloutLayout(box)!;
+        drag.current = { kind: 'callout', start: pt, orig: box, from: { x: l.x, y: l.y }, began: false };
+        return;
+      }
       const hit = pickTop(doc.markups, doc.page, pt, 6 / zoom);
       if (hit) {
         p.onSelect(hit.id);
@@ -282,6 +291,15 @@ export function PageView(p: PageViewProps) {
         p.onBeginEdit();
       }
       p.onLive(doc.markups.map((m) => (m.id === dg.orig.id ? translate(dg.orig, dx, dy) : m)));
+    } else if (dg.kind === 'callout') {
+      const dx = pt.x - dg.start.x,
+        dy = pt.y - dg.start.y;
+      if (!dg.began) {
+        if (Math.hypot(dx, dy) * zoom < 3) return;
+        dg.began = true;
+        p.onBeginEdit();
+      }
+      p.onLive(doc.markups.map((m) => (m.id === dg.orig.id ? moveCallout(dg.orig, { x: dg.from.x + dx, y: dg.from.y + dy }) : m)));
     } else if (dg.kind === 'handle') {
       if (!dg.began) {
         dg.began = true;

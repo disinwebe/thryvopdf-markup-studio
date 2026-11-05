@@ -1,3 +1,4 @@
+import { canDeleteMarkup } from './core/comments';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveWithState } from './core/annotations';
 import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure } from './core/types';
@@ -127,6 +128,11 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
 
   const deleteMarkup = (id: string) => {
     if (!active) return;
+    const target = active.markups.find((m) => m.id === id);
+    if (target && !canDeleteMarkup(target, user)) {
+      window.alert('This markup has comments by other users. Only their authors (or an administrator) can delete them.');
+      return;
+    }
     commit(active.id, active.markups.filter((m) => m.id !== id));
     setSelectedId(null);
   };
@@ -588,6 +594,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                   doc={active}
                   selectedId={selectedId}
                   author={author}
+                  user={user}
                   onSelect={(id) => {
                     const m = active.markups.find((x) => x.id === id);
                     if (m) {

@@ -23,6 +23,7 @@ import {
 import { DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
 import { TAG_R, numberMarkups, tagAnchor } from './numbering';
+import { calloutLayout } from './callout';
 
 export interface PageGeom {
   x0: number;
@@ -325,6 +326,37 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     const y0 = Math.min(rect.y, c.y - r - 1);
     const x1 = Math.max(rect.x + rect.w, c.x + r + 1);
     const y1 = Math.max(rect.y + rect.h, c.y + r + 1);
+    rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  const co = calloutLayout(m);
+  if (co) {
+    // Comment box with a leader line to the annotation's end point, drawn as part of the same annotation.
+    const A = cv(co.anchor);
+    const E = cv(co.edge);
+    const corners = [
+      cv({ x: co.x, y: co.y }),
+      cv({ x: co.x + co.w, y: co.y }),
+      cv({ x: co.x + co.w, y: co.y + co.h }),
+      cv({ x: co.x, y: co.y + co.h }),
+    ];
+    let y = co.y + 5 + 13;
+    let txt = '';
+    for (const r of co.rows) {
+      const head = y + 9;
+      txt += `BT /F1 8.5 Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + 5, y: head })} (${latin1(r.head)}) Tj ET\n`;
+      r.lines.forEach((ln, j) => {
+        txt += `BT /F1 9 Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + 5, y: head + 11 * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
+      });
+      y += 13 * 0.9 + r.lines.length * 11 + 3;
+    }
+    ops += `\nq /GS1 gs 0.882 0.114 0.282 RG 1.2 w ${f(E.x)} ${f(E.y)} m ${f(A.x)} ${f(A.y)} l S `;
+    ops += `1 1 1 rg ${path(corners, true)} B\n${txt}Q`;
+    const xs = [...corners.map((c) => c.x), A.x];
+    const ys = [...corners.map((c) => c.y), A.y];
+    const x0 = Math.min(rect.x, ...xs) - 2;
+    const y0 = Math.min(rect.y, ...ys) - 2;
+    const x1 = Math.max(rect.x + rect.w, ...xs) + 2;
+    const y1 = Math.max(rect.y + rect.h, ...ys) + 2;
     rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
   return { subtype: SUBTYPE[m.type] ?? 'Square', ops, rect, extra, blend };

@@ -2,6 +2,7 @@ import { arrowHead, boxCenter, boxOf, cloudPoints, rectPoly, wrapText, approxTex
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
 import { TAG_R, tagAnchor } from '../core/numbering';
+import { calloutLayout } from '../core/callout';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
 const d = (p: Pt[], close = false) => 'M' + p.map((q) => `${q.x} ${q.y}`).join(' L') + (close ? ' Z' : '');
@@ -180,19 +181,36 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
     }
   }
   const a = tag ? tagAnchor(m) : null;
-  const note = m.comments.length ? m.comments[m.comments.length - 1].text : '';
-  const short = note.length > 60 ? note.slice(0, 57) + '...' : note;
+  const co = calloutLayout(m);
   return (
     <g>
       <g opacity={m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}>{body}</g>
+      {co && (
+        <g className="callout-box">
+          <line x1={co.edge.x} y1={co.edge.y} x2={co.anchor.x} y2={co.anchor.y} stroke="#e11d48" strokeWidth={1.2} />
+          <circle cx={co.anchor.x} cy={co.anchor.y} r={2.5} fill="#e11d48" />
+          <rect x={co.x} y={co.y} width={co.w} height={co.h} fill="#fff" stroke="#e11d48" strokeWidth={1.2} rx={3} />
+          {tag && <text x={co.x + 5} y={co.y + 11} fontSize={9} fontWeight={700} fill="#e11d48">#{tag}</text>}
+          {(() => {
+            let y = co.y + 5 + 13;
+            return co.rows.map((r, i) => {
+              const head = y + 9;
+              const out = (
+                <g key={i}>
+                  <text x={co.x + 5} y={head} fontSize={8.5} fontWeight={700} fill="#9f1239">{r.head}</text>
+                  {r.lines.map((ln, j) => (
+                    <text key={j} x={co.x + 5} y={head + 11 * (j + 1)} fontSize={9} fill="#222">{ln}</text>
+                  ))}
+                </g>
+              );
+              y += 13 * 0.9 + r.lines.length * 11 + 3;
+              return out;
+            });
+          })()}
+        </g>
+      )}
       {a && tag && (
         <g className="review-tag">
-          {short && (
-            <g>
-              <rect x={a.x + TAG_R + 2} y={a.y - TAG_R} width={approxTextWidth(short, 10) + 8} height={16} fill="#fff" stroke="#e11d48" strokeWidth={1} rx={2} />
-              <text x={a.x + TAG_R + 6} y={a.y + 4} fontSize={10} fill="#9f1239">{short}</text>
-            </g>
-          )}
           <circle cx={a.x} cy={a.y} r={TAG_R} fill="#e11d48" stroke="#fff" strokeWidth={1} />
           <text x={a.x} y={a.y + 3.5} fontSize={tag > 99 ? 7 : 9} fontWeight={700} fill="#fff" textAnchor="middle">{tag}</text>
         </g>
@@ -200,7 +218,6 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
     </g>
   );
 }
-
 function clampEdge(from: Pt, to: Pt, r: { x: number; y: number; w: number; h: number }): Pt {
   const dx = to.x - from.x,
     dy = to.y - from.y;

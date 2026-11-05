@@ -23,7 +23,31 @@ function validMarkup(m) {
   if (!Number.isFinite(m.width) || !Number.isFinite(m.opacity)) return 'Invalid width or opacity.';
   if (typeof m.author !== 'string' || typeof m.date !== 'string' || typeof m.status !== 'string') return 'Missing author, date or status.';
   if (!Array.isArray(m.comments)) return 'Invalid comments.';
+  const seen = new Set();
+  for (const c of m.comments) {
+    if (!c || typeof c !== 'object' || Array.isArray(c)) return 'Invalid comment.';
+    if (typeof c.id !== 'string' || !ID_RE.test(c.id) || seen.has(c.id)) return 'Invalid comment id.';
+    seen.add(c.id);
+    if (typeof c.text !== 'string' || c.text.length > 5000 || typeof c.date !== 'string') return 'Invalid comment text.';
+  }
+  if (m.callout !== undefined && (!m.callout || !Number.isFinite(m.callout.x) || !Number.isFinite(m.callout.y))) return 'Invalid comment box position.';
   if (JSON.stringify(m).length > 262144) return 'Markup too large.';
+  return null;
+}
+
+const isAdmin = (u) => u.role === 'admin';
+// Comment ownership: by e-mail when stamped, by name for older comments.
+const ownsComment = (c, u) => (c.authorEmail ? c.authorEmail === u.email : c.author === u.name);
+
+/** Edit/delete rules for comments: only the author edits; only the author (or an administrator) deletes. */
+function commentError(prev, m, user) {
+  const old = new Map(((prev && prev.comments) || []).map((c) => [c.id, c]));
+  const incoming = new Set(m.comments.map((c) => c.id));
+  for (const c of m.comments) {
+    const o = old.get(c.id);
+    if (o && o.text !== c.text && !ownsComment(o, user)) return 'Only the author of a comment can edit it.';
+  }
+  for (const o of old.values()) if (!incoming.has(o.id) && !ownsComment(o, user) && !isAdmin(user)) return 'Only the author of a comment (or an administrator) can delete it.';
   return null;
 }
 
@@ -133,6 +157,22 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
         if (err) return [400, { ok: false, error: err }];
       }
       for (const x of dels) if (typeof x !== 'string' || !ID_RE.test(x)) return [400, { ok: false, error: 'Invalid markup id.' }];
+      const denied = new Set();
+      let deniedMsg = '';
+      for (const m of ups) {
+        const e = commentError(d.markups.get(m.id), m, user);
+        if (e) { denied.add(m.id); deniedMsg = deniedMsg || e; }
+      }
+      for (const x of dels) {
+        const prev = d.markups.get(x);
+        if (prev && prev.comments.some((c) => !ownsComment(c, user)) && !isAdmin(user)) {
+          denied.add(x);
+          deniedMsg = deniedMsg || 'This markup has comments by other users; only their authors (or an administrator) can delete them.';
+        }
+      }
+      if (denied.size) {
+        return [403, { ok: false, forbidden: true, error: deniedMsg, current: [...denied].map((id) => d.markups.get(id)).filter(Boolean), gone: [...denied].filter((id) => !d.markups.has(id)) }];
+      }
       const fresh = ups.filter((m) => !d.markups.has(m.id)).length;
       if (d.markups.size + fresh > MAX_MARKUPS) return [413, { ok: false, error: 'This document has reached the markup limit.' }];
       const real = dels.filter((x) => d.markups.has(x));
@@ -140,10 +180,21 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       // Authorship is server-controlled: new markups/comments get the session user's name; existing ones keep theirs.
       for (const m of ups) {
         const prev = d.markups.get(m.id);
-        const known = new Map(((prev && prev.comments) || []).map((c) => [c.id, c.author]));
+        const known = new Map(((prev && prev.comments) || []).map((c) => [c.id, c]));
         m.author = prev ? prev.author : user.name;
-        if (Array.isArray(m.comments)) {
-          for (const c of m.comments) if (c && typeof c === 'object') c.author = known.has(c.id) ? known.get(c.id) : user.name;
+        for (const c of m.comments) {
+          const o = known.get(c.id);
+          if (o) {
+            c.author = o.author;
+            c.date = o.date;
+            if (o.authorEmail) c.authorEmail = o.authorEmail; else delete c.authorEmail;
+            if (o.text !== c.text) c.edited = new Date(now()).toISOString();
+            else if (o.edited) c.edited = o.edited; else delete c.edited;
+          } else {
+            c.author = user.name;
+            c.authorEmail = user.email;
+            delete c.edited;
+          }
         }
         d.markups.set(m.id, m);
       }

@@ -36,8 +36,11 @@ export const STATUSES: Status[] = ['None', 'Accepted', 'Rejected', 'Cancelled', 
 export interface Comment {
   id: string;
   author: string;
+  /** stamped by the app/server; ownership is checked against it when present */
+  authorEmail?: string;
   date: string;
   text: string;
+  edited?: string;
 }
 
 export interface Markup {
@@ -59,6 +62,8 @@ export interface Markup {
   date: string;
   subject?: string;
   comments: Comment[];
+  /** top-left of the movable comment box, page space; default is placed beside the markup */
+  callout?: Pt;
 }
 
 export type Unit = 'ft' | 'in' | 'm' | 'mm';
