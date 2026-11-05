@@ -19,10 +19,10 @@
     "appId": "com.planmarkupstudio.app",
     "productName": "ThryvoPDF Markup Studio",
     "publish": null,
-    "files": ["dist/**", "electron/**", "package.json"],
+    "files": ["dist/**", "electron/**", "assets/icon.*", "package.json"],
     "directories": { "output": "release" },
-    "win": { "target": ["nsis"] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "win": { "target": ["nsis"], "icon": "assets/icon.ico" },
+    "nsis": { "installerIcon": "assets/icon.ico", "uninstallerIcon": "assets/icon.ico", "oneClick": false, "allowToChangeInstallationDirectory": true }
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",

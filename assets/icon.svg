@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>ThryvoPDF Markup Studio</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1F3A"/>
+      <stop offset="1" stop-color="#0C4A56"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- blueprint grid -->
+  <g stroke="#5EEAD4" stroke-opacity="0.12" stroke-width="2">
+    <path d="M64 0V512M128 0V512M192 0V512M256 0V512M320 0V512M384 0V512M448 0V512"/>
+    <path d="M0 64H512M0 128H512M0 192H512M0 256H512M0 320H512M0 384H512M0 448H512"/>
+  </g>
+  <!-- Y arms (Yvonne) meeting the shared stem -->
+  <g stroke="#FFFFFF" stroke-width="56" stroke-linecap="round" fill="none">
+    <path d="M130 134L256 296"/>
+    <path d="M382 134L256 296"/>
+    <path d="M256 296V372"/>
+  </g>
+  <!-- T bar (Thirdy), drawn over the arm tops -->
+  <rect x="86" y="104" width="340" height="60" rx="30" fill="#2DD4BF"/>
+  <!-- markup pin: the family mark on the drawing -->
+  <circle cx="256" cy="436" r="28" fill="#F59E0B"/>
+</svg>

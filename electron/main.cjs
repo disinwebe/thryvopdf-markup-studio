@@ -20,6 +20,7 @@ function createWindow() {
     width: 1500,
     height: 950,
     title: 'ThryvoPDF Markup Studio',
+    icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
     backgroundColor: '#1e1f22',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

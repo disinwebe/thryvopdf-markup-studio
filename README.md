@@ -66,3 +66,7 @@ Available in server mode only; local PDFs and local-account mode work exactly as
 - **Persistence**: shared PDFs and their markups are stored in `docs/` next to the users file (default `server/data/docs`), one `.pdf` and one `.json` per document. **Back up the whole `server/data` folder** (users + docs).
 
 Limitations: only markups are shared (not scale calibrations, bookmarks or sheet metadata); the shared PDF itself is not modified, so page reorder/rotate/insert are blocked on shared tabs (extract to a local copy first), while Save / Save as writes a local copy with the current markups; sync uses HTTP long-polling, not WebSockets (about 1 s latency, one open request per shared tab); presence expires 45 s after a client stops polling; sessions last 8 h, then sign in again; the server keeps no history/undo of other users' changes; there is no per-document access control; plain HTTP exposes documents on the LAN unless TLS is enabled. Server-side validation rejects malformed markups.
+
+## Logo
+
+The icon (`assets/icon.svg` is the editable source) combines a **T** bar and a **Y** - the initials of Thirdy and Yvonne, the family behind *Thryvo* - with the amber dot as a markup pin on the drawing. Regenerate `icon.png`/`icon.ico` after editing with `npm i --no-save @resvg/resvg-js; node scripts/build-icons.cjs`.
