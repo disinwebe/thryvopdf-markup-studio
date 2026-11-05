@@ -70,3 +70,7 @@ Limitations: only markups are shared (not scale calibrations, bookmarks or sheet
 ## Logo
 
 The icon (`assets/icon.svg` is the editable source) shows a drawing sheet with a dimension line, an architectural floor plan with a door swing, and a red revision cloud: the core workflow of the app (measure, markup, review). The T-junction in the plan walls is a subtle nod to *Thryvo* (Thirdy and Yvonne). Regenerate `icon.png`/`icon.ico` after editing with `npm i --no-save @resvg/resvg-js; node scripts/build-icons.cjs`.
+
+## Theme and authorship
+
+Use the **Light/Dark** button in the top bar to switch themes; the choice is remembered. Markup and comment authors are always the signed-in user's name (there is no editable Author field), and in shared documents the server stamps authorship from the login session.

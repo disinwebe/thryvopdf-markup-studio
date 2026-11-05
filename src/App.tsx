@@ -16,6 +16,7 @@ import { ProjectPanel } from './components/ProjectPanel';
 import { SharedLibrary, SharedListing } from './components/SharedLibrary';
 import { useSharedSync } from './app/useSharedSync';
 import { syncedOf } from './app/shared';
+import { useTheme } from './app/theme';
 
 const MARKUP_TOOLS: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count', 'calibrate'];
@@ -33,7 +34,8 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   const [tool, setTool] = useState<Tool>('select');
   const [styles, setStyles] = useState<Record<string, Style>>({});
   const [subject, setSubject] = useState('');
-  const [author, setAuthor] = useState(user.name);
+  const author = user.name;
+  const [theme, setTheme] = useTheme();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RightTab>('markups');
   const [leftTab, setLeftTab] = useState<LeftTab>('pages');
@@ -427,9 +429,9 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
           </>
         )}
         <span className="grow" />
-        <label className="author">
-          Author <input value={author} onChange={(e) => setAuthor(e.target.value)} />
-        </label>
+        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Switch between light and dark theme">
+          {theme === 'dark' ? '☀ Light' : '🌙 Dark'}
+        </button>
         <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</span>
         {actions.serverMode && <button onClick={() => setLibrary(true)} title="Documents stored on the server">Shared…</button>}
         {actions.manageUsers && <button onClick={actions.manageUsers}>Users</button>}

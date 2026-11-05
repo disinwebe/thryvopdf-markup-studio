@@ -141,6 +141,23 @@ describe('shared documents', () => {
     admin = (await call('POST', '/api/login', undefined, { email: 'admin', password: 'NewAdminPass1' })).token;
   });
 
+  it('stamps authorship from the session, ignoring client-supplied authors', async () => {
+    const forged = mk('au1', { author: 'Forged', comments: [{ id: 'c1', author: 'Forged', date: 'x', text: 'hi' }] });
+    await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [forged] });
+    let st = await call('GET', `/api/docs/${id}/state`, ann);
+    let m = st.markups.find((x: any) => x.id === 'au1');
+    expect(m.author).toBe('Bob Ray');
+    expect(m.comments[0].author).toBe('Bob Ray');
+    // another user editing keeps the original author and cannot rewrite existing comment authors
+    const edit = { ...m, author: 'Ann Lee', color: '#00ff00', comments: [{ ...m.comments[0], author: 'Ann Lee' }, { id: 'c2', author: 'Zed', date: 'x', text: 'yo' }] };
+    await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [edit] });
+    st = await call('GET', `/api/docs/${id}/state`, bob);
+    m = st.markups.find((x: any) => x.id === 'au1');
+    expect([m.author, m.color]).toEqual(['Bob Ray', '#00ff00']);
+    expect(m.comments.map((c: any) => c.author)).toEqual(['Bob Ray', 'Ann Lee']);
+    await call('POST', `/api/docs/${id}/ops`, bob, { deletes: ['au1'] });
+  });
+
   it('only the owner or an admin can delete', async () => {
     expect((await call('DELETE', `/api/docs/${id}`, bob)).code).toBe(403);
     expect((await call('DELETE', `/api/docs/${id}`, ann)).ok).toBe(true);

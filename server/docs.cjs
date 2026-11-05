@@ -127,7 +127,16 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       if (d.markups.size + fresh > MAX_MARKUPS) return [413, { ok: false, error: 'This document has reached the markup limit.' }];
       const real = dels.filter((x) => d.markups.has(x));
       if (!ups.length && !real.length) return [200, snapshot(d)];
-      for (const m of ups) d.markups.set(m.id, m);
+      // Authorship is server-controlled: new markups/comments get the session user's name; existing ones keep theirs.
+      for (const m of ups) {
+        const prev = d.markups.get(m.id);
+        const known = new Map(((prev && prev.comments) || []).map((c) => [c.id, c.author]));
+        m.author = prev ? prev.author : user.name;
+        if (Array.isArray(m.comments)) {
+          for (const c of m.comments) if (c && typeof c === 'object') c.author = known.has(c.id) ? known.get(c.id) : user.name;
+        }
+        d.markups.set(m.id, m);
+      }
       for (const x of real) d.markups.delete(x);
       d.version++;
       d.log.push({ v: d.version, by: user.name, byEmail: user.email, cid: String(b.cid || '').slice(0, 40), upserts: ups, deletes: real });
