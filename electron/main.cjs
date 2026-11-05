@@ -1,8 +1,10 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { createAuth } = require('./auth.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
+if (process.env.PMS_USER_DATA) app.setPath('userData', process.env.PMS_USER_DATA);
 const allowed = new Set();
 
 function startupPaths() {
@@ -41,13 +43,23 @@ function createWindow() {
         }
         await new Promise((r) => setTimeout(r, 1500));
       }
-      const img = await win.webContents.capturePage();
-      fs.writeFileSync(process.env.PMS_SCREENSHOT, img.toPNG());
       if (process.env.PMS_RESULT) fs.writeFileSync(process.env.PMS_RESULT, JSON.stringify(result, null, 2));
+      try {
+        const img = await win.webContents.capturePage();
+        fs.writeFileSync(process.env.PMS_SCREENSHOT, img.toPNG());
+      } catch (err) {
+        console.error('capture failed', err.message);
+      }
       app.quit();
     });
   }
 }
+
+let auth;
+const guard = (fn) => (...a) => {
+  if (!auth.current()) throw new Error('Not signed in');
+  return fn(...a);
+};
 
 const toBuf = (p) => {
   allowed.add(p);
@@ -55,17 +67,17 @@ const toBuf = (p) => {
   return { path: p, name: path.basename(p), data: new Uint8Array(b.buffer, b.byteOffset, b.byteLength) };
 };
 
-ipcMain.handle('startup-files', () => startupPaths().map(toBuf));
+ipcMain.handle('startup-files', guard(() => startupPaths().map(toBuf)));
 
-ipcMain.handle('open-files', async (e, opts = {}) => {
+ipcMain.handle('open-files', guard(async (e, opts = {}) => {
   const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
     properties: ['openFile', ...(opts.multi === false ? [] : ['multiSelections'])],
     filters: opts.filters || [{ name: 'PDF', extensions: ['pdf'] }],
   });
   return r.canceled ? [] : r.filePaths.map(toBuf);
-});
+}));
 
-ipcMain.handle('save-file', async (e, { defaultName, data, filters, path: existing }) => {
+ipcMain.handle('save-file', guard(async (e, { defaultName, data, filters, path: existing }) => {
   const write = (p) => {
     fs.writeFileSync(p, typeof data === 'string' ? data : Buffer.from(data));
     allowed.add(p);
@@ -78,18 +90,23 @@ ipcMain.handle('save-file', async (e, { defaultName, data, filters, path: existi
   });
   if (r.canceled || !r.filePath) return null;
   return write(r.filePath);
-});
+}));
 
-ipcMain.handle('save-many', async (e, { files }) => {
+ipcMain.handle('save-many', guard(async (e, { files }) => {
   const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
     properties: ['openDirectory', 'createDirectory'],
   });
   if (r.canceled || !r.filePaths[0]) return null;
   for (const f of files) fs.writeFileSync(path.join(r.filePaths[0], path.basename(f.name)), Buffer.from(f.data));
   return r.filePaths[0];
-});
+}));
 
 app.whenReady().then(() => {
+  auth = createAuth(path.join(app.getPath('userData'), 'users.json'));
+  ipcMain.handle('auth-status', () => auth.status());
+  ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
+  ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
+  ipcMain.handle('auth-logout', () => auth.logout());
   createWindow();
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });

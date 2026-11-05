@@ -99,3 +99,5 @@ export const BOX_TYPES: MarkupType[] = ['highlight', 'text', 'callout', 'cloud',
 export const STAMPS = ['APPROVED', 'REJECTED', 'DRAFT', 'FOR REVIEW', 'REVISED', 'VOID', 'CONFIDENTIAL', 'AS BUILT'];
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+export const DISCIPLINE_LIST = ['General', 'Architectural', 'Structural', 'Civil', 'Mechanical', 'Electrical', 'Plumbing', 'Fire Protection', 'Landscape', 'Interior'];

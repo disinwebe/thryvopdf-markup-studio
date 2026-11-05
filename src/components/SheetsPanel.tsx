@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react';
 import { Doc } from '../app/model';
 import { toCsv } from '../core/measurement';
-import { SheetMeta } from '../core/types';
+import { DISCIPLINE_LIST, SheetMeta } from '../core/types';
 import { SearchHit, searchDoc } from '../pdf/pdfjs';
 
-const DISCIPLINES = ['', 'General', 'Architectural', 'Structural', 'Civil', 'Mechanical', 'Electrical', 'Plumbing', 'Fire Protection', 'Landscape', 'Interior'];
+const DISCIPLINES = ['', ...DISCIPLINE_LIST];
 
 const blank: SheetMeta = { number: '', title: '', discipline: '', revision: '' };
 

@@ -23,14 +23,14 @@ type LeftTab = 'pages' | 'bookmarks' | 'project';
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App() {
+export default function App({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
   const [tool, setTool] = useState<Tool>('select');
   const [styles, setStyles] = useState<Record<string, Style>>({});
   const [subject, setSubject] = useState('');
-  const [author, setAuthor] = useState(() => localStorage.getItem('pms.author') || 'User');
+  const [author, setAuthor] = useState(user.name);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RightTab>('markups');
   const [leftTab, setLeftTab] = useState<LeftTab>('pages');
@@ -42,9 +42,12 @@ export default function App() {
   docsRef.current = docs;
 
   const active = docs.find((d) => d.id === activeId) ?? null;
+  const logout = () => {
+    if (docs.some((d) => d.dirty) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
+    onLogout();
+  };
   const say = useCallback((m: string) => setMsg(m), []);
 
-  useEffect(() => localStorage.setItem('pms.author', author), [author]);
 
   const updateDoc = useCallback((id: string, fn: (d: Doc) => Partial<Doc>) => {
     setDocs((all) => all.map((d) => (d.id === id ? { ...d, ...fn(d) } : d)));
@@ -367,6 +370,8 @@ export default function App() {
         <label className="author">
           Author <input value={author} onChange={(e) => setAuthor(e.target.value)} />
         </label>
+        <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}</span>
+        <button onClick={logout}>Logout</button>
       </div>
 
       {view === 'viewer' && (
