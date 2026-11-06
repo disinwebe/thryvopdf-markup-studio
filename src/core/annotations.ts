@@ -24,7 +24,7 @@ import {
 import { DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
 import { TAG_R, numberMarkups, tagAnchor } from './numbering';
-import { calloutLayout } from './callout';
+import { CALLOUT_PAD, calloutLayout } from './callout';
 
 export interface PageGeom {
   x0: number;
@@ -340,13 +340,13 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
       cv({ x: co.x + co.w, y: co.y + co.h }),
       cv({ x: co.x, y: co.y + co.h }),
     ];
-    let y = co.y + 5 + co.headH / 0.9;
+    let y = co.y + CALLOUT_PAD + co.headH / 0.9;
     let txt = '';
     for (const r of co.rows) {
       const head = y + co.fs;
-      txt += `BT /F1 ${f(co.headFs)} Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + 5, y: head })} (${latin1(r.head)}) Tj ET\n`;
+      txt += `BT /F1 ${f(co.headFs)} Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + CALLOUT_PAD, y: head })} (${latin1(r.head)}) Tj ET\n`;
       r.lines.forEach((ln, j) => {
-        txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + 5, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
+        txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + CALLOUT_PAD, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
       });
       y += co.headH + r.lines.length * co.lineH + co.rowGap;
     }

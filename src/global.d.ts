@@ -29,6 +29,10 @@ type AuthResult = { ok: true; user: AuthUser; pending?: undefined } | { ok: true
 
 interface Window {
   api?: {
+    setMenuState(state: { signedIn: boolean; documentOpen: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; serverMode: boolean; blocked: boolean }): void;
+    onMenuAction(fn: (action: string) => void): () => void;
+    quitApp(): Promise<void>;
+    appVersion(): Promise<string>;
     startupFiles(): Promise<PickedFile[]>;
     openFiles(opts?: { multi?: boolean; filters?: { name: string; extensions: string[] }[] }): Promise<PickedFile[]>;
     saveFile(args: {

@@ -2,6 +2,14 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   startupFiles: () => ipcRenderer.invoke('startup-files'),
+  setMenuState: (state) => ipcRenderer.send('menu-state', state),
+  onMenuAction: (fn) => {
+    const handler = (_event, action) => fn(action);
+    ipcRenderer.on('menu-action', handler);
+    return () => ipcRenderer.removeListener('menu-action', handler);
+  },
+  quitApp: () => ipcRenderer.invoke('quit-app'),
+  appVersion: () => ipcRenderer.invoke('app-version'),
   openFiles: (opts) => ipcRenderer.invoke('open-files', opts),
   saveFile: (args) => ipcRenderer.invoke('save-file', args),
   saveMany: (args) => ipcRenderer.invoke('save-many', args),

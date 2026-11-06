@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('./client.cjs');
+const { menuTemplate } = require('./menu.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
 // Keep the pre-rename data folder so existing installs keep their settings and accounts.
@@ -28,7 +29,23 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  win.setMenuBarVisibility(false);
+  let rendererSignedIn = false;
+  const installMenu = (state) => {
+    const menu = Menu.buildFromTemplate(menuTemplate(state, (action) => {
+      if (action === 'quit' && !rendererSignedIn) app.quit();
+      else win.webContents.send('menu-action', action);
+    }));
+    if (process.platform === 'darwin') Menu.setApplicationMenu(menu);
+    else { win.setMenu(menu); win.setMenuBarVisibility(true); }
+  };
+  installMenu({});
+  const onMenuState = (e, state) => {
+    if (e.sender !== win.webContents) return;
+    rendererSignedIn = state.signedIn === true;
+    installMenu({ ...state, signedIn: !!auth.current() && state.signedIn === true });
+  };
+  ipcMain.on('menu-state', onMenuState);
+  win.on('closed', () => ipcMain.removeListener('menu-state', onMenuState));
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) win.loadURL(devUrl);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
@@ -157,6 +174,8 @@ app.whenReady().then(() => {
   ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
   ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
   ipcMain.handle('auth-logout', () => auth.logout());
+  ipcMain.handle('quit-app', () => app.quit());
+  ipcMain.handle('app-version', () => app.getVersion());
   ipcMain.handle('shared-docs', (e, a = {}) => {
     if (!auth.docs) return { ok: false, error: 'Shared documents are unavailable.' };
     if (a.op === 'upload' && a.token) {

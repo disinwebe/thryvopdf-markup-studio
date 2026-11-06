@@ -19,7 +19,8 @@ import { useSharedSync } from './app/useSharedSync';
 import { syncedOf } from './app/shared';
 import { useTheme } from './app/theme';
 import { toolForKey } from './app/shortcuts';
-import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN, getCommentSize, setCommentSize } from './core/commentSize';
+import { getCommentSize, setCommentSize } from './core/commentSize';
+import { markupCsv } from './core/markupCsv';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const TOOL_HINT: Partial<Record<Tool, string>> = {
@@ -35,7 +36,7 @@ type LeftTab = 'pages' | 'bookmarks' | 'project';
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App({ user, actions }: { user: AuthUser; actions: { serverMode?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void } }) {
+export default function App({ user, actions }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void } }) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
@@ -56,6 +57,18 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
   const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
   const [library, setLibrary] = useState(false);
+  useEffect(() => {
+    if (!actions.serverMode || !window.api) return;
+    let cancelled = false;
+    void window.api.sharedDocs({ op: 'list' }).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setLibrary(true);
+      else setMsg(`Shared documents unavailable: ${result.error || 'Could not connect to the server.'}`);
+    }).catch((error: unknown) => {
+      if (!cancelled) setMsg(`Shared documents unavailable: ${String(error)}`);
+    });
+    return () => { cancelled = true; };
+  }, [actions.serverMode]);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
@@ -371,6 +384,46 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
     return () => window.removeEventListener('keydown', h);
   }, []);
 
+  const menuRef = useRef<(action: string) => void>(() => {});
+  menuRef.current = (action) => {
+    if (action === 'quit') {
+      if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Quit anyway?')) return;
+      void leaveAll().finally(() => window.api?.quitApp());
+      return;
+    }
+    if (library || actions.uiBlocked) return;
+    switch (action) {
+      case 'open': void open(); break;
+      case 'save': void save(false); break;
+      case 'saveAs': void save(true); break;
+      case 'csv': if (active) void exportCsv(markupCsv(active.markups, active.path || active.name), downloadName(active.name, '-markups', 'csv')); break;
+      case 'shared': if (actions.serverMode) setLibrary(true); break;
+      case 'close': if (active) closeDoc(active.id); break;
+      case 'undo': undo(); break;
+      case 'redo': redo(); break;
+      case 'select': setTool('select'); setPending(null); break;
+      case 'pan': setTool('hand'); setPending(null); break;
+      case 'delete': if (selectedId) deleteMarkup(selectedId); break;
+      case 'theme': setTheme(theme === 'dark' ? 'light' : 'dark'); break;
+      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup'); break;
+      case 'about': void window.api?.appVersion().then((v) => window.alert(`ThryvoPDF Markup Studio ${v}\nPDF review, markup and shared drawing collaboration.`)); break;
+      case 'serverHelp': window.alert('On the server PC, run npm run server and allow its configured port through Windows Firewall. On each client, choose Change on the sign-in screen, enter the server address and test the connection. Back up the server data folder, including its users and documents. Use HTTPS on untrusted networks.'); break;
+    }
+  };
+  useEffect(() => window.api?.onMenuAction((action) => menuRef.current(action)), []);
+  useEffect(() => {
+    const api = window.api;
+    if (!api) return;
+    api.setMenuState({
+      signedIn: true, documentOpen: !!active, canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
+      selected: !!active && !!selectedId && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
+      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked,
+    });
+  }, [active, selectedId, user, actions.serverMode, actions.uiBlocked, library]);
+  useEffect(() => () => window.api?.setMenuState({
+    signedIn: false, documentOpen: false, canUndo: false, canRedo: false, selected: false, serverMode: false, blocked: false,
+  }), []);
+
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     const files = [...e.dataTransfer.files].filter((f) => /\.pdf$/i.test(f.name));
@@ -449,10 +502,6 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
           </>
         )}
         <span className="grow" />
-        <label title="Comment text size on the drawing and in saved PDFs">
-          Comment text
-          <input type="number" min={COMMENT_SIZE_MIN} max={COMMENT_SIZE_MAX} value={commentSize} onChange={(e) => changeCommentSize(+e.target.value)} style={{ width: 48 }} />
-        </label>
         <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Switch between light and dark theme">
           {theme === 'dark' ? '☀ Light' : '🌙 Dark'}
         </button>
@@ -541,7 +590,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
           <>
             <div className="side left">
               <div className="ptabs">
-                {(['pages', 'bookmarks', 'project'] as LeftTab[]).map((t) => (
+                {(['project', 'pages', 'bookmarks'] as LeftTab[]).map((t) => (
                   <button key={t} className={leftTab === t ? 'on' : ''} onClick={() => setLeftTab(t)}>
                     {t === 'pages' ? 'Pages' : t === 'bookmarks' ? 'Bookmarks' : 'Project'}
                   </button>
@@ -617,6 +666,8 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                   selectedId={selectedId}
                   author={author}
                   user={user}
+                  commentSize={commentSize}
+                  onCommentSize={changeCommentSize}
                   onSelect={(id) => {
                     const m = active.markups.find((x) => x.id === id);
                     if (m) {

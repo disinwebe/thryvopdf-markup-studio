@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Doc, TOOL_LABEL } from '../app/model';
-import { defaultSubject, measureLabel, DEFAULT_CAL, toCsv } from '../core/measurement';
+import { defaultSubject, measureLabel, DEFAULT_CAL } from '../core/measurement';
+import { markupCsv } from '../core/markupCsv';
+import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN } from '../core/commentSize';
 import { Actor, canDeleteComment, canDeleteMarkup, canEditComment } from '../core/comments';
 import { numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
@@ -14,6 +16,8 @@ export interface MarkupsPanelProps {
   onUpdate(id: string, patch: Partial<Markup>, key?: string): void;
   onDelete(id: string): void;
   onExport(csv: string): void;
+  commentSize: number;
+  onCommentSize(size: number): void;
 }
 
 export function MarkupsPanel(p: MarkupsPanelProps) {
@@ -38,10 +42,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
   const sel = doc.markups.find((m) => m.id === p.selectedId) ?? null;
 
   const exportCsv = () => {
-    const out: unknown[][] = [['Page', 'Type', 'Subject', 'Text', 'Status', 'Author', 'Date', 'Comments']];
-    for (const m of doc.markups)
-      out.push([m.page + 1, TOOL_LABEL[m.type], m.subject ?? '', m.text ?? '', m.status, m.author, m.date, m.comments.map((c) => `${c.author}: ${c.text}`).join(' | ')]);
-    p.onExport(toCsv(out));
+    p.onExport(markupCsv(doc.markups, doc.path || doc.name));
   };
 
   return (
@@ -83,7 +84,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
   );
 }
 
-function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
+function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onCommentSize }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
   const [comment, setComment] = useState('');
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const upd = (patch: Partial<Markup>, key?: string) => onUpdate(m.id, patch, key);
@@ -171,7 +172,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; d
           {c.edited && <span className="muted small"> (edited)</span>}
           {editing?.id === c.id ? (
             <div>
-              <textarea value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
+              <textarea className="comment-input" value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
               <div className="row">
                 <button
                   onClick={() => {
@@ -197,6 +198,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; d
       ))}
       <div className="row">
         <input
+          className="comment-input"
           value={comment}
           placeholder="Add a comment / reply"
           onChange={(e) => setComment(e.target.value)}
@@ -208,6 +210,12 @@ function Properties({ m, doc, onUpdate, onDelete, author, user }: { m: Markup; d
           }}
         />
       </div>
+      <label className="comment-size">
+        Comment text size
+        <select value={commentSize} onChange={(e) => onCommentSize(+e.target.value)}>
+          {Array.from({ length: COMMENT_SIZE_MAX - COMMENT_SIZE_MIN + 1 }, (_, i) => COMMENT_SIZE_MIN + i).map((size) => <option key={size} value={size}>{size}</option>)}
+        </select>
+      </label>
         </>
       )}
     </div>
