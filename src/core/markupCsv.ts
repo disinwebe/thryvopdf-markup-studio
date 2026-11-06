@@ -1,6 +1,6 @@
 import { TOOL_LABEL } from '../app/model';
 import { toCsv } from './measurement';
-import { numberMarkups } from './numbering';
+import { isReviewMarkup, numberMarkups } from './numbering';
 import type { Markup } from './types';
 
 export function formatMarkupDate(value: string): string {
@@ -17,7 +17,7 @@ export function markupCsv(markups: Markup[], filename: string): string {
   const rows: unknown[][] = [['Comment ID', 'Page', 'Type', 'Filename', 'Status', 'Author', 'Date', 'Comments']];
   for (const m of markups) rows.push([
     nums.get(m.id) ?? '', m.page + 1, TOOL_LABEL[m.type], name, m.status, m.author,
-    formatMarkupDate(m.date), m.comments.map((c) => `${c.author}: ${c.text}`).join(' | '),
+    formatMarkupDate(m.date), isReviewMarkup(m) ? m.comments.map((c) => `${c.author}: ${c.text}`).join(' | ') : '',
   ]);
   return toCsv(rows);
 }

@@ -4,7 +4,7 @@ import { defaultSubject, measureLabel, DEFAULT_CAL } from '../core/measurement';
 import { markupCsv } from '../core/markupCsv';
 import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN } from '../core/commentSize';
 import { Actor, canDeleteComment, canDeleteMarkup, canEditComment } from '../core/comments';
-import { numberMarkups } from '../core/numbering';
+import { isReviewMarkup, numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 
 export interface MarkupsPanelProps {
@@ -32,7 +32,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
         .filter((m) => status === 'All' || m.status === status)
         .filter((m) => {
           if (!q.trim()) return true;
-          const hay = [m.type, m.text, m.subject, m.author, m.status, ...m.comments.map((c) => c.text)].join(' ').toLowerCase();
+          const hay = [m.type, m.text, m.subject, m.author, m.status, ...(isReviewMarkup(m) ? m.comments.map((c) => c.text) : [])].join(' ').toLowerCase();
           return hay.includes(q.toLowerCase());
         })
         .sort((a, b) => a.page - b.page || (a.date ?? '').localeCompare(b.date ?? '')),
@@ -69,10 +69,10 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} onClick={() => p.onSelect(m.id)}>
             <span className="swatch" style={{ background: m.color }} />
             <div className="grow">
-              {m.type !== 'line' && <b className="review-no">#{nums.get(m.id)}</b>} <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
+              {isReviewMarkup(m) && <b className="review-no">#{nums.get(m.id)}</b>} <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
               <div className="muted small">
                 {(m.subject || m.text || m.stamp || '').slice(0, 40)} · {m.author} · {new Date(m.date).toLocaleDateString()}
-                {m.comments.length ? ` · 💬${m.comments.length}` : ''}
+                {isReviewMarkup(m) && m.comments.length ? ` · 💬${m.comments.length}` : ''}
               </div>
             </div>
             <span className={'badge s-' + m.status}>{m.status === 'None' ? '' : m.status}</span>
@@ -163,7 +163,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       <div className="muted small">
         {m.author} · {new Date(m.date).toLocaleString()}
       </div>
-      {m.type !== 'line' && (
+      {isReviewMarkup(m) && (
         <>
       <div className="muted small" title="Internal annotation ID, saved as /NM in the PDF">Comment #{numberMarkups(doc.markups).get(m.id)} · internal ID: {m.id}</div>
       <h4>Comments</h4>

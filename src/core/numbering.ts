@@ -1,9 +1,11 @@
 import { Markup, Pt } from './types';
 
+export const isReviewMarkup = (m: Pick<Markup, 'type'>): boolean => m.type !== 'line' && m.type !== 'stamp';
+
 /** Visible, sequential review numbers: by page, then creation date, then id. Renumbers automatically when markups change. */
 export function numberMarkups(markups: Pick<Markup, 'id' | 'page' | 'date' | 'type'>[]): Map<string, number> {
   const order = [...markups]
-    .filter((m) => m.type !== 'line')
+    .filter(isReviewMarkup)
     .sort((a, b) => a.page - b.page || a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   return new Map(order.map((m, i) => [m.id, i + 1]));
 }

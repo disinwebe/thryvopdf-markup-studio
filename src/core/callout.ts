@@ -1,6 +1,7 @@
 import { bbox, boxOf, wrapText } from './geometry';
 import { getCommentSize } from './commentSize';
 import { BOX_TYPES, Markup, Pt } from './types';
+import { isReviewMarkup } from './numbering';
 
 export const CALLOUT_W = 150;
 export const CALLOUT_PAD = 10;
@@ -47,7 +48,7 @@ export function defaultCalloutPos(m: Pick<Markup, 'points'>): Pt {
 }
 
 export function calloutLayout(m: Markup, fs: number = getCommentSize()): CalloutLayout | null {
-  if (!m.comments.length) return null;
+  if (!isReviewMarkup(m) || !m.comments.length) return null;
   const HEAD = (fs * 13) / 9;
   const LINE = (fs * 11) / 9;
   const pos = m.callout ?? defaultCalloutPos(m);
