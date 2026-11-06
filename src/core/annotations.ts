@@ -23,7 +23,7 @@ import {
 } from './geometry';
 import { DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
-import { TAG_R, numberMarkups, tagAnchor } from './numbering';
+import { TAG_R, isReviewMarkup, numberMarkups, tagAnchor } from './numbering';
 import { CALLOUT_PAD, calloutLayout } from './callout';
 
 export interface PageGeom {
@@ -321,15 +321,15 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
   const pad = m.width / 2 + 12;
   const bb = bbox(viewPts.map(cv));
   let rect = { x: bb.x - pad, y: bb.y - pad, w: bb.w + pad * 2, h: bb.h + pad * 2 };
-  if (tag) {
+  if (tag && isReviewMarkup(m)) {
     // Visible review number, drawn at full opacity regardless of the markup's own opacity.
     const a = tagAnchor(m);
     const c = cv(a);
     const k = TAG_R * 0.5523;
     const r = TAG_R;
     const circle = `${f(c.x + r)} ${f(c.y)} m ${f(c.x + r)} ${f(c.y + k)} ${f(c.x + k)} ${f(c.y + r)} ${f(c.x)} ${f(c.y + r)} c ${f(c.x - k)} ${f(c.y + r)} ${f(c.x - r)} ${f(c.y + k)} ${f(c.x - r)} ${f(c.y)} c ${f(c.x - r)} ${f(c.y - k)} ${f(c.x - k)} ${f(c.y - r)} ${f(c.x)} ${f(c.y - r)} c ${f(c.x + k)} ${f(c.y - r)} ${f(c.x + r)} ${f(c.y - k)} ${f(c.x + r)} ${f(c.y)} c h`;
-    const label = String(tag);
-    const size = label.length > 2 ? 7 : 9;
+    const label = `#${tag}`;
+    const size = label.length > 3 ? 6 : 8;
     const w = label.length * size * 0.556;
     ops += `\nq /GS1 gs 0.882 0.114 0.282 rg 1 1 1 RG 1 w ${circle} B\nBT /F1 ${size} Tf 1 1 1 rg ${tm({ x: a.x - w / 2, y: a.y + size * 0.35 })} (${label}) Tj ET Q`;
     const x0 = Math.min(rect.x, c.x - r - 1);
@@ -343,12 +343,11 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     // Comment box with a leader line to the annotation's end point, drawn as part of the same annotation.
     const A = cv(co.anchor);
     const E = cv(co.edge);
-    const corners = [
-      cv({ x: co.x, y: co.y }),
-      cv({ x: co.x + co.w, y: co.y }),
-      cv({ x: co.x + co.w, y: co.y + co.h }),
-      cv({ x: co.x, y: co.y + co.h }),
+    const viewCorners = [
+      { x: co.x, y: co.y }, { x: co.x + co.w, y: co.y },
+      { x: co.x + co.w, y: co.y + co.h }, { x: co.x, y: co.y + co.h },
     ];
+    const corners = viewCorners.map(cv);
     let y = co.y + CALLOUT_PAD + co.headH / 0.9;
     let txt = '';
     for (const r of co.rows) {
@@ -359,8 +358,9 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
       });
       y += co.headH + r.lines.length * co.lineH + co.rowGap;
     }
-    ops += `\nq /GS1 gs 0.882 0.114 0.282 RG 1.2 w ${f(E.x)} ${f(E.y)} m ${f(A.x)} ${f(A.y)} l S `;
-    ops += `1 1 1 rg ${path(corners, true)} B\n${txt}Q`;
+    if (tag) txt = `BT /F1 ${f(co.fs)} Tf 0.882 0.114 0.282 rg ${tm({ x: co.x + CALLOUT_PAD, y: co.y + CALLOUT_PAD + co.fs })} (#${tag}) Tj ET\n` + txt;
+    ops += `\nq /GS1 gs 0.882 0.114 0.282 RG 1.5 w ${f(E.x)} ${f(E.y)} m ${f(A.x)} ${f(A.y)} l S `;
+    ops += `1 1 1 rg ${path(viewCorners, true)} B\n${txt}Q`;
     const xs = [...corners.map((c) => c.x), A.x];
     const ys = [...corners.map((c) => c.y), A.y];
     const x0 = Math.min(rect.x, ...xs) - 2;
@@ -445,7 +445,7 @@ export async function writeAnnotations(
       };
       if (m.type === 'cloud') dict.BE = { S: 'C', I: 2 };
       const annot = ctx.obj(dict as never) as unknown as PDFDict;
-      annot.set(PDFName.of('Contents'), PDFHexString.fromText(contentsOf(m)));
+      if (isReviewMarkup(m)) annot.set(PDFName.of('Contents'), PDFHexString.fromText(contentsOf(m)));
       annot.set(PDFName.of('T'), PDFHexString.fromText(m.author));
       annot.set(PDFName.of('NM'), PDFString.of(m.id));
       annot.set(PDFName.of('Subj'), PDFHexString.fromText(m.subject || m.type));
@@ -453,6 +453,10 @@ export async function writeAnnotations(
       if (d) annot.set(PDFName.of('M'), PDFString.of(d));
       annot.set(KEY_MARKUP, PDFHexString.fromText(JSON.stringify(m)));
       const parentRef = ctx.register(annot);
+      if (!isReviewMarkup(m)) {
+        page.node.addAnnot(parentRef);
+        continue;
+      }
       // One review item: the markup itself carries /Contents (text + thread), and a linked /Popup holds the comment window.
       const popup = ctx.obj({
         Type: 'Annot',

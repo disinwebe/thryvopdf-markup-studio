@@ -14,7 +14,7 @@ const m = (extra: Partial<Markup> = {}): Markup => ({
 
 describe('comment callout geometry', () => {
   it('connects the leader to the last point of line-like annotations', () => {
-    const l = calloutLayout(m({ type: 'line' }))!;
+    const l = calloutLayout(m({ type: 'polyline' }))!;
     expect(l.anchor).toEqual({ x: 90, y: 60 });
     expect(l.rows[0].head).toBe('Ann');
   });

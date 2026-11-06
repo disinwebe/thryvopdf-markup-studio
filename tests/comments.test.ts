@@ -49,10 +49,11 @@ describe('annotation IDs and comments in the PDF', () => {
     expect([after.get('b'), after.get('a')]).toEqual([1, 2]);
   });
 
-  it('does not number plain line drawings', () => {
+  it('does not number plain lines or stamps, including legacy commented stamps', () => {
     const line = mk('line-id', [], { type: 'line' });
+    const stamp = mk('stamp-id', [c('legacy', 'old comment')], { type: 'stamp' });
     const markup = mk('markup-id', []);
-    expect(numberMarkups([line, markup])).toEqual(new Map([['markup-id', 1]]));
+    expect(numberMarkups([line, stamp, markup])).toEqual(new Map([['markup-id', 1]]));
   });
 
   it('persists a plain line as page drawing content, not as a review annotation', async () => {
@@ -103,7 +104,7 @@ describe('annotation IDs and comments in the PDF', () => {
     const item = reviewItems(doc)[0];
     const ap = item.d.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as unknown as { getContents(): Uint8Array };
     const ops = Buffer.from(ap.getContents()).toString('latin1');
-    expect(ops).toContain('(1) Tj');
+    expect(ops).toContain('(#1) Tj');
     expect(ops).toContain('0.882 0.114 0.282 rg');
     expect(str(item.d.get(PDFName.of('NM')))).toBe('uuid-1');
   });
