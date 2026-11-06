@@ -36,15 +36,49 @@ describe('collapsed groups', () => {
 describe('native menu wiring', () => {
   it('disables document and server actions when unavailable and sends selected actions', () => {
     const send = vi.fn();
-    const menu = menuTemplate({ signedIn: true, documentOpen: true, selected: true, canUndo: true, serverMode: true }, send, 'win32');
-    expect(menu.map((m: { label: string }) => m.label)).toEqual(['File', 'Edit', 'Help']);
+    const menu = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: true, selected: true, canUndo: true, serverMode: true, admin: true, passwordAvailable: true }, send, 'win32');
+    expect(menu.map((m: { label: string }) => m.label)).toEqual(['&File', '&Edit', '&Option', '&View', '&Help']);
     const file = menu[0].submenu;
-    expect(file.find((m: { label: string }) => m.label === 'Save').enabled).toBe(true);
-    file.find((m: { label: string }) => m.label === 'Export markup CSV...').click();
+    expect(file.find((m: { label: string }) => m.label === '&Save').enabled).toBe(true);
+    file.find((m: { label: string }) => m.label === '&Export markup CSV...').click();
     expect(send).toHaveBeenCalledWith('csv');
+    file.find((m: { label: string }) => m.label === '&Logout').click();
+    expect(send).toHaveBeenCalledWith('logout');
+    const option = menu[2].submenu;
+    for (const [label, action] of [['&Users...', 'users'], ['&Password...', 'password'], ['&Theme: toggle light / dark', 'theme']]) {
+      const entry = option.find((m: { label: string }) => m.label === label);
+      expect(entry.enabled).toBe(true);
+      entry.click();
+      expect(send).toHaveBeenCalledWith(action);
+    }
+    const view = menu[3].submenu;
+    for (const [label, action, accelerator] of [['Zoom &In', 'zoomIn', 'CmdOrCtrl+='], ['Zoom &Out', 'zoomOut', 'CmdOrCtrl+-'], ['Fit &Width', 'fitWidth', undefined], ['Fit &Page', 'fitPage', undefined]]) {
+      const entry = view.find((m: { label: string }) => m.label === label);
+      expect(entry.enabled).toBe(true);
+      expect(entry.accelerator).toBe(accelerator);
+      entry.click();
+      expect(send).toHaveBeenCalledWith(action);
+    }
     const inactive = menuTemplate({ signedIn: true, blocked: true, documentOpen: true }, send, 'win32');
-    expect(inactive[0].submenu.find((m: { label: string }) => m.label === 'Save').enabled).toBe(false);
+    expect(inactive[0].submenu.find((m: { label: string }) => m.label === '&Save').enabled).toBe(false);
+    expect(inactive[3].submenu[0].enabled).toBe(false);
     const loggedOut = menuTemplate({}, send, 'win32');
-    expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === 'Shared Documents...').enabled).toBe(false);
+    expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === 'S&hared Documents...').enabled).toBe(false);
+    expect(loggedOut[2].submenu[0].visible).toBe(false);
+    const compare = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: false, admin: false }, send, 'win32');
+    expect(compare[3].submenu[0].enabled).toBe(false);
+    expect(compare[2].submenu[0].visible).toBe(false);
+  });
+
+  it('assigns unique Windows menu and item access keys', () => {
+    const menu = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: true, admin: true }, vi.fn(), 'win32');
+    const key = (label: string) => /&([^&])/.exec(label)?.[1].toLowerCase();
+    const topKeys = menu.map((m: { label: string }) => key(m.label));
+    expect(topKeys).toEqual(['f', 'e', 'o', 'v', 'h']);
+    for (const section of menu) {
+      const keys = section.submenu.filter((m: { label?: string }) => m.label).map((m: { label: string }) => key(m.label));
+      expect(keys).not.toContain(undefined);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
   });
 });

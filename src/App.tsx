@@ -398,6 +398,9 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       case 'saveAs': void save(true); break;
       case 'csv': if (active) void exportCsv(markupCsv(active.markups, active.path || active.name), downloadName(active.name, '-markups', 'csv')); break;
       case 'shared': if (actions.serverMode) setLibrary(true); break;
+      case 'logout': void logout(); break;
+      case 'users': actions.manageUsers?.(); break;
+      case 'password': actions.changePassword(); break;
       case 'close': if (active) closeDoc(active.id); break;
       case 'undo': undo(); break;
       case 'redo': redo(); break;
@@ -405,7 +408,11 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       case 'pan': setTool('hand'); setPending(null); break;
       case 'delete': if (selectedId) deleteMarkup(selectedId); break;
       case 'theme': setTheme(theme === 'dark' ? 'light' : 'dark'); break;
-      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup'); break;
+      case 'zoomIn': if (view === 'viewer') zoomBy(1.25); break;
+      case 'zoomOut': if (view === 'viewer') zoomBy(1 / 1.25); break;
+      case 'fitWidth': if (active && view === 'viewer') setFit((f) => ({ mode: 'width', n: f.n + 1 })); break;
+      case 'fitPage': if (active && view === 'viewer') setFit((f) => ({ mode: 'page', n: f.n + 1 })); break;
+      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
       case 'about': void window.api?.appVersion().then((v) => window.alert(`ThryvoPDF Markup Studio ${v}\nPDF review, markup and shared drawing collaboration.`)); break;
       case 'serverHelp': window.alert('On the server PC, run npm run server and allow its configured port through Windows Firewall. On each client, choose Change on the sign-in screen, enter the server address and test the connection. Back up the server data folder, including its users and documents. Use HTTPS on untrusted networks.'); break;
     }
@@ -415,13 +422,13 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
     const api = window.api;
     if (!api) return;
     api.setMenuState({
-      signedIn: true, documentOpen: !!active, canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
+      signedIn: true, documentOpen: !!active, viewerActive: view === 'viewer', canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
       selected: !!active && !!selectedId && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
       serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked,
     });
-  }, [active, selectedId, user, actions.serverMode, actions.uiBlocked, library]);
+  }, [active, selectedId, user, view, actions.serverMode, actions.uiBlocked, library]);
   useEffect(() => () => window.api?.setMenuState({
-    signedIn: false, documentOpen: false, canUndo: false, canRedo: false, selected: false, serverMode: false, blocked: false,
+    signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, serverMode: false, blocked: false,
   }), []);
 
   const onDrop = async (e: React.DragEvent) => {
@@ -494,22 +501,15 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
             <span>/ {active.numPages}</span>
             <button onClick={() => goto(active.page + 1)}>▶</button>
             <span className="sep" />
-            <button onClick={() => zoomBy(1 / 1.25)}>－</button>
+            <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out (Ctrl+-)">－</button>
             <span className="zoom">{Math.round((active.zoom || 1) * 100)}%</span>
-            <button onClick={() => zoomBy(1.25)}>＋</button>
+            <button onClick={() => zoomBy(1.25)} title="Zoom in (Ctrl+=)">＋</button>
             <button onClick={() => setFit((f) => ({ mode: 'width', n: f.n + 1 }))}>Fit width</button>
             <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))}>Fit page</button>
           </>
         )}
         <span className="grow" />
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} title="Switch between light and dark theme">
-          {theme === 'dark' ? '☀ Light' : '🌙 Dark'}
-        </button>
         <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</span>
-        {actions.serverMode && <button onClick={() => setLibrary(true)} title="Documents stored on the server">Shared…</button>}
-        {actions.manageUsers && <button onClick={actions.manageUsers}>Users</button>}
-        {user.email && window.api && <button onClick={actions.changePassword}>Password</button>}
-        <button onClick={logout}>Logout</button>
       </div>
 
       {view === 'viewer' && (

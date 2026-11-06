@@ -42,7 +42,8 @@ function createWindow() {
   const onMenuState = (e, state) => {
     if (e.sender !== win.webContents) return;
     rendererSignedIn = state.signedIn === true;
-    installMenu({ ...state, signedIn: !!auth.current() && state.signedIn === true });
+    const user = auth.current();
+    installMenu({ ...state, signedIn: !!user && state.signedIn === true, admin: user?.role === 'admin', passwordAvailable: !!user?.email });
   };
   ipcMain.on('menu-state', onMenuState);
   win.on('closed', () => ipcMain.removeListener('menu-state', onMenuState));
