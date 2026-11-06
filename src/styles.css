@@ -83,3 +83,7 @@ button.link { background: none; border: 0; color: var(--acc); }
 .shared-groups .item { font-size: 12px; padding: 3px 6px; }
 .shared-groups .group-title { font-size: 12px; margin-top: 8px; }
 .shared-groups .small { font-size: 11px; }
+.group-toggle { display: block; width: 100%; text-align: left; }
+.props .comment-input { box-sizing: border-box; padding: 8px 10px; width: 100%; }
+.props .comment-size { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.props .comment-size select { max-width: 80px; }

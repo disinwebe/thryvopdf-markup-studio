@@ -96,5 +96,33 @@ Shared documents are listed by **group** (the project name) in both the Shared l
 
 ### Shortcuts, comment text size and refresh
 
-**V** selects the Select tool, **H** toggles Pan (hold **Space** for a temporary pan while any tool is active); shortcuts are ignored while typing in a field. Tool buttons show the hint as a tooltip. The **Comment text** box in the top bar (7-18, default 9) sets the comment callout text size; it is remembered per PC and used on screen and when drawing the callout into the saved PDF. There is no Callout drawing tool: comments are always attached to an annotation. **Line** is the first markup tool. The Project tab's shared list refreshes automatically every 5 minutes while that tab is visible and the window is not hidden (Refresh is still available). In the upload form, Group and Description are on separate lines.
+**V** selects the Select tool, **H** toggles Pan (hold **Space** for a temporary pan while any tool is active); shortcuts are ignored while typing in a field. Tool buttons show the hint as a tooltip. Select an annotation and use **Comment text size** beneath its comments (7-18, default 9); the preference is remembered per PC and used on screen and when drawing callouts into saved PDFs. There is no Callout drawing tool: comments are always attached to an annotation. **Line** is the first markup tool. The Project tab's shared list refreshes automatically every 5 minutes while that tab is visible and the window is not hidden (Refresh is still available). In the upload form, Group and Description are on separate lines.
 
+After server login the shared library opens automatically when the server is reachable; local mode does not open it. The left Project tab lets you collapse each shared group, and remembers that choice on this PC. The native menus provide document operations, markup tools, account settings, view controls and server guidance. Markup CSV exports use the visible comment number (blank for drawing-only lines), PDF filename and local date/time; the separate takeoff CSV is unchanged.
+
+On Windows, use **Alt+F**, **Alt+E**, **Alt+O**, **Alt+V**, or **Alt+H** to open the File, Edit, Option, View, or Help menu. Underlined letters select menu items. File contains Shared Documents and Logout; Option contains Password, theme selection, and Users for administrators. View offers zoom and fit actions, also available on the toolbar. **Ctrl+=** zooms in and **Ctrl+-** zooms out when a PDF is open in the viewer (Command replaces Ctrl on macOS).
+
+### Custom stamps
+
+Select **Stamp**, then **Import stamp...** to use a PNG, JPEG, WebP, GIF, BMP or PDF (maximum 20 MB). For a multi-page PDF, choose the page to use. The selected image or PDF page is rasterized to a bounded PNG and embedded in each markup; no original file path is needed after import. Click the drawing to place it; use Select to move, resize and adjust its opacity. PDF stamp pages and animated GIFs become still images; the image may be downsampled to fit shared-markup limits. Original PDF vector content, hyperlinks and animations are not preserved. Other PDF readers can display the resulting stamp appearance, but custom stamp editing in other apps has not been verified.
+
+### Offline device licensing
+
+The Windows app requires a signed **perpetual license for each device**, before login. Activation and subsequent checks work offline. On the activation screen, copy the device request (a SHA-256 fingerprint of the Windows MachineGuid, not the raw identifier) and send it to the software owner, who returns a license file. Click **Import license file**; it is saved in this PC's application data and verified on each start. The company-server account remains separate.
+
+**Owner setup on a trusted machine:** generate an Ed25519 keypair outside the repository. Keep the private key confidential, restrict access using Windows ACLs and maintain a secure backup. A replacement private key cannot issue licenses for installers built with a different public key.
+
+```powershell
+node scripts\license-vendor.cjs keygen C:\SecureKeys\thryvo-private.pem C:\SecureKeys\thryvo-public.pem
+$env:PMS_LICENSE_PUBLIC_KEY = 'C:\SecureKeys\thryvo-public.pem'
+npm run dist
+```
+
+Only the selected public key is embedded in the installer; the private key is never embedded or committed. Builds without `PMS_LICENSE_PUBLIC_KEY` fail closed at activation and cannot be activated; they are not distributable production builds. To issue a license after receiving a customer's exact 64-character device request, on the trusted machine run:
+
+```powershell
+$env:PMS_LICENSE_PRIVATE_KEY = 'C:\SecureKeys\thryvo-private.pem'
+node scripts\license-vendor.cjs issue DEVICE_REQUEST C:\SecureKeys\customer-license.json
+```
+
+Deliver that file securely to the customer. No production key or license is supplied with this repository. A Windows reinstall, hardware migration or changed MachineGuid may require a new license. MachineGuid can be cloned or changed; this is a practical device binding, not tamper-proof DRM. Someone with control of the app installation can patch local checks, and an offline license cannot be revoked immediately. Revocation or replacement of trust keys requires a future app update or a separately designed online service.

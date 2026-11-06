@@ -1,7 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('./client.cjs');
+const { menuTemplate } = require('./menu.cjs');
+const { createLicenseStore, MAX_LICENSE_BYTES } = require('./license.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
 // Keep the pre-rename data folder so existing installs keep their settings and accounts.
@@ -28,7 +30,24 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  win.setMenuBarVisibility(false);
+  let rendererSignedIn = false;
+  const installMenu = (state) => {
+    const menu = Menu.buildFromTemplate(menuTemplate(state, (action) => {
+      if (action === 'quit' && !rendererSignedIn) app.quit();
+      else win.webContents.send('menu-action', action);
+    }));
+    if (process.platform === 'darwin') Menu.setApplicationMenu(menu);
+    else { win.setMenu(menu); win.setMenuBarVisibility(true); }
+  };
+  installMenu({});
+  const onMenuState = (e, state) => {
+    if (e.sender !== win.webContents) return;
+    rendererSignedIn = state.signedIn === true;
+    const user = auth.current();
+    installMenu({ ...state, signedIn: !!user && state.signedIn === true, admin: user?.role === 'admin', passwordAvailable: !!user?.email });
+  };
+  ipcMain.on('menu-state', onMenuState);
+  win.on('closed', () => ipcMain.removeListener('menu-state', onMenuState));
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) win.loadURL(devUrl);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
@@ -58,8 +77,15 @@ function createWindow() {
   }
 }
 
-let auth;
+let auth, license;
+const licensed = (fn) => (...a) => {
+  const status = license.status();
+  if (!status.ok) throw new Error(status.error || 'This device is not licensed.');
+  return fn(...a);
+};
 const guard = (fn) => (...a) => {
+  const status = license.status();
+  if (!status.ok) throw new Error(status.error || 'This device is not licensed.');
   if (!auth.current()) throw new Error('Not signed in');
   return fn(...a);
 };
@@ -78,6 +104,19 @@ ipcMain.handle('open-files', guard(async (e, opts = {}) => {
     filters: opts.filters || [{ name: 'PDF', extensions: ['pdf'] }],
   });
   return r.canceled ? [] : r.filePaths.map(toBuf);
+}));
+
+ipcMain.handle('pick-stamp', guard(async (e) => {
+  const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+    properties: ['openFile'],
+    filters: [{ name: 'Images and PDF', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'pdf'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const p = r.filePaths[0];
+  const size = fs.statSync(p).size;
+  if (!size || size > 20 * 1024 * 1024) throw new Error('Choose a non-empty image or PDF smaller than 20 MB.');
+  const b = fs.readFileSync(p);
+  return { path: '', name: path.basename(p), data: new Uint8Array(b.buffer, b.byteOffset, b.byteLength) };
 }));
 
 ipcMain.handle('save-file', guard(async (e, { defaultName, data, filters, path: existing }) => {
@@ -152,12 +191,34 @@ ipcMain.handle('save-many', guard(async (e, { files }) => {
 
 app.whenReady().then(() => {
   const ud = app.getPath('userData');
+  license = createLicenseStore({ file: path.join(ud, 'device-license.json'), publicKeyFile: path.join(__dirname, '..', 'dist', 'license-public.pem') });
   auth = createClient({ configFile: path.join(ud, 'server.json'), localFile: path.join(ud, 'users.json'), fetch: net.fetch.bind(net) });
-  ipcMain.handle('auth-status', () => auth.status());
-  ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
-  ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
-  ipcMain.handle('auth-logout', () => auth.logout());
-  ipcMain.handle('shared-docs', (e, a = {}) => {
+  ipcMain.handle('license-status', () => license.status());
+  ipcMain.handle('license-import', async (e) => {
+    const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
+      properties: ['openFile'], filters: [{ name: 'License files', extensions: ['json', 'license'] }],
+    });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, cancelled: true };
+    try {
+      if (fs.statSync(r.filePaths[0]).size > MAX_LICENSE_BYTES) return { ok: false, error: 'License file is too large.' };
+      return license.activate(fs.readFileSync(r.filePaths[0], 'utf8'));
+    } catch { return { ok: false, error: 'Could not read the license file.' }; }
+  });
+  ipcMain.handle('auth-status', licensed(() => auth.status()));
+  ipcMain.handle('auth-register', licensed((e, a) => auth.register(a || {})));
+  ipcMain.handle('auth-login', licensed((e, a) => auth.login(a || {})));
+  ipcMain.handle('auth-logout', licensed(() => auth.logout()));
+  ipcMain.handle('quit-app', () => app.quit());
+  ipcMain.handle('app-version', () => app.getVersion());
+  ipcMain.handle('show-about', licensed(async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win) return;
+    await dialog.showMessageBox(win, {
+      type: 'info', title: 'About this software', message: `ThryvoPDF Markup Studio ${app.getVersion()}`,
+      detail: 'PDF review, markup and shared drawing collaboration.\nDeveloped by: TRL 2026', buttons: ['OK'],
+    });
+  }));
+  ipcMain.handle('shared-docs', guard((e, a = {}) => {
     if (!auth.docs) return { ok: false, error: 'Shared documents are unavailable.' };
     if (a.op === 'upload' && a.token) {
       const p = picked.get(a.token);
@@ -170,12 +231,13 @@ app.whenReady().then(() => {
       }
     }
     return auth.docs(a);
-  });
-  ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
-  ipcMain.handle('auth-admin-list', () => auth.adminList());
-  ipcMain.handle('auth-admin-action', (e, a) => auth.adminAction(a || {}));
-  ipcMain.handle('auth-test', (e, url) => auth.test(url));
-  ipcMain.handle('auth-configure', (e, a) => auth.configure(a || {}));
+  }));
+  // Password changes must remain available during mandatory first-login changes.
+  ipcMain.handle('auth-change-password', licensed((e, a) => auth.changePassword(a || {})));
+  ipcMain.handle('auth-admin-list', guard(() => auth.adminList()));
+  ipcMain.handle('auth-admin-action', guard((e, a) => auth.adminAction(a || {})));
+  ipcMain.handle('auth-test', licensed((e, url) => auth.test(url)));
+  ipcMain.handle('auth-configure', licensed((e, a) => auth.configure(a || {})));
   createWindow();
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });

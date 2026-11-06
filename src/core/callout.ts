@@ -3,7 +3,7 @@ import { getCommentSize } from './commentSize';
 import { BOX_TYPES, Markup, Pt } from './types';
 
 export const CALLOUT_W = 150;
-const PAD = 5;
+export const CALLOUT_PAD = 10;
 const MAX_SHOWN = 4;
 
 export interface CalloutLayout {
@@ -54,9 +54,9 @@ export function calloutLayout(m: Markup, fs: number = getCommentSize()): Callout
   const shown = m.comments.slice(-MAX_SHOWN);
   const rows = shown.map((c) => ({
     head: c.author + (c.edited ? ' (edited)' : ''),
-    lines: wrapText(c.text, CALLOUT_W - PAD * 2, fs),
+    lines: wrapText(c.text, CALLOUT_W - CALLOUT_PAD * 2, fs),
   }));
-  const h = PAD * 2 + HEAD + rows.reduce((s, r) => s + HEAD * 0.9 + r.lines.length * LINE + 3, 0);
+  const h = CALLOUT_PAD * 2 + HEAD + rows.reduce((s, r) => s + HEAD * 0.9 + r.lines.length * LINE + 3, 0);
   const box = { x: pos.x, y: pos.y, w: CALLOUT_W, h };
   const centre = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
   const anchor = anchorOf(m, centre);

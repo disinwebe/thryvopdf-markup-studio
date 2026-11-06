@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Markup, uid } from '../core/types';
 import { Doc } from './model';
-import { applyOps, diffMarkups, syncedOf } from './shared';
+import { applyOps, batchChanges, diffMarkups, syncedOf } from './shared';
 
 type UpdateDoc = (id: string, fn: (d: Doc) => Partial<Doc>) => void;
 
@@ -26,7 +26,8 @@ export function useSharedSync(docs: Doc[], docsRef: { current: Doc[] }, updateDo
     timers.current.delete(id);
     const d = docsRef.current.find((x) => x.id === id);
     if (!d?.shared || inflight.current.has(id)) return;
-    const { upserts, deletes } = diffMarkups(d.markups, d.shared.synced);
+    const diff = diffMarkups(d.markups, d.shared.synced);
+    const { upserts, deletes } = batchChanges(diff.upserts, diff.deletes);
     if (!upserts.length && !deletes.length) return;
     const base = d.shared.synced;
     inflight.current.add(id);
@@ -40,7 +41,8 @@ export function useSharedSync(docs: Doc[], docsRef: { current: Doc[] }, updateDo
         // Only advance entries that a remote op did not change while the request was in flight.
         for (const m of upserts) if (synced[m.id] === base[m.id]) synced[m.id] = JSON.stringify(m);
         for (const x of deletes) if (synced[x] === base[x]) delete synced[x];
-        return { dirty: false, shared: { ...cur.shared, synced, status: 'live', error: undefined } };
+        const remaining = diffMarkups(cur.markups, synced);
+        return { dirty: remaining.upserts.length > 0 || remaining.deletes.length > 0, shared: { ...cur.shared, synced, status: 'live', error: undefined } };
       });
     } else if (r.forbidden) {
       // The server refused (e.g. editing/deleting another user's comment): restore its authoritative copies and keep going.

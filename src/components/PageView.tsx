@@ -238,7 +238,12 @@ export function PageView(p: PageViewProps) {
     }
     if (CLICK.includes(tool)) {
       let points = [pt];
-      if (tool === 'stamp') points = [{ x: pt.x - 70, y: pt.y - 20 }, { x: pt.x + 70, y: pt.y + 20 }];
+      if (tool === 'stamp') {
+        const ratio = style.stampImage ? style.stampImage.width / style.stampImage.height : 3.5;
+        const w = Math.min(140, 80 * ratio);
+        const h = Math.min(80, 140 / ratio);
+        points = [{ x: pt.x - w / 2, y: pt.y - h / 2 }, { x: pt.x + w / 2, y: pt.y + h / 2 }];
+      }
       p.onCreate(makeMarkup(tool as MarkupType, doc.page, points, style, p.author));
       return;
     }

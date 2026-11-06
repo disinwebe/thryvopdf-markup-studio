@@ -57,6 +57,8 @@ export interface Markup {
   text?: string;
   fontSize?: number;
   stamp?: string;
+  /** Embedded PNG, independent of the source file path. */
+  stampImage?: import('./stamp').StampImage;
   status: Status;
   author: string;
   /** stamped when created; deletion is limited to the author */

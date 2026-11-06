@@ -24,7 +24,7 @@ import {
 import { DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
 import { TAG_R, numberMarkups, tagAnchor } from './numbering';
-import { calloutLayout } from './callout';
+import { CALLOUT_PAD, calloutLayout } from './callout';
 
 export interface PageGeom {
   x0: number;
@@ -281,6 +281,15 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     }
     case 'stamp': {
       const r = boxOf(m);
+      if (m.stampImage) {
+        const origin = cv({ x: r.x, y: r.y + r.h });
+        const right = cv({ x: r.x + r.w, y: r.y + r.h });
+        const top = cv({ x: r.x, y: r.y });
+        ops = `q ${f(right.x - origin.x)} ${f(right.y - origin.y)} ${f(top.x - origin.x)} ${f(top.y - origin.y)} ${f(origin.x)} ${f(origin.y)} cm /StampImage Do Q`;
+        viewPts = rectPoly(r);
+        extra.Name = 'Draft';
+        break;
+      }
       const t = (m.stamp ?? m.text ?? 'STAMP').toUpperCase();
       const size = Math.max(6, Math.min(r.h * 0.5, (r.w - 10) / Math.max(1, t.length * 0.62)));
       viewPts = rectPoly(r);
@@ -340,13 +349,13 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
       cv({ x: co.x + co.w, y: co.y + co.h }),
       cv({ x: co.x, y: co.y + co.h }),
     ];
-    let y = co.y + 5 + co.headH / 0.9;
+    let y = co.y + CALLOUT_PAD + co.headH / 0.9;
     let txt = '';
     for (const r of co.rows) {
       const head = y + co.fs;
-      txt += `BT /F1 ${f(co.headFs)} Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + 5, y: head })} (${latin1(r.head)}) Tj ET\n`;
+      txt += `BT /F1 ${f(co.headFs)} Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + CALLOUT_PAD, y: head })} (${latin1(r.head)}) Tj ET\n`;
       r.lines.forEach((ln, j) => {
-        txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + 5, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
+        txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + CALLOUT_PAD, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
       });
       y += co.headH + r.lines.length * co.lineH + co.rowGap;
     }
@@ -415,11 +424,12 @@ export async function writeAnnotations(
       const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL, numbers.get(m.id));
       const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
       const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1 });
+      const stampImage = m.type === 'stamp' && m.stampImage ? await doc.embedPng(m.stampImage.data) : undefined;
       const ap = ctx.stream('/GS0 gs\n' + b.ops, {
         Type: 'XObject',
         Subtype: 'Form',
         BBox: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
-        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs, GS1: gs1 } }),
+        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs, GS1: gs1 }, ...(stampImage ? { XObject: { StampImage: stampImage.ref } } : {}) }),
       });
       const apRef = ctx.register(ap);
       const dict: Record<string, unknown> = {

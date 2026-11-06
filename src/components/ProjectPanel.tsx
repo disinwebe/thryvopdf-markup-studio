@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Doc } from '../app/model';
 import { groupByProject } from '../app/upload';
 import { SHARED_REFRESH_MS, startPolling } from '../app/shortcuts';
+import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 import type { SharedListing } from './SharedLibrary';
 
 export function ProjectPanel(p: {
@@ -19,6 +20,14 @@ export function ProjectPanel(p: {
   const [name, setName] = useState('');
   const [shared, setShared] = useState<SharedListing[]>([]);
   const [sharedErr, setSharedErr] = useState('');
+  const [collapsed, setCollapsed] = useState<string[]>(() => {
+    try { return loadCollapsedGroups(localStorage); } catch { return []; }
+  });
+  const toggleGroup = (project: string) => setCollapsed((prev) => {
+    const next = prev.includes(project) ? prev.filter((v) => v !== project) : [...prev, project];
+    try { saveCollapsedGroups(localStorage, next); } catch { /* storage unavailable */ }
+    return next;
+  });
   const loadShared = useCallback(async () => {
     if (!window.api?.sharedDocs) return;
     const r = await window.api.sharedDocs({ op: 'list' });
@@ -83,8 +92,10 @@ export function ProjectPanel(p: {
           {!sharedErr && !shared.length && <div className="muted small">No shared documents yet.</div>}
           {groupByProject(shared).map((g) => (
             <div key={'g:' + g.project} className="group">
-              <div className="group-title"><b>{g.project || 'Ungrouped'}</b> <span className="muted small">({g.docs.length})</span></div>
-              {g.docs.map((d) => (
+              <button className="group-title group-toggle" aria-expanded={!collapsed.includes(g.project)} onClick={() => toggleGroup(g.project)}>
+                <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted small">({g.docs.length})</span>
+              </button>
+              {!collapsed.includes(g.project) && g.docs.map((d) => (
                 <div key={d.id} className="item" onClick={() => void p.onOpenShared!(d)} title={d.description || 'Open shared document'}>
                   <div className="grow">
                     <span>{d.rel ? d.rel + '/' : ''}{d.name}</span>

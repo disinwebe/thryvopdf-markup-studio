@@ -2,7 +2,7 @@ import { arrowHead, boxCenter, boxOf, cloudPoints, rectPoly, wrapText, approxTex
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
 import { TAG_R, tagAnchor } from '../core/numbering';
-import { calloutLayout } from '../core/callout';
+import { CALLOUT_PAD, calloutLayout } from '../core/callout';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
 const d = (p: Pt[], close = false) => 'M' + p.map((q) => `${q.x} ${q.y}`).join(' L') + (close ? ' Z' : '');
@@ -157,6 +157,10 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
     }
     case 'stamp': {
       const r = boxOf(m);
+      if (m.stampImage) {
+        body = <image href={m.stampImage.data} x={r.x} y={r.y} width={r.w} height={r.h} preserveAspectRatio="none" />;
+        break;
+      }
       const t = (m.stamp ?? 'STAMP').toUpperCase();
       const size = Math.max(6, Math.min(r.h * 0.5, (r.w - 10) / Math.max(1, t.length * 0.62)));
       body = (
@@ -190,16 +194,16 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
           <line x1={co.edge.x} y1={co.edge.y} x2={co.anchor.x} y2={co.anchor.y} stroke="#e11d48" strokeWidth={1.2} />
           <circle cx={co.anchor.x} cy={co.anchor.y} r={2.5} fill="#e11d48" />
           <rect x={co.x} y={co.y} width={co.w} height={co.h} fill="#fff" stroke="#e11d48" strokeWidth={1.2} rx={3} />
-          {tag && <text x={co.x + 5} y={co.y + 11} fontSize={co.fs} fontWeight={700} fill="#e11d48">#{tag}</text>}
+          {tag && <text x={co.x + CALLOUT_PAD} y={co.y + CALLOUT_PAD + co.fs} fontSize={co.fs} fontWeight={700} fill="#e11d48">#{tag}</text>}
           {(() => {
-            let y = co.y + 5 + co.headH / 0.9;
+            let y = co.y + CALLOUT_PAD + co.headH / 0.9;
             return co.rows.map((r, i) => {
               const head = y + co.fs;
               const out = (
                 <g key={i}>
-                  <text x={co.x + 5} y={head} fontSize={co.headFs} fontWeight={700} fill="#9f1239">{r.head}</text>
+                  <text x={co.x + CALLOUT_PAD} y={head} fontSize={co.headFs} fontWeight={700} fill="#9f1239">{r.head}</text>
                   {r.lines.map((ln, j) => (
-                    <text key={j} x={co.x + 5} y={head + co.lineH * (j + 1)} fontSize={co.fs} fill="#222">{ln}</text>
+                    <text key={j} x={co.x + CALLOUT_PAD} y={head + co.lineH * (j + 1)} fontSize={co.fs} fill="#222">{ln}</text>
                   ))}
                 </g>
               );
