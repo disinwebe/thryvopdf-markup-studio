@@ -36,8 +36,11 @@ export const STATUSES: Status[] = ['None', 'Accepted', 'Rejected', 'Cancelled', 
 export interface Comment {
   id: string;
   author: string;
+  /** stamped by the app/server; ownership is checked against it when present */
+  authorEmail?: string;
   date: string;
   text: string;
+  edited?: string;
 }
 
 export interface Markup {
@@ -54,11 +57,17 @@ export interface Markup {
   text?: string;
   fontSize?: number;
   stamp?: string;
+  /** Embedded PNG, independent of the source file path. */
+  stampImage?: import('./stamp').StampImage;
   status: Status;
   author: string;
+  /** stamped when created; deletion is limited to the author */
+  authorEmail?: string;
   date: string;
   subject?: string;
   comments: Comment[];
+  /** top-left of the movable comment box, page space; default is placed beside the markup */
+  callout?: Pt;
 }
 
 export type Unit = 'ft' | 'in' | 'm' | 'mm';
@@ -98,6 +107,10 @@ export const BOX_TYPES: MarkupType[] = ['highlight', 'text', 'callout', 'cloud',
 
 export const STAMPS = ['APPROVED', 'REJECTED', 'DRAFT', 'FOR REVIEW', 'REVISED', 'VOID', 'CONFIDENTIAL', 'AS BUILT'];
 
-export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+export const uid = () => {
+  const b = new Uint32Array(2);
+  (globalThis.crypto ?? { getRandomValues: (a: Uint32Array) => a.map(() => Math.random() * 2 ** 32) }).getRandomValues(b);
+  return b[0].toString(36) + b[1].toString(36) + Date.now().toString(36).slice(-3);
+};
 
 export const DISCIPLINE_LIST = ['General', 'Architectural', 'Structural', 'Civil', 'Mechanical', 'Electrical', 'Plumbing', 'Fire Protection', 'Landscape', 'Interior'];

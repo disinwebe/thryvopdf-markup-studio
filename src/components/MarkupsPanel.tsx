@@ -1,16 +1,23 @@
 import { useMemo, useState } from 'react';
 import { Doc, TOOL_LABEL } from '../app/model';
-import { defaultSubject, measureLabel, DEFAULT_CAL, toCsv } from '../core/measurement';
+import { defaultSubject, measureLabel, DEFAULT_CAL } from '../core/measurement';
+import { markupCsv } from '../core/markupCsv';
+import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN } from '../core/commentSize';
+import { Actor, canDeleteComment, canDeleteMarkup, canEditComment } from '../core/comments';
+import { numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 
 export interface MarkupsPanelProps {
   doc: Doc;
   selectedId: string | null;
   author: string;
+  user: Actor;
   onSelect(id: string): void;
   onUpdate(id: string, patch: Partial<Markup>, key?: string): void;
   onDelete(id: string): void;
   onExport(csv: string): void;
+  commentSize: number;
+  onCommentSize(size: number): void;
 }
 
 export function MarkupsPanel(p: MarkupsPanelProps) {
@@ -28,16 +35,14 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           const hay = [m.type, m.text, m.subject, m.author, m.status, ...m.comments.map((c) => c.text)].join(' ').toLowerCase();
           return hay.includes(q.toLowerCase());
         })
-        .sort((a, b) => a.page - b.page || a.date.localeCompare(b.date)),
+        .sort((a, b) => a.page - b.page || (a.date ?? '').localeCompare(b.date ?? '')),
     [doc.markups, q, status, scope, doc.page],
   );
+  const nums = numberMarkups(doc.markups);
   const sel = doc.markups.find((m) => m.id === p.selectedId) ?? null;
 
   const exportCsv = () => {
-    const out: unknown[][] = [['Page', 'Type', 'Subject', 'Text', 'Status', 'Author', 'Date', 'Comments']];
-    for (const m of doc.markups)
-      out.push([m.page + 1, TOOL_LABEL[m.type], m.subject ?? '', m.text ?? '', m.status, m.author, m.date, m.comments.map((c) => `${c.author}: ${c.text}`).join(' | ')]);
-    p.onExport(toCsv(out));
+    p.onExport(markupCsv(doc.markups, doc.path || doc.name));
   };
 
   return (
@@ -64,7 +69,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} onClick={() => p.onSelect(m.id)}>
             <span className="swatch" style={{ background: m.color }} />
             <div className="grow">
-              <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
+              {m.type !== 'line' && <b className="review-no">#{nums.get(m.id)}</b>} <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
               <div className="muted small">
                 {(m.subject || m.text || m.stamp || '').slice(0, 40)} · {m.author} · {new Date(m.date).toLocaleDateString()}
                 {m.comments.length ? ` · 💬${m.comments.length}` : ''}
@@ -79,8 +84,9 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
   );
 }
 
-function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
+function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onCommentSize }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
   const [comment, setComment] = useState('');
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const upd = (patch: Partial<Markup>, key?: string) => onUpdate(m.id, patch, key);
   const cal = doc.calibrations[m.page] ?? DEFAULT_CAL;
   const hasFill = ['rect', 'ellipse', 'cloud', 'text', 'callout', 'm-area'].includes(m.type);
@@ -88,7 +94,7 @@ function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Do
     <div className="props">
       <h4>
         {TOOL_LABEL[m.type]} properties
-        <button className="danger" onClick={() => onDelete(m.id)}>Delete</button>
+        <button className="danger" disabled={!canDeleteMarkup(m, user)} title={canDeleteMarkup(m, user) ? undefined : "Only the author can delete this markup"} onClick={() => onDelete(m.id)}>Delete</button>
       </h4>
       {isMeasure(m.type) && <div className="muted">{measureLabel(m, cal) || '1 item'}</div>}
       <label>
@@ -123,7 +129,8 @@ function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Do
       {m.type === 'stamp' && (
         <label>
           Stamp
-          <select value={m.stamp} onChange={(e) => upd({ stamp: e.target.value })}>
+          <select value={m.stampImage ? '__custom__' : m.stamp} onChange={(e) => upd({ stamp: e.target.value, stampImage: undefined })}>
+            {m.stampImage && <option value="__custom__">Custom image</option>}
             {STAMPS.map((s) => (
               <option key={s}>{s}</option>
             ))}
@@ -156,26 +163,62 @@ function Properties({ m, doc, onUpdate, onDelete, author }: { m: Markup; doc: Do
       <div className="muted small">
         {m.author} · {new Date(m.date).toLocaleString()}
       </div>
+      {m.type !== 'line' && (
+        <>
+      <div className="muted small" title="Internal annotation ID, saved as /NM in the PDF">Comment #{numberMarkups(doc.markups).get(m.id)} · internal ID: {m.id}</div>
       <h4>Comments</h4>
       {m.comments.map((c) => (
-        <div key={c.id} className="comment">
+        <div key={c.id} className="comment" title={'Comment ID ' + c.id}>
           <b>{c.author}</b> <span className="muted small">{new Date(c.date).toLocaleString()}</span>
-          <div>{c.text}</div>
+          {c.edited && <span className="muted small"> (edited)</span>}
+          {editing?.id === c.id ? (
+            <div>
+              <textarea className="comment-input" value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
+              <div className="row">
+                <button
+                  onClick={() => {
+                    if (editing.text.trim()) upd({ comments: m.comments.map((x) => (x.id === c.id ? { ...x, text: editing.text.trim() } : x)) });
+                    setEditing(null);
+                  }}
+                >
+                  Save
+                </button>
+                <button onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div>{c.text}</div>
+          )}
+          {editing?.id !== c.id && (
+            <div className="row">
+              {canEditComment(c, user) && <button onClick={() => setEditing({ id: c.id, text: c.text })}>Edit</button>}
+              {canDeleteComment(c, user) && <button className="danger" onClick={() => upd({ comments: m.comments.filter((x) => x.id !== c.id) })}>Delete</button>}
+            </div>
+          )}
         </div>
       ))}
       <div className="row">
         <input
+          className="comment-input"
           value={comment}
           placeholder="Add a comment / reply"
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && comment.trim()) {
-              upd({ comments: [...m.comments, { id: uid(), author, date: new Date().toISOString(), text: comment.trim() }] });
+              upd({ comments: [...m.comments, { id: uid(), author, authorEmail: user.email, date: new Date().toISOString(), text: comment.trim() }] });
               setComment('');
             }
           }}
         />
       </div>
+      <label className="comment-size">
+        Comment text size
+        <select value={commentSize} onChange={(e) => onCommentSize(+e.target.value)}>
+          {Array.from({ length: COMMENT_SIZE_MAX - COMMENT_SIZE_MIN + 1 }, (_, i) => COMMENT_SIZE_MIN + i).map((size) => <option key={size} value={size}>{size}</option>)}
+        </select>
+      </label>
+        </>
+      )}
     </div>
   );
 }

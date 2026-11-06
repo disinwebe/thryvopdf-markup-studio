@@ -5,6 +5,8 @@ import { DEFAULT_CAL } from '../core/measurement';
 import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas } from '../pdf/pdfjs';
 import { MarkupShape } from './MarkupShape';
+import { numberMarkups } from '../core/numbering';
+import { calloutLayout, hitCallout, moveCallout } from '../core/callout';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
@@ -13,6 +15,7 @@ const MULTI: Tool[] = ['polyline', 'm-polylength', 'm-area', 'm-perimeter', 'm-a
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; sl: number; st: number }
   | { kind: 'move'; start: Pt; orig: Markup; began: boolean }
+  | { kind: 'callout'; start: Pt; orig: Markup; from: Pt; began: boolean }
   | { kind: 'handle'; key: HandleKey; orig: Markup; began: boolean }
   | { kind: 'two'; moved: boolean }
   | { kind: 'pen' };
@@ -208,6 +211,13 @@ export function PageView(p: PageViewProps) {
           return;
         }
       }
+      const box = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, pt));
+      if (box) {
+        p.onSelect(box.id);
+        const l = calloutLayout(box)!;
+        drag.current = { kind: 'callout', start: pt, orig: box, from: { x: l.x, y: l.y }, began: false };
+        return;
+      }
       const hit = pickTop(doc.markups, doc.page, pt, 6 / zoom);
       if (hit) {
         p.onSelect(hit.id);
@@ -228,7 +238,12 @@ export function PageView(p: PageViewProps) {
     }
     if (CLICK.includes(tool)) {
       let points = [pt];
-      if (tool === 'stamp') points = [{ x: pt.x - 70, y: pt.y - 20 }, { x: pt.x + 70, y: pt.y + 20 }];
+      if (tool === 'stamp') {
+        const ratio = style.stampImage ? style.stampImage.width / style.stampImage.height : 3.5;
+        const w = Math.min(140, 80 * ratio);
+        const h = Math.min(80, 140 / ratio);
+        points = [{ x: pt.x - w / 2, y: pt.y - h / 2 }, { x: pt.x + w / 2, y: pt.y + h / 2 }];
+      }
       p.onCreate(makeMarkup(tool as MarkupType, doc.page, points, style, p.author));
       return;
     }
@@ -281,6 +296,15 @@ export function PageView(p: PageViewProps) {
         p.onBeginEdit();
       }
       p.onLive(doc.markups.map((m) => (m.id === dg.orig.id ? translate(dg.orig, dx, dy) : m)));
+    } else if (dg.kind === 'callout') {
+      const dx = pt.x - dg.start.x,
+        dy = pt.y - dg.start.y;
+      if (!dg.began) {
+        if (Math.hypot(dx, dy) * zoom < 3) return;
+        dg.began = true;
+        p.onBeginEdit();
+      }
+      p.onLive(doc.markups.map((m) => (m.id === dg.orig.id ? moveCallout(dg.orig, { x: dg.from.x + dx, y: dg.from.y + dy }) : m)));
     } else if (dg.kind === 'handle') {
       if (!dg.began) {
         dg.began = true;
@@ -326,6 +350,7 @@ export function PageView(p: PageViewProps) {
     return map;
   }, [doc.markups]);
 
+  const tags = useMemo(() => numberMarkups(doc.markups), [doc.markups]);
   const cal = doc.calibrations[doc.page] ?? DEFAULT_CAL;
   const pageMarkups = doc.markups.filter((m) => m.page === doc.page);
 
@@ -361,7 +386,7 @@ export function PageView(p: PageViewProps) {
             style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           >
             {pageMarkups.map((m) => (
-              <MarkupShape key={m.id} m={m} cal={cal} countNo={countNos.get(m.id)} />
+              <MarkupShape key={m.id} m={m} cal={cal} countNo={countNos.get(m.id)} tag={tags.get(m.id)} />
             ))}
             {preview && (
               <g opacity={0.85}>

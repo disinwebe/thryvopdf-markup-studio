@@ -9,6 +9,7 @@ import {
   PDFRef,
   PDFString,
   StandardFonts,
+  rgb,
 } from 'pdf-lib';
 import {
   approxTextWidth,
@@ -21,7 +22,9 @@ import {
   wrapText,
 } from './geometry';
 import { DEFAULT_CAL, measureLabel } from './measurement';
-import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta } from './types';
+import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
+import { TAG_R, numberMarkups, tagAnchor } from './numbering';
+import { CALLOUT_PAD, calloutLayout } from './callout';
 
 export interface PageGeom {
   x0: number;
@@ -131,7 +134,7 @@ const SUBTYPE: Record<string, string> = {
 };
 
 /** Build the appearance-stream operators and annotation-specific keys for a markup. */
-export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAULT_CAL): Built {
+export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAULT_CAL, tag?: number): Built {
   const cv = (p: Pt) => viewToPdf(p, g);
   const col = hex(m.color);
   const stroke = `${f(m.width)} w ${col.join(' ')} RG 1 J 1 j`;
@@ -278,6 +281,15 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     }
     case 'stamp': {
       const r = boxOf(m);
+      if (m.stampImage) {
+        const origin = cv({ x: r.x, y: r.y + r.h });
+        const right = cv({ x: r.x + r.w, y: r.y + r.h });
+        const top = cv({ x: r.x, y: r.y });
+        ops = `q ${f(right.x - origin.x)} ${f(right.y - origin.y)} ${f(top.x - origin.x)} ${f(top.y - origin.y)} ${f(origin.x)} ${f(origin.y)} cm /StampImage Do Q`;
+        viewPts = rectPoly(r);
+        extra.Name = 'Draft';
+        break;
+      }
       const t = (m.stamp ?? m.text ?? 'STAMP').toUpperCase();
       const size = Math.max(6, Math.min(r.h * 0.5, (r.w - 10) / Math.max(1, t.length * 0.62)));
       viewPts = rectPoly(r);
@@ -308,7 +320,55 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
 
   const pad = m.width / 2 + 12;
   const bb = bbox(viewPts.map(cv));
-  const rect = { x: bb.x - pad, y: bb.y - pad, w: bb.w + pad * 2, h: bb.h + pad * 2 };
+  let rect = { x: bb.x - pad, y: bb.y - pad, w: bb.w + pad * 2, h: bb.h + pad * 2 };
+  if (tag) {
+    // Visible review number, drawn at full opacity regardless of the markup's own opacity.
+    const a = tagAnchor(m);
+    const c = cv(a);
+    const k = TAG_R * 0.5523;
+    const r = TAG_R;
+    const circle = `${f(c.x + r)} ${f(c.y)} m ${f(c.x + r)} ${f(c.y + k)} ${f(c.x + k)} ${f(c.y + r)} ${f(c.x)} ${f(c.y + r)} c ${f(c.x - k)} ${f(c.y + r)} ${f(c.x - r)} ${f(c.y + k)} ${f(c.x - r)} ${f(c.y)} c ${f(c.x - r)} ${f(c.y - k)} ${f(c.x - k)} ${f(c.y - r)} ${f(c.x)} ${f(c.y - r)} c ${f(c.x + k)} ${f(c.y - r)} ${f(c.x + r)} ${f(c.y - k)} ${f(c.x + r)} ${f(c.y)} c h`;
+    const label = String(tag);
+    const size = label.length > 2 ? 7 : 9;
+    const w = label.length * size * 0.556;
+    ops += `\nq /GS1 gs 0.882 0.114 0.282 rg 1 1 1 RG 1 w ${circle} B\nBT /F1 ${size} Tf 1 1 1 rg ${tm({ x: a.x - w / 2, y: a.y + size * 0.35 })} (${label}) Tj ET Q`;
+    const x0 = Math.min(rect.x, c.x - r - 1);
+    const y0 = Math.min(rect.y, c.y - r - 1);
+    const x1 = Math.max(rect.x + rect.w, c.x + r + 1);
+    const y1 = Math.max(rect.y + rect.h, c.y + r + 1);
+    rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  const co = calloutLayout(m);
+  if (co) {
+    // Comment box with a leader line to the annotation's end point, drawn as part of the same annotation.
+    const A = cv(co.anchor);
+    const E = cv(co.edge);
+    const corners = [
+      cv({ x: co.x, y: co.y }),
+      cv({ x: co.x + co.w, y: co.y }),
+      cv({ x: co.x + co.w, y: co.y + co.h }),
+      cv({ x: co.x, y: co.y + co.h }),
+    ];
+    let y = co.y + CALLOUT_PAD + co.headH / 0.9;
+    let txt = '';
+    for (const r of co.rows) {
+      const head = y + co.fs;
+      txt += `BT /F1 ${f(co.headFs)} Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + CALLOUT_PAD, y: head })} (${latin1(r.head)}) Tj ET\n`;
+      r.lines.forEach((ln, j) => {
+        txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + CALLOUT_PAD, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
+      });
+      y += co.headH + r.lines.length * co.lineH + co.rowGap;
+    }
+    ops += `\nq /GS1 gs 0.882 0.114 0.282 RG 1.2 w ${f(E.x)} ${f(E.y)} m ${f(A.x)} ${f(A.y)} l S `;
+    ops += `1 1 1 rg ${path(corners, true)} B\n${txt}Q`;
+    const xs = [...corners.map((c) => c.x), A.x];
+    const ys = [...corners.map((c) => c.y), A.y];
+    const x0 = Math.min(rect.x, ...xs) - 2;
+    const y0 = Math.min(rect.y, ...ys) - 2;
+    const x1 = Math.max(rect.x + rect.w, ...xs) + 2;
+    const y1 = Math.max(rect.y + rect.h, ...ys) + 2;
+    rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
   return { subtype: SUBTYPE[m.type] ?? 'Square', ops, rect, extra, blend };
 }
 
@@ -325,6 +385,8 @@ function clampToRect(from: Pt, to: Pt, r: Rect): Pt {
 
 const KEY_MARKUP = PDFName.of('PMS');
 const KEY_PAGE = PDFName.of('PMSPage');
+const KEY_REPLY = PDFName.of('PMSReply');
+const KEY_LINE_STREAMS = PDFName.of('PMSLineStreams');
 
 export interface DocState {
   markups: Markup[];
@@ -341,21 +403,33 @@ export async function writeAnnotations(
   const ctx = doc.context;
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const pages = doc.getPages();
-  for (const page of pages) removeOwnAnnots(page);
+  for (const page of pages) {
+    removeOwnAnnots(page);
+    removeLineContent(page);
+    setPageData(page, { lines: [] });
+  }
+  for (const page of pages) nameForeignAnnots(page);
+  const numbers = numberMarkups(markups);
   const byPage = new Map<number, Markup[]>();
   for (const m of markups) byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
   for (const [idx, list] of byPage) {
     const page = pages[idx];
     if (!page) continue;
     const g = pageGeom(page);
+    const lines = list.filter((m) => m.type === 'line');
+    setPageData(page, { lines: lines.map((m) => ({ ...m, comments: [] })) });
+    writeLineContent(page, g, lines);
     for (const m of list) {
-      const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL);
+      if (m.type === 'line') continue;
+      const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL, numbers.get(m.id));
       const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
+      const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1 });
+      const stampImage = m.type === 'stamp' && m.stampImage ? await doc.embedPng(m.stampImage.data) : undefined;
       const ap = ctx.stream('/GS0 gs\n' + b.ops, {
         Type: 'XObject',
         Subtype: 'Form',
         BBox: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
-        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs } }),
+        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs, GS1: gs1 }, ...(stampImage ? { XObject: { StampImage: stampImage.ref } } : {}) }),
       });
       const apRef = ctx.register(ap);
       const dict: Record<string, unknown> = {
@@ -371,20 +445,120 @@ export async function writeAnnotations(
       };
       if (m.type === 'cloud') dict.BE = { S: 'C', I: 2 };
       const annot = ctx.obj(dict as never) as unknown as PDFDict;
-      annot.set(PDFName.of('Contents'), PDFHexString.fromText(m.text ?? ''));
+      annot.set(PDFName.of('Contents'), PDFHexString.fromText(contentsOf(m)));
       annot.set(PDFName.of('T'), PDFHexString.fromText(m.author));
       annot.set(PDFName.of('NM'), PDFString.of(m.id));
       annot.set(PDFName.of('Subj'), PDFHexString.fromText(m.subject || m.type));
       const d = pdfDate(m.date);
       if (d) annot.set(PDFName.of('M'), PDFString.of(d));
       annot.set(KEY_MARKUP, PDFHexString.fromText(JSON.stringify(m)));
-      page.node.addAnnot(ctx.register(annot));
+      const parentRef = ctx.register(annot);
+      // One review item: the markup itself carries /Contents (text + thread), and a linked /Popup holds the comment window.
+      const popup = ctx.obj({
+        Type: 'Annot',
+        Subtype: 'Popup',
+        Rect: [f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h - 90), f(b.rect.x + b.rect.w + 180), f(b.rect.y + b.rect.h)],
+        F: 28,
+        Open: false,
+        Parent: parentRef,
+      } as never) as unknown as PDFDict;
+      popup.set(KEY_REPLY, PDFString.of(m.id));
+      const popupRef = ctx.register(popup);
+      annot.set(PDFName.of('Popup'), popupRef);
+      page.node.addAnnot(parentRef);
+      page.node.addAnnot(popupRef);
     }
   }
   pages.forEach((page, i) => {
     const cal = calibrations[i];
     if (cal) setPageData(page, { cal });
   });
+}
+
+/** Removes the last app-generated drawing stream before it is regenerated on save. */
+function removeLineContent(page: PDFPage) {
+  const refs = page.node.lookupMaybe(KEY_LINE_STREAMS, PDFArray);
+  const contents = page.node.Contents();
+  if (refs && contents instanceof PDFArray) {
+    const owned = new Set<string>();
+    for (let i = 0; i < refs.size(); i++) {
+      const ref = refs.get(i);
+      if (ref instanceof PDFRef) owned.add(ref.toString());
+    }
+    for (let i = contents.size() - 1; i >= 0; i--) {
+      const ref = contents.get(i);
+      if (ref instanceof PDFRef && owned.has(ref.toString())) contents.remove(i);
+    }
+  }
+  page.node.delete(KEY_LINE_STREAMS);
+}
+
+/** Plain line tools are PDF page content, not review annotations. */
+function writeLineContent(page: PDFPage, g: PageGeom, lines: Markup[]) {
+  const drawable = lines.filter((m) => m.points.length >= 2);
+  if (!drawable.length) return;
+  const initialContents = page.node.Contents();
+  const existing = new Set<string>();
+  const rawContents = page.node.get(PDFName.of('Contents'));
+  if (rawContents instanceof PDFRef) existing.add(rawContents.toString());
+  if (rawContents instanceof PDFArray) {
+    for (let i = 0; i < rawContents.size(); i++) {
+      const ref = rawContents.get(i);
+      if (ref instanceof PDFRef) existing.add(ref.toString());
+    }
+  }
+  if (initialContents instanceof PDFArray) {
+    for (let i = 0; i < initialContents.size(); i++) {
+      const ref = initialContents.get(i);
+      if (ref instanceof PDFRef) existing.add(ref.toString());
+    }
+  }
+  for (const m of drawable) {
+    page.drawLine({
+      start: viewToPdf(m.points[0], g),
+      end: viewToPdf(m.points[1], g),
+      thickness: m.width,
+      color: rgb(...hex(m.color)),
+      opacity: m.opacity,
+    });
+  }
+  const contents = page.node.Contents();
+  if (!(contents instanceof PDFArray)) {
+    throw new Error('Could not persist plain line drawing content.');
+  }
+  const created: PDFRef[] = [];
+  for (let i = 0; i < contents.size(); i++) {
+    const ref = contents.get(i);
+    if (ref instanceof PDFRef && !existing.has(ref.toString())) created.push(ref);
+  }
+  if (!created.length) throw new Error('Could not identify plain line drawing content.');
+  page.node.set(KEY_LINE_STREAMS, page.doc.context.obj(created));
+}
+
+/** Gives annotations from other tools a stable /NM when they have none, never reusing a name already present. */
+function nameForeignAnnots(page: PDFPage) {
+  const annots = page.node.Annots();
+  if (!annots) return;
+  const isStr = (v: unknown): v is PDFString | PDFHexString => v instanceof PDFString || v instanceof PDFHexString;
+  const seen = new Set<string>();
+  for (let i = 0; i < annots.size(); i++) {
+    const nm = annots.lookupMaybe(i, PDFDict)?.get(PDFName.of('NM'));
+    if (isStr(nm)) seen.add(nm.decodeText());
+  }
+  for (let i = 0; i < annots.size(); i++) {
+    const d = annots.lookupMaybe(i, PDFDict);
+    if (!d || d.has(KEY_MARKUP) || d.has(KEY_REPLY) || isStr(d.get(PDFName.of('NM')))) continue;
+    let id = 'ext-' + uid();
+    while (seen.has(id)) id = 'ext-' + uid();
+    seen.add(id);
+    d.set(PDFName.of('NM'), PDFString.of(id));
+  }
+}
+
+/** /Contents carries the markup's own text followed by its comment thread, so any viewer shows the comments. */
+export function contentsOf(m: Markup): string {
+  const thread = m.comments.map((c) => c.author + ': ' + c.text).join('\n');
+  return [m.text ?? '', thread].filter(Boolean).join('\n\n');
 }
 
 function removeOwnAnnots(page: PDFPage) {
@@ -394,13 +568,13 @@ function removeOwnAnnots(page: PDFPage) {
   for (let i = 0; i < annots.size(); i++) {
     const raw = annots.get(i);
     const d = annots.lookupMaybe(i, PDFDict);
-    if (d?.has(KEY_MARKUP)) continue;
+    if (d?.has(KEY_MARKUP) || d?.has(KEY_REPLY)) continue;
     if (raw instanceof PDFRef) keep.push(raw);
   }
   page.node.set(PDFName.of('Annots'), page.doc.context.obj(keep));
 }
 
-function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta } {
+function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta; lines?: Markup[] } {
   const v = page.node.get(KEY_PAGE);
   const s = v instanceof PDFString || v instanceof PDFHexString ? v.decodeText() : undefined;
   try {
@@ -410,7 +584,7 @@ function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta } {
   }
 }
 
-function setPageData(page: PDFPage, patch: { cal?: Calibration; sheet?: SheetMeta }) {
+function setPageData(page: PDFPage, patch: { cal?: Calibration; sheet?: SheetMeta; lines?: Markup[] }) {
   const merged = { ...pageData(page), ...patch };
   page.node.set(KEY_PAGE, PDFHexString.fromText(JSON.stringify(merged)));
 }
@@ -436,9 +610,21 @@ export async function readState(doc: PDFDocument): Promise<DocState> {
       }
     }
     const pd = pageData(page);
+    if (pd.lines) markups.push(...pd.lines.map((m) => ({ ...m, page: i, comments: [] })));
     if (pd.cal) calibrations[i] = pd.cal;
     if (pd.sheet) sheets[i] = pd.sheet;
   });
+  // Every markup and comment must have an ID that is unique within the document.
+  const seen = new Set<string>();
+  for (const m of markups) {
+    if (!m.id || seen.has(m.id)) m.id = uid();
+    seen.add(m.id);
+    const cs = new Set<string>();
+    for (const c of m.comments) {
+      if (!c.id || cs.has(c.id)) c.id = uid();
+      cs.add(c.id);
+    }
+  }
   return { markups, calibrations, sheets, bookmarks: readBookmarks(doc) };
 }
 

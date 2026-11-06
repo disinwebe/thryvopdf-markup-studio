@@ -21,6 +21,25 @@ export interface Doc {
   /** 0 = fit page on first display */
   zoom: number;
   textCache: Map<number, string>;
+  /** Present when this tab is a copy of a document hosted on the server. */
+  shared?: SharedInfo;
+}
+
+export interface Collaborator {
+  name: string;
+  email: string;
+  discipline?: string;
+}
+
+export interface SharedInfo {
+  id: string;
+  version: number;
+  pr: number;
+  /** JSON of each markup as last known to the server, used to detect local changes. */
+  synced: Record<string, string>;
+  collaborators: Collaborator[];
+  status: 'live' | 'offline' | 'expired';
+  error?: string;
 }
 
 export const stateOf = (d: Doc): DocState => ({
@@ -65,6 +84,7 @@ export interface Style {
   fillColor: string;
   fontSize: number;
   stamp: string;
+  stampImage?: import('../core/stamp').StampImage;
   subject: string;
 }
 
@@ -128,7 +148,10 @@ export function makeMarkup(
     m.text = '';
   }
   if (type === 'note') m.text = '';
-  if (type === 'stamp') m.stamp = style.stamp;
+  if (type === 'stamp') {
+    m.stamp = style.stamp;
+    if (style.stampImage) m.stampImage = style.stampImage;
+  }
   if (style.fill && ['rect', 'ellipse', 'cloud', 'text', 'callout'].includes(type)) m.fill = style.fillColor;
   if (type.startsWith('m-') && style.subject.trim()) m.subject = style.subject.trim();
   return m;

@@ -1,3 +1,4 @@
+import { canDeleteMarkup } from './core/comments';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveWithState } from './core/annotations';
 import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure } from './core/types';
@@ -13,8 +14,21 @@ import { OrganizePanel } from './components/OrganizePanel';
 import { SearchPanel, SheetsPanel } from './components/SheetsPanel';
 import { ComparePanel } from './components/ComparePanel';
 import { ProjectPanel } from './components/ProjectPanel';
+import { SharedLibrary, SharedListing } from './components/SharedLibrary';
+import { useSharedSync } from './app/useSharedSync';
+import { batchChanges, syncedOf } from './app/shared';
+import { useTheme } from './app/theme';
+import { toolForKey } from './app/shortcuts';
+import { getCommentSize, setCommentSize } from './core/commentSize';
+import { markupCsv } from './core/markupCsv';
+import { importStamp } from './app/stampImport';
 
-const MARKUP_TOOLS: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const TOOL_HINT: Partial<Record<Tool, string>> = {
+  select: 'Select (V)',
+  hand: 'Pan (H to toggle, or hold Space while using another tool)',
+  line: 'Drawing-only line (not a comment)',
+};
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count', 'calibrate'];
 const HISTORY_LIMIT = 100;
 
@@ -23,28 +37,48 @@ type LeftTab = 'pages' | 'bookmarks' | 'project';
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
+export default function App({ user, actions }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void } }) {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
   const [tool, setTool] = useState<Tool>('select');
   const [styles, setStyles] = useState<Record<string, Style>>({});
   const [subject, setSubject] = useState('');
-  const [author, setAuthor] = useState(user.name);
+  const author = user.name;
+  const [theme, setTheme] = useTheme();
+  const [commentSize, setCommentSizeState] = useState(getCommentSize);
+  const changeCommentSize = (n: number) => {
+    setCommentSize(n);
+    setCommentSizeState(getCommentSize());
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RightTab>('markups');
   const [leftTab, setLeftTab] = useState<LeftTab>('pages');
   const [fit, setFit] = useState<{ mode: 'width' | 'page'; n: number }>({ mode: 'page', n: 0 });
   const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
   const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [library, setLibrary] = useState(false);
+  useEffect(() => {
+    if (!actions.serverMode || !window.api) return;
+    let cancelled = false;
+    void window.api.sharedDocs({ op: 'list' }).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setLibrary(true);
+      else setMsg(`Shared documents unavailable: ${result.error || 'Could not connect to the server.'}`);
+    }).catch((error: unknown) => {
+      if (!cancelled) setMsg(`Shared documents unavailable: ${String(error)}`);
+    });
+    return () => { cancelled = true; };
+  }, [actions.serverMode]);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
 
   const active = docs.find((d) => d.id === activeId) ?? null;
-  const logout = () => {
-    if (docs.some((d) => d.dirty) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
-    onLogout();
+  const logout = async () => {
+    if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
+    await leaveAll();
+    actions.logout();
   };
   const say = useCallback((m: string) => setMsg(m), []);
 
@@ -52,6 +86,8 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
   const updateDoc = useCallback((id: string, fn: (d: Doc) => Partial<Doc>) => {
     setDocs((all) => all.map((d) => (d.id === id ? { ...d, ...fn(d) } : d)));
   }, []);
+
+  const { cid, leaveAll } = useSharedSync(docs, docsRef, updateDoc);
 
   const addDocs = useCallback(async (files: PickedFile[], activate = true) => {
     for (const f of files) {
@@ -104,7 +140,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
 
   const createMarkup = (m: Markup) => {
     if (!active) return;
-    commit(active.id, [...active.markups, m]);
+    commit(active.id, [...active.markups, { ...m, authorEmail: user.email }]);
     setSelectedId(m.id);
     if (m.type === 'text' || m.type === 'callout' || m.type === 'note') {
       setTool('select');
@@ -118,6 +154,11 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
 
   const deleteMarkup = (id: string) => {
     if (!active) return;
+    const target = active.markups.find((m) => m.id === id);
+    if (target && !canDeleteMarkup(target, user)) {
+      window.alert('Only the author of a markup can delete it.');
+      return;
+    }
     commit(active.id, active.markups.filter((m) => m.id !== id));
     setSelectedId(null);
   };
@@ -138,6 +179,57 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
     }
   };
 
+  const openShared = async (info: SharedListing) => {
+    const have = docsRef.current.find((d) => d.shared?.id === info.id);
+    if (have) {
+      setActiveId(have.id);
+      setLibrary(false);
+      return;
+    }
+    const r = await window.api!.sharedDocs({ op: 'open', id: info.id });
+    if (!r.ok) return say(r.expired ? 'Session expired. Log out and sign in again.' : 'Could not open shared document: ' + (r.error || 'unknown error'));
+    try {
+      const base = await createDoc(r.name || info.name, new Uint8Array(r.bytes));
+      const d: Doc = {
+        ...base,
+        markups: r.markups,
+        dirty: false,
+        shared: { id: info.id, version: r.version, pr: r.pr, synced: syncedOf(r.markups), collaborators: r.presence || [], status: 'live' },
+      };
+      setDocs((all) => [...all, d]);
+      setActiveId(d.id);
+      setView('viewer');
+      setLibrary(false);
+      say(`Opened shared document ${d.name}: ${d.numPages} pages, ${d.markups.length} markups. Changes sync live.`);
+    } catch (e) {
+      say('Could not open shared document: ' + (e as Error).message);
+    }
+  };
+
+  const uploadActive = async (project = '', description = ''): Promise<{ ok: boolean; message: string }> => {
+    const fail = (message: string) => {
+      say(message);
+      return { ok: false, message };
+    };
+    if (!active) return fail('Open a PDF tab first.');
+    if (active.shared) return fail('This tab is already a shared document.');
+    try {
+      const bytes = await bake(active);
+      const up = await window.api!.sharedDocs({ op: 'upload', name: active.name, bytes, project, description });
+      if (!up.ok) return fail('Upload failed: ' + (up.error || 'unknown error'));
+      for (let i = 0; i < active.markups.length;) {
+        const batch = batchChanges(active.markups.slice(i), []).upserts;
+        const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: batch, cid });
+        if (!r.ok) return fail(`Uploaded ${active.name}, but copying existing markups failed: ${r.error || 'unknown error'}`);
+        i += batch.length;
+      }
+      const message = `Uploaded ${active.name} with ${active.markups.length} markup(s). Open it from the list to collaborate; this tab stays a local copy.`;
+      say(message);
+      return { ok: true, message };
+    } catch (e) {
+      return fail('Upload failed: ' + (e as Error).message);
+    }
+  };
   const exportCsv = async (csv: string, name: string) => {
     const path = await saveBytes(name, csv, 'csv');
     if (path) say('Saved ' + path);
@@ -172,6 +264,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
   };
 
   const applyPlan = async (d: Doc, plan: PagePlan[], extras: Uint8Array[] = []) => {
+    if (d.shared) return say('Page changes are not available on shared documents (they would desync collaborators). Extract the pages to a local copy first.');
     try {
       const baked = await bake(d);
       const bytes = await buildFromPlan([baked, ...extras], plan);
@@ -263,7 +356,12 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
     const t = e.target as HTMLElement;
     if (t && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
     const mod = e.ctrlKey || e.metaKey;
-    if (mod && e.key.toLowerCase() === 'z') {
+    const next = active ? toolForKey(e, tool) : null;
+    if (next) {
+      e.preventDefault();
+      setTool(next);
+      setPending(null);
+    } else if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault();
       e.shiftKey ? redo() : undo();
     } else if (mod && e.key.toLowerCase() === 'y') {
@@ -288,6 +386,53 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, []);
+
+  const menuRef = useRef<(action: string) => void>(() => {});
+  menuRef.current = (action) => {
+    if (action === 'quit') {
+      if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Quit anyway?')) return;
+      void leaveAll().finally(() => window.api?.quitApp());
+      return;
+    }
+    if (library || actions.uiBlocked) return;
+    switch (action) {
+      case 'open': void open(); break;
+      case 'save': void save(false); break;
+      case 'saveAs': void save(true); break;
+      case 'csv': if (active) void exportCsv(markupCsv(active.markups, active.path || active.name), downloadName(active.name, '-markups', 'csv')); break;
+      case 'shared': if (actions.serverMode) setLibrary(true); break;
+      case 'logout': void logout(); break;
+      case 'users': actions.manageUsers?.(); break;
+      case 'password': actions.changePassword(); break;
+      case 'close': if (active) closeDoc(active.id); break;
+      case 'undo': undo(); break;
+      case 'redo': redo(); break;
+      case 'select': setTool('select'); setPending(null); break;
+      case 'pan': setTool('hand'); setPending(null); break;
+      case 'delete': if (selectedId) deleteMarkup(selectedId); break;
+      case 'theme': setTheme(theme === 'dark' ? 'light' : 'dark'); break;
+      case 'zoomIn': if (view === 'viewer') zoomBy(1.25); break;
+      case 'zoomOut': if (view === 'viewer') zoomBy(1 / 1.25); break;
+      case 'fitWidth': if (active && view === 'viewer') setFit((f) => ({ mode: 'width', n: f.n + 1 })); break;
+      case 'fitPage': if (active && view === 'viewer') setFit((f) => ({ mode: 'page', n: f.n + 1 })); break;
+      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
+      case 'about': void window.api?.showAbout(); break;
+      case 'serverHelp': window.alert('On the server PC, run npm run server and allow its configured port through Windows Firewall. On each client, choose Change on the sign-in screen, enter the server address and test the connection. Back up the server data folder, including its users and documents. Use HTTPS on untrusted networks.'); break;
+    }
+  };
+  useEffect(() => window.api?.onMenuAction((action) => menuRef.current(action)), []);
+  useEffect(() => {
+    const api = window.api;
+    if (!api) return;
+    api.setMenuState({
+      signedIn: true, documentOpen: !!active, viewerActive: view === 'viewer', canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
+      selected: !!active && !!selectedId && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
+      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked,
+    });
+  }, [active, selectedId, user, view, actions.serverMode, actions.uiBlocked, library]);
+  useEffect(() => () => window.api?.setMenuState({
+    signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, serverMode: false, blocked: false,
+  }), []);
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -316,6 +461,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
         mp.fill = on ? patch.fillColor ?? selected.fill ?? '#ffffff' : undefined;
       }
       if (patch.stamp !== undefined) mp.stamp = patch.stamp;
+      if (patch.stamp !== undefined) mp.stampImage = patch.stampImage;
       updateMarkup(selected.id, mp, 'style');
     } else if (tool !== 'select' && tool !== 'hand') {
       setStyles((s) => ({ ...s, [tool]: { ...(s[tool] ?? defaultStyle(tool)), ...patch } }));
@@ -323,11 +469,33 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
   };
   const canStyle = editingSelected || !['select', 'hand', 'calibrate'].includes(tool);
   const showStamp = tool === 'stamp' || selected?.type === 'stamp';
+  const chooseStamp = async () => {
+    try {
+      const file = await window.api?.pickStamp();
+      if (!file) return;
+      const image = await importStamp(file, (total) => {
+        const answer = window.prompt(`Choose a PDF page from 1 to ${total}:`, '1');
+        return answer === null ? null : Number(answer);
+      });
+      if (!image) return;
+      if (editingSelected && selected?.type === 'stamp') {
+        updateMarkup(selected.id, { stamp: 'Custom image', stampImage: image });
+      } else {
+        setStyles((s) => ({ ...s, stamp: { ...(s.stamp ?? defaultStyle('stamp')), stamp: 'Custom image', stampImage: image } }));
+        setTool('stamp');
+      }
+      say('Custom stamp loaded. Click the drawing to place it.');
+    } catch (e) {
+      const message = 'Could not load stamp: ' + (e instanceof Error ? e.message : String(e));
+      say(message);
+      window.alert(message);
+    }
+  };
 
   const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
 
   const toolBtn = (t: Tool) => (
-    <button key={t} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active}>
+    <button key={t} title={TOOL_HINT[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active}>
       {TOOL_LABEL[t]}
     </button>
   );
@@ -359,19 +527,15 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
             <span>/ {active.numPages}</span>
             <button onClick={() => goto(active.page + 1)}>▶</button>
             <span className="sep" />
-            <button onClick={() => zoomBy(1 / 1.25)}>－</button>
+            <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out (Ctrl+-)">－</button>
             <span className="zoom">{Math.round((active.zoom || 1) * 100)}%</span>
-            <button onClick={() => zoomBy(1.25)}>＋</button>
+            <button onClick={() => zoomBy(1.25)} title="Zoom in (Ctrl+=)">＋</button>
             <button onClick={() => setFit((f) => ({ mode: 'width', n: f.n + 1 }))}>Fit width</button>
             <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))}>Fit page</button>
           </>
         )}
         <span className="grow" />
-        <label className="author">
-          Author <input value={author} onChange={(e) => setAuthor(e.target.value)} />
-        </label>
-        <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}</span>
-        <button onClick={logout}>Logout</button>
+        <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</span>
       </div>
 
       {view === 'viewer' && (
@@ -397,11 +561,15 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
                 Fill <input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} />
               </label>
               {showStamp && (
-                <select value={selected?.type === 'stamp' && editingSelected ? selected.stamp : shown.stamp} onChange={(e) => changeStyle({ stamp: e.target.value })}>
+                <>
+                <select value={selected?.type === 'stamp' && editingSelected ? selected.stamp : shown.stamp} onChange={(e) => changeStyle({ stamp: e.target.value, stampImage: undefined })}>
+                  {(selected?.stampImage || shown.stampImage) && <option value="Custom image">Custom image</option>}
                   {STAMPS.map((s) => (
                     <option key={s}>{s}</option>
                   ))}
                 </select>
+                <button onClick={() => void chooseStamp()} title="Import an image or PDF page as a stamp">Import stamp...</button>
+                </>
               )}
             </>
           )}
@@ -411,6 +579,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
       <div className="tabs">
         {docs.map((d) => (
           <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); setSelectedId(null); }}>
+            {d.shared && <span title="Shared document on the server">☁ </span>}
             {d.name}
             {d.dirty ? ' •' : ''}
             <button
@@ -426,10 +595,21 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
         ))}
       </div>
 
+      {active?.shared && (
+        <div className={'collab' + (active.shared.status === 'live' ? '' : ' warn')} role="status">
+          <b>☁ Shared document</b> - edits sync live.
+          {active.shared.status === 'live' ? (
+            <span> Working now: {active.shared.collaborators.map((c) => (c.email === user.email ? 'You' : c.name) + (c.discipline ? ` (${c.discipline})` : '')).join(', ') || '-'}</span>
+          ) : (
+            <span> {active.shared.status === 'expired' ? 'Session expired.' : 'Offline.'} {active.shared.error}</span>
+          )}
+        </div>
+      )}
+
       <div className="main">
         {!active ? (
           <div className="empty">
-            <h1>Plan Markup Studio</h1>
+            <h1>ThryvoPDF Markup Studio</h1>
             <p>Markups · Measurements · Compare revisions · Organize drawing sets</p>
             <button className="primary big" onClick={open}>Open PDF…</button>
             <p className="muted">or drag PDF files onto this window</p>
@@ -440,7 +620,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
           <>
             <div className="side left">
               <div className="ptabs">
-                {(['pages', 'bookmarks', 'project'] as LeftTab[]).map((t) => (
+                {(['project', 'pages', 'bookmarks'] as LeftTab[]).map((t) => (
                   <button key={t} className={leftTab === t ? 'on' : ''} onClick={() => setLeftTab(t)}>
                     {t === 'pages' ? 'Pages' : t === 'bookmarks' ? 'Bookmarks' : 'Project'}
                   </button>
@@ -456,6 +636,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
                   activeId={active.id}
                   onActivate={setActiveId}
                   onOpen={open}
+                  onOpenShared={openShared}
                   onClose={closeDoc}
                   onRename={(id, name) => updateDoc(id, () => ({ name, dirty: true }))}
                   onMove={(i, dir) =>
@@ -514,6 +695,9 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
                   doc={active}
                   selectedId={selectedId}
                   author={author}
+                  user={user}
+                  commentSize={commentSize}
+                  onCommentSize={changeCommentSize}
                   onSelect={(id) => {
                     const m = active.markups.find((x) => x.id === id);
                     if (m) {
@@ -580,6 +764,7 @@ export default function App({ user, onLogout }: { user: AuthUser; onLogout: () =
         )}
       </div>
       <div className="status">{msg}</div>
+      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} />}
     </div>
   );
 }
