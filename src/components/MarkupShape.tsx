@@ -1,7 +1,7 @@
 import { arrowHead, boxCenter, boxOf, cloudPoints, rectPoly, wrapText, approxTextWidth } from '../core/geometry';
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
-import { TAG_R, tagAnchor } from '../core/numbering';
+import { TAG_R, isReviewMarkup, tagAnchor } from '../core/numbering';
 import { CALLOUT_PAD, calloutLayout } from '../core/callout';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
@@ -184,7 +184,7 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       break;
     }
   }
-  const a = tag ? tagAnchor(m) : null;
+  const a = tag && isReviewMarkup(m) ? tagAnchor(m) : null;
   const co = calloutLayout(m);
   return (
     <g>
@@ -193,7 +193,7 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
         <g className="callout-box">
           <line x1={co.edge.x} y1={co.edge.y} x2={co.anchor.x} y2={co.anchor.y} stroke="#e11d48" strokeWidth={1.2} />
           <circle cx={co.anchor.x} cy={co.anchor.y} r={2.5} fill="#e11d48" />
-          <rect x={co.x} y={co.y} width={co.w} height={co.h} fill="#fff" stroke="#e11d48" strokeWidth={1.2} rx={3} />
+          <rect x={co.x} y={co.y} width={co.w} height={co.h} fill="#fff" stroke="#e11d48" strokeWidth={1.5} />
           {tag && <text x={co.x + CALLOUT_PAD} y={co.y + CALLOUT_PAD + co.fs} fontSize={co.fs} fontWeight={700} fill="#e11d48">#{tag}</text>}
           {(() => {
             let y = co.y + CALLOUT_PAD + co.headH / 0.9;
@@ -216,7 +216,7 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       {a && tag && (
         <g className="review-tag">
           <circle cx={a.x} cy={a.y} r={TAG_R} fill="#e11d48" stroke="#fff" strokeWidth={1} />
-          <text x={a.x} y={a.y + 3.5} fontSize={tag > 99 ? 7 : 9} fontWeight={700} fill="#fff" textAnchor="middle">{tag}</text>
+          <text x={a.x} y={a.y + 3} fontSize={tag > 99 ? 6 : 8} fontWeight={700} fill="#fff" textAnchor="middle">#{tag}</text>
         </g>
       )}
     </g>

@@ -3,6 +3,7 @@ import { Doc } from '../app/model';
 import { groupByProject } from '../app/upload';
 import { SHARED_REFRESH_MS, startPolling } from '../app/shortcuts';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
+import { isReviewMarkup } from '../core/numbering';
 import type { SharedListing } from './SharedLibrary';
 
 export function ProjectPanel(p: {
@@ -71,7 +72,7 @@ export function ProjectPanel(p: {
               </b>
             )}
             <div className="muted small">
-              {d.numPages} sheets · {d.markups.filter((m) => m.type !== 'line').length} markups{d.dirty ? ' · unsaved' : ''}
+              {d.numPages} sheets · {d.markups.filter(isReviewMarkup).length} markups{d.dirty ? ' · unsaved' : ''}
             </div>
           </div>
           <div className="mini" onClick={(e) => e.stopPropagation()}>
