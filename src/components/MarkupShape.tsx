@@ -157,6 +157,10 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
     }
     case 'stamp': {
       const r = boxOf(m);
+      if (m.stampImage) {
+        body = <image href={m.stampImage.data} x={r.x} y={r.y} width={r.w} height={r.h} preserveAspectRatio="none" />;
+        break;
+      }
       const t = (m.stamp ?? 'STAMP').toUpperCase();
       const size = Math.max(6, Math.min(r.h * 0.5, (r.w - 10) / Math.max(1, t.length * 0.62)));
       body = (

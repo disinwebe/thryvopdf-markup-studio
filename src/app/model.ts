@@ -84,6 +84,7 @@ export interface Style {
   fillColor: string;
   fontSize: number;
   stamp: string;
+  stampImage?: import('../core/stamp').StampImage;
   subject: string;
 }
 
@@ -147,7 +148,10 @@ export function makeMarkup(
     m.text = '';
   }
   if (type === 'note') m.text = '';
-  if (type === 'stamp') m.stamp = style.stamp;
+  if (type === 'stamp') {
+    m.stamp = style.stamp;
+    if (style.stampImage) m.stampImage = style.stampImage;
+  }
   if (style.fill && ['rect', 'ellipse', 'cloud', 'text', 'callout'].includes(type)) m.fill = style.fillColor;
   if (type.startsWith('m-') && style.subject.trim()) m.subject = style.subject.trim();
   return m;

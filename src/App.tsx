@@ -16,11 +16,12 @@ import { ComparePanel } from './components/ComparePanel';
 import { ProjectPanel } from './components/ProjectPanel';
 import { SharedLibrary, SharedListing } from './components/SharedLibrary';
 import { useSharedSync } from './app/useSharedSync';
-import { syncedOf } from './app/shared';
+import { batchChanges, syncedOf } from './app/shared';
 import { useTheme } from './app/theme';
 import { toolForKey } from './app/shortcuts';
 import { getCommentSize, setCommentSize } from './core/commentSize';
 import { markupCsv } from './core/markupCsv';
+import { importStamp } from './app/stampImport';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const TOOL_HINT: Partial<Record<Tool, string>> = {
@@ -216,9 +217,11 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       const bytes = await bake(active);
       const up = await window.api!.sharedDocs({ op: 'upload', name: active.name, bytes, project, description });
       if (!up.ok) return fail('Upload failed: ' + (up.error || 'unknown error'));
-      for (let i = 0; i < active.markups.length; i += 500) {
-        const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: active.markups.slice(i, i + 500), cid });
+      for (let i = 0; i < active.markups.length;) {
+        const batch = batchChanges(active.markups.slice(i), []).upserts;
+        const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: batch, cid });
         if (!r.ok) return fail(`Uploaded ${active.name}, but copying existing markups failed: ${r.error || 'unknown error'}`);
+        i += batch.length;
       }
       const message = `Uploaded ${active.name} with ${active.markups.length} markup(s). Open it from the list to collaborate; this tab stays a local copy.`;
       say(message);
@@ -413,7 +416,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       case 'fitWidth': if (active && view === 'viewer') setFit((f) => ({ mode: 'width', n: f.n + 1 })); break;
       case 'fitPage': if (active && view === 'viewer') setFit((f) => ({ mode: 'page', n: f.n + 1 })); break;
       case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
-      case 'about': void window.api?.appVersion().then((v) => window.alert(`ThryvoPDF Markup Studio ${v}\nPDF review, markup and shared drawing collaboration.`)); break;
+      case 'about': void window.api?.showAbout(); break;
       case 'serverHelp': window.alert('On the server PC, run npm run server and allow its configured port through Windows Firewall. On each client, choose Change on the sign-in screen, enter the server address and test the connection. Back up the server data folder, including its users and documents. Use HTTPS on untrusted networks.'); break;
     }
   };
@@ -458,6 +461,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
         mp.fill = on ? patch.fillColor ?? selected.fill ?? '#ffffff' : undefined;
       }
       if (patch.stamp !== undefined) mp.stamp = patch.stamp;
+      if (patch.stamp !== undefined) mp.stampImage = patch.stampImage;
       updateMarkup(selected.id, mp, 'style');
     } else if (tool !== 'select' && tool !== 'hand') {
       setStyles((s) => ({ ...s, [tool]: { ...(s[tool] ?? defaultStyle(tool)), ...patch } }));
@@ -465,6 +469,28 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   };
   const canStyle = editingSelected || !['select', 'hand', 'calibrate'].includes(tool);
   const showStamp = tool === 'stamp' || selected?.type === 'stamp';
+  const chooseStamp = async () => {
+    try {
+      const file = await window.api?.pickStamp();
+      if (!file) return;
+      const image = await importStamp(file, (total) => {
+        const answer = window.prompt(`Choose a PDF page from 1 to ${total}:`, '1');
+        return answer === null ? null : Number(answer);
+      });
+      if (!image) return;
+      if (editingSelected && selected?.type === 'stamp') {
+        updateMarkup(selected.id, { stamp: 'Custom image', stampImage: image });
+      } else {
+        setStyles((s) => ({ ...s, stamp: { ...(s.stamp ?? defaultStyle('stamp')), stamp: 'Custom image', stampImage: image } }));
+        setTool('stamp');
+      }
+      say('Custom stamp loaded. Click the drawing to place it.');
+    } catch (e) {
+      const message = 'Could not load stamp: ' + (e instanceof Error ? e.message : String(e));
+      say(message);
+      window.alert(message);
+    }
+  };
 
   const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
 
@@ -535,11 +561,15 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                 Fill <input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} />
               </label>
               {showStamp && (
-                <select value={selected?.type === 'stamp' && editingSelected ? selected.stamp : shown.stamp} onChange={(e) => changeStyle({ stamp: e.target.value })}>
+                <>
+                <select value={selected?.type === 'stamp' && editingSelected ? selected.stamp : shown.stamp} onChange={(e) => changeStyle({ stamp: e.target.value, stampImage: undefined })}>
+                  {(selected?.stampImage || shown.stampImage) && <option value="Custom image">Custom image</option>}
                   {STAMPS.map((s) => (
                     <option key={s}>{s}</option>
                   ))}
                 </select>
+                <button onClick={() => void chooseStamp()} title="Import an image or PDF page as a stamp">Import stamp...</button>
+                </>
               )}
             </>
           )}

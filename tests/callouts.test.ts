@@ -60,6 +60,18 @@ describe('comment callouts: authorization and sync', () => {
     await ops(bob, { upserts: [mk('m1', { callout: { x: 100, y: 50 }, comments: [cm('c1', 'Ann says'), cm('c2', 'Bob says')] })] });
   });
 
+  describe('shared custom stamps', () => {
+    it('synchronizes and reopens a persisted stamp with its image and opacity', async () => {
+      const id = (await call('POST', '/api/docs?name=stamps.pdf', ann, undefined, PDF)).doc.id;
+      const image = { data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', width: 1, height: 1 };
+      const stamp = mk('stamp1', { type: 'stamp', stampImage: image, opacity: 0.4 });
+      expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [stamp] })).code).toBe(200);
+      const viewed = (await call('GET', `/api/docs/${id}/state`, bob)).markups[0];
+      expect(viewed).toMatchObject({ stampImage: image, opacity: 0.4 });
+      expect((await call('GET', `/api/docs/${id}/state`, ann)).markups[0].stampImage).toEqual(image);
+    });
+  });
+
   it('stamps comment author and email from the session, not the client', async () => {
     const m = (await state(bob)).find((x: any) => x.id === 'm1');
     expect(m.comments.map((c: any) => [c.author, c.authorEmail])).toEqual([['Ann Lee', 'ann@example.com'], ['Bob Ray', 'bob@example.com']]);

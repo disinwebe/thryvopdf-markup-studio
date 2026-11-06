@@ -33,8 +33,10 @@ interface Window {
     onMenuAction(fn: (action: string) => void): () => void;
     quitApp(): Promise<void>;
     appVersion(): Promise<string>;
+    showAbout(): Promise<void>;
     startupFiles(): Promise<PickedFile[]>;
     openFiles(opts?: { multi?: boolean; filters?: { name: string; extensions: string[] }[] }): Promise<PickedFile[]>;
+    pickStamp(): Promise<PickedFile | null>;
     saveFile(args: {
       defaultName: string;
       data: Uint8Array | string;
@@ -43,6 +45,8 @@ interface Window {
     }): Promise<string | null>;
     saveMany(args: { files: { name: string; data: Uint8Array }[] }): Promise<string | null>;
     authStatus(): Promise<AuthStatus>;
+    licenseStatus(): Promise<{ ok: boolean; device?: string; error?: string }>;
+    importLicense(): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
     pickUploads(kind: 'files' | 'folder'): Promise<{ project: string; items: { token: string; name: string; rel: string; size: number }[]; truncated: boolean } | null>;
     sharedDocs(args: { op: 'list' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta'; id?: string; name?: string; project?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;

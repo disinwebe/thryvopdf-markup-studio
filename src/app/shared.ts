@@ -19,6 +19,19 @@ export function diffMarkups(markups: Markup[], synced: Synced) {
   return { upserts, deletes };
 }
 
+/** Leave ample room below the server's 16 MiB request cap, including UTF-8 encoding and JSON overhead. */
+export function batchChanges(upserts: Markup[], deletes: string[]) {
+  const batch: Markup[] = [];
+  let size = 0;
+  for (const m of upserts) {
+    const length = new TextEncoder().encode(JSON.stringify(m)).length;
+    if (batch.length && (size + length > 4 * 1024 * 1024 || batch.length >= 500)) break;
+    size += length;
+    batch.push(m);
+  }
+  return { upserts: batch, deletes: deletes.slice(0, 500) };
+}
+
 /**
  * Applies server-authoritative ops. Ops from this client (same cid) only update the synced baseline so that
  * newer local edits of the same markup are not clobbered; ops from others win (last writer wins).

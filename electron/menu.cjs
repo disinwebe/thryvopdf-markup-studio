@@ -43,7 +43,7 @@ function menuTemplate(state, send, platform = process.platform) {
     ] },
     { label: '&Help', submenu: [
       item('&Keyboard shortcuts', 'shortcuts', usable),
-      item('&About ThryvoPDF Markup Studio', 'about', usable),
+      item('&About this software', 'about', usable),
       item('&Server connection and deployment', 'serverHelp', usable),
     ] },
   ];

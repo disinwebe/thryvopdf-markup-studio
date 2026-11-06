@@ -281,6 +281,15 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     }
     case 'stamp': {
       const r = boxOf(m);
+      if (m.stampImage) {
+        const origin = cv({ x: r.x, y: r.y + r.h });
+        const right = cv({ x: r.x + r.w, y: r.y + r.h });
+        const top = cv({ x: r.x, y: r.y });
+        ops = `q ${f(right.x - origin.x)} ${f(right.y - origin.y)} ${f(top.x - origin.x)} ${f(top.y - origin.y)} ${f(origin.x)} ${f(origin.y)} cm /StampImage Do Q`;
+        viewPts = rectPoly(r);
+        extra.Name = 'Draft';
+        break;
+      }
       const t = (m.stamp ?? m.text ?? 'STAMP').toUpperCase();
       const size = Math.max(6, Math.min(r.h * 0.5, (r.w - 10) / Math.max(1, t.length * 0.62)));
       viewPts = rectPoly(r);
@@ -415,11 +424,12 @@ export async function writeAnnotations(
       const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL, numbers.get(m.id));
       const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
       const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1 });
+      const stampImage = m.type === 'stamp' && m.stampImage ? await doc.embedPng(m.stampImage.data) : undefined;
       const ap = ctx.stream('/GS0 gs\n' + b.ops, {
         Type: 'XObject',
         Subtype: 'Form',
         BBox: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
-        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs, GS1: gs1 } }),
+        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs, GS1: gs1 }, ...(stampImage ? { XObject: { StampImage: stampImage.ref } } : {}) }),
       });
       const apRef = ctx.register(ap);
       const dict: Record<string, unknown> = {

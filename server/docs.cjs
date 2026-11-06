@@ -32,6 +32,13 @@ function validMarkup(m) {
     if (typeof c.text !== 'string' || c.text.length > 5000 || typeof c.date !== 'string') return 'Invalid comment text.';
   }
   if (m.callout !== undefined && (!m.callout || !Number.isFinite(m.callout.x) || !Number.isFinite(m.callout.y))) return 'Invalid comment box position.';
+  if (m.stampImage !== undefined) {
+    const i = m.stampImage;
+    if (m.type !== 'stamp' || !i || typeof i !== 'object' ||
+        !Number.isInteger(i.width) || i.width < 1 || i.width > 800 ||
+        !Number.isInteger(i.height) || i.height < 1 || i.height > 800 ||
+        typeof i.data !== 'string' || i.data.length > 180000 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(i.data)) return 'Invalid stamp image.';
+  }
   if (JSON.stringify(m).length > 262144) return 'Markup too large.';
   return null;
 }

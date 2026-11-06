@@ -129,7 +129,8 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       {m.type === 'stamp' && (
         <label>
           Stamp
-          <select value={m.stamp} onChange={(e) => upd({ stamp: e.target.value })}>
+          <select value={m.stampImage ? '__custom__' : m.stamp} onChange={(e) => upd({ stamp: e.target.value, stampImage: undefined })}>
+            {m.stampImage && <option value="__custom__">Custom image</option>}
             {STAMPS.map((s) => (
               <option key={s}>{s}</option>
             ))}
