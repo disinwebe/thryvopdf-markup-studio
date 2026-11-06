@@ -423,7 +423,7 @@ export async function writeAnnotations(
       if (m.type === 'line') continue;
       const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL, numbers.get(m.id));
       const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
-      const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1 });
+      const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1, BM: 'Normal' });
       const stampImage = m.type === 'stamp' && m.stampImage ? await doc.embedPng(m.stampImage.data) : undefined;
       const ap = ctx.stream('/GS0 gs\n' + b.ops, {
         Type: 'XObject',
