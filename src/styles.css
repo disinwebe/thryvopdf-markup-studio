@@ -24,8 +24,12 @@ input.pg { width: 56px; }
 .main { flex: 1; display: flex; min-height: 0; }
 .side { width: 300px; background: var(--panel); display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 .side.right { width: 360px; border-right: 0; border-left: 1px solid var(--line); }
+.side[hidden] { display: none; }
 .ptabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; border-bottom: 1px solid var(--line); }
 .center { flex: 1; min-width: 0; display: flex; position: relative; }
+.panel-toggle { position: absolute; z-index: 4; top: 8px; padding: 5px 6px; box-shadow: 0 1px 5px var(--shadow); }
+.left-toggle { left: 4px; }
+.right-toggle { right: 4px; }
 .viewer-controls { position: absolute; z-index: 3; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 3px; max-width: calc(100% - 16px); overflow-x: auto; white-space: nowrap; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px var(--shadow); font-size: 11px; }
 .viewer-controls button { padding: 2px 5px; }
 .viewer-controls input.pg { width: 43px; padding: 2px; }
@@ -50,6 +54,7 @@ input.pg { width: 56px; }
 .props > label input:not([type=color]):not([type=checkbox]), .props > label select { width: 100%; }
 .grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
 .badge { padding: 1px 6px; border-radius: 8px; background: var(--ctl-h); font-size: 11px; }
+.pending-registrations { position: fixed; right: 12px; bottom: 32px; z-index: 5; max-width: min(360px, calc(100vw - 24px)); padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); box-shadow: 0 2px 8px var(--shadow); }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; }
 .muted { color: var(--mut); } .small { font-size: 11px; }
 .ok { color: #4ade80; } .warn { color: #fbbf24; } .danger { color: #f87171; }

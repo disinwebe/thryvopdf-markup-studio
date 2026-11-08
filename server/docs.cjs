@@ -1,6 +1,6 @@
 // Shared document library: stores PDFs + their markups on the server, serializes edits, tracks presence.
 const crypto = require('crypto');
-const fs = require('fs');
+const defaultFs = require('fs');
 const path = require('path');
 
 const TYPES = new Set([
@@ -79,9 +79,28 @@ const cleanRel = (r) =>
     .slice(0, 12)
     .join('/');
 
-function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000, maxUpload = 150 * 1024 * 1024 }) {
+function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000, maxUpload = 150 * 1024 * 1024, fs = defaultFs }) {
   fs.mkdirSync(dir, { recursive: true });
   const docs = new Map();
+  const journal = path.join(dir, '.group-rename-journal');
+  let unavailable = false;
+
+  // The committed journal is replayed before serving requests, including after a partial write.
+  const replayRename = () => {
+    const tx = JSON.parse(fs.readFileSync(journal, 'utf8'));
+    if (!tx || !Array.isArray(tx.ids) || !tx.ids.length || !tx.ids.every((id) => typeof id === 'string' && ID_RE.test(id)) ||
+        typeof tx.project !== 'string' || !tx.project || cleanProject(tx.project) !== tx.project) throw new Error('Invalid group rename journal.');
+    for (const id of tx.ids) {
+      const file = path.join(dir, id + '.json');
+      const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (record.id !== id) throw new Error('Invalid document in group rename journal.');
+      record.project = tx.project;
+      fs.writeFileSync(file + '.tmp', JSON.stringify(record));
+      fs.renameSync(file + '.tmp', file);
+    }
+    fs.unlinkSync(journal);
+  };
+  if (fs.existsSync(journal)) replayRename();
 
   for (const f of fs.readdirSync(dir)) {
     if (!f.endsWith('.json')) continue;
@@ -127,13 +146,45 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       else d.waiters.push(w);
     }
   };
-  const info = (d) => ({ id: d.id, name: d.name, owner: d.ownerName, size: d.size, created: d.created, project: d.project, description: d.description || '', rel: d.rel, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name) });
+  const info = (d, user, ownedProjects) => ({ id: d.id, name: d.name, owner: d.ownerName, size: d.size, created: d.created, project: d.project, description: d.description || '', rel: d.rel, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name), canRenameGroup: !!d.project && (isAdmin(user) || (ownedProjects ? ownedProjects.has(d.project) : [...docs.values()].some((other) => other.project === d.project && other.owner === user.email))) });
   const get = (id) => docs.get(id) || null;
   const NOT_FOUND = [404, { ok: false, error: 'Shared document not found.' }];
 
   return {
-    list: () => [200, { ok: true, docs: [...docs.values()].map(info).sort((a, b) => b.created.localeCompare(a.created)) }],
+    list: (user) => {
+      const ownedProjects = new Set([...docs.values()].filter((d) => d.owner === user.email).map((d) => d.project));
+      return [200, { ok: true, docs: [...docs.values()].map((d) => info(d, user, ownedProjects)).sort((a, b) => b.created.localeCompare(a.created)) }];
+    },
     maxUpload,
+    isAvailable: () => !unavailable,
+
+    renameGroup(user, b) {
+      if (!b || typeof b.project !== 'string' || !b.project || typeof b.newProject !== 'string') return [400, { ok: false, error: 'Source and new group name are required.' }];
+      const name = b.newProject.trim();
+      if (!name || name.length > 80 || cleanProject(name) !== name) return [400, { ok: false, error: 'Invalid group name.' }];
+      const affected = [...docs.values()].filter((d) => d.project === b.project);
+      if (!affected.length) return [404, { ok: false, error: 'Group not found.' }];
+      if (!isAdmin(user) && !affected.some((d) => d.owner === user.email)) return [403, { ok: false, error: 'Only an administrator or an uploader in the group can rename it.' }];
+      if (name === b.project) return [400, { ok: false, error: 'Choose a different group name.' }];
+      if ([...docs.values()].some((d) => d.project !== b.project && d.project.toLowerCase() === name.toLowerCase())) return [409, { ok: false, error: 'A group with that name already exists.' }];
+      const temp = journal + '.tmp';
+      try {
+        fs.writeFileSync(temp, JSON.stringify({ ids: affected.map((d) => d.id), project: name }));
+        fs.renameSync(temp, journal);
+      } catch (err) {
+        try { fs.rmSync(temp, { force: true }); } catch { /* leave uncommitted temp for cleanup */ }
+        throw err;
+      }
+      try {
+        replayRename();
+      } catch {
+        // Do not serve a partially persisted library; restart replays the committed journal.
+        unavailable = true;
+        return [503, { ok: false, error: 'Shared library unavailable. Restart the server to recover the group rename.' }];
+      }
+      for (const d of affected) d.project = name;
+      return [200, { ok: true, project: b.project, newProject: name, count: affected.length }];
+    },
 
     upload(user, name, bytes, meta = {}) {
       if (!Buffer.isBuffer(bytes) || bytes.length < 8 || !bytes.subarray(0, 1024).includes('%PDF-')) return [400, { ok: false, error: 'The file is not a PDF.' }];
@@ -142,7 +193,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       fs.writeFileSync(path.join(dir, id + '.pdf'), bytes);
       persist(d);
       docs.set(id, d);
-      return [201, { ok: true, doc: info(d) }];
+      return [201, { ok: true, doc: info(d, user) }];
     },
 
     file(id) {
@@ -264,7 +315,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       if (b && typeof b.project === 'string') d.project = cleanProject(b.project);
       if (b && typeof b.description === 'string') d.description = cleanDescription(b.description);
       persist(d);
-      return [200, { ok: true, doc: info(d) }];
+      return [200, { ok: true, doc: info(d, user) }];
     },
     remove(id, user) {
       const d = get(id);

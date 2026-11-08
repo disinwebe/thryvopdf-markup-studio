@@ -66,19 +66,30 @@ export function PageView(p: PageViewProps) {
   }, [doc.pdf, doc.page]);
 
   // fit page on first display or when requested
-  const fitDone = useRef({ n: p.fit.n, id: '' });
+  const fitDone = useRef({ n: p.fit.n, id: '', viewport: 0 });
+  const [viewportRevision, setViewportRevision] = useState(0);
+  const fittedZoom = useRef<number | null>(null);
+  useEffect(() => {
+    if (!scroller.current) return;
+    const observer = new ResizeObserver(() => setViewportRevision((revision) => revision + 1));
+    observer.observe(scroller.current);
+    return () => observer.disconnect();
+  }, [size]);
   useEffect(() => {
     if (!size || !scroller.current) return;
     const first = doc.zoom === 0;
-    const requested = p.fit.n !== fitDone.current.n;
-    if (!first && !requested) return;
-    fitDone.current = { n: p.fit.n, id: doc.id };
+    const explicit = p.fit.n !== fitDone.current.n;
+    const resized = viewportRevision > fitDone.current.viewport && fitDone.current.id === doc.id;
+    const autoFit = fittedZoom.current !== null && Math.abs(doc.zoom - fittedZoom.current) < 0.0001;
+    if (!first && !explicit && !(resized && autoFit)) return;
+    fitDone.current = { n: p.fit.n, id: doc.id, viewport: viewportRevision };
     const cw = scroller.current.clientWidth - 56,
       ch = scroller.current.clientHeight - 56;
     const z = p.fit.mode === 'width' ? cw / size.w : Math.min(cw / size.w, ch / size.h);
-    p.onZoom(Math.max(0.05, Math.min(8, z)));
+    fittedZoom.current = Math.max(0.05, Math.min(8, z));
+    p.onZoom(fittedZoom.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size, p.fit.n, doc.id]);
+  }, [size, p.fit.n, doc.id, viewportRevision]);
 
   useEffect(() => {
     if (!size || !canvas.current) return;

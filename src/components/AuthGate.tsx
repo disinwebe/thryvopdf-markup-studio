@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react';
 import { DISCIPLINE_LIST } from '../core/types';
 import { ChangePassword, UserManagement } from './AccountPanels';
+import { PendingRegistrationsNotice, usePendingRegistrations } from './PendingRegistrations';
 
 type View = 'setup' | 'register' | 'login' | 'awaiting';
 type Actions = { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void };
@@ -15,6 +16,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
   const [panel, setPanel] = useState<'password' | 'users' | null>(null);
   const [url, setUrl] = useState('');
   const [f, setF] = useState({ name: '', email: '', discipline: DISCIPLINE_LIST[0], password: '', confirm: '' });
+  const pendingRegistrations = usePendingRegistrations(user, st?.mode === 'server');
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const refresh = useCallback(async () => {
@@ -101,6 +103,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
     return (
       <>
         {children(user, actions)}
+        <PendingRegistrationsNotice state={pendingRegistrations} onManageUsers={() => setPanel('users')} />
         {panel && (
           <div className="modal">
             {panel === 'password' ? <ChangePassword onDone={(u) => { setUser(u); setPanel(null); }} onCancel={() => setPanel(null)} /> : <UserManagement me={user} onClose={() => setPanel(null)} />}

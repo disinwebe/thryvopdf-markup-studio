@@ -14,12 +14,12 @@ describe('markup CSV', () => {
     const line = { ...m, id: 'line', type: 'line' } as Markup;
     const csv = markupCsv([m, line], 'C:\\drawings\\test.pdf');
     expect(csv).toContain('Comment ID,Page,Type,Filename,Author,Date,Comments,Status\r\n');
-    expect(csv).toContain('1,1,Rectangle,test.pdf,Anne,2026-11-06 1:34 PM,"Anne: a, b",None');
+    expect(csv).toContain('1,1,Rectangle,test.pdf,Anne,2026-11-06 1:34 PM,"a, b",None');
     expect(csv).toContain(',1,Line,test.pdf');
     expect(csv.split('\r\n')[0]).not.toMatch(/Text|Subject/);
     expect(formatMarkupDate(new Date(2026, 0, 1, 0, 5).toISOString())).toBe('2026-01-01 12:05 AM');
     expect(formatMarkupDate('invalid')).toBe('invalid');
-    expect(markupCsv([{ ...m, calloutHidden: true }], 'test.pdf')).toContain('"Anne: a, b",None');
+    expect(markupCsv([{ ...m, calloutHidden: true }], 'test.pdf')).toContain('"a, b",None');
   });
 });
 
@@ -31,6 +31,14 @@ describe('collapsed groups', () => {
     expect(loadCollapsedGroups(store)).toEqual(['Tower A', '']);
     value = 'bad';
     expect(loadCollapsedGroups(store)).toEqual([]);
+  });
+  it('keeps shared-library collapse state separate from the Project tab', () => {
+    const data = new Map<string, string>();
+    const store = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => void data.set(key, value) };
+    saveCollapsedGroups(store, ['Project']);
+    saveCollapsedGroups(store, ['Library'], 'pms.sharedLibrary.collapsedGroups');
+    expect(loadCollapsedGroups(store)).toEqual(['Project']);
+    expect(loadCollapsedGroups(store, 'pms.sharedLibrary.collapsedGroups')).toEqual(['Library']);
   });
 });
 
@@ -53,6 +61,11 @@ describe('native menu wiring', () => {
       expect(send).toHaveBeenCalledWith(action);
     }
     const view = menu[3].submenu;
+    expect(view.some((entry: { label?: string }) => /measurement|sheet index|search documents/i.test((entry.label || '').replace(/&/g, '')))).toBe(false);
+    for (const action of ['toggleLeftPanel', 'toggleRightPanel']) {
+      view.find((entry: { click?: () => void; label?: string }) => entry.label?.toLowerCase().includes(action === 'toggleLeftPanel' ? 'left panel' : 'right panel')).click();
+      expect(send).toHaveBeenCalledWith(action);
+    }
     for (const [label, action, accelerator] of [['Zoom &In', 'zoomIn', 'CmdOrCtrl+='], ['Zoom &Out', 'zoomOut', 'CmdOrCtrl+-'], ['Fit &Width', 'fitWidth', undefined], ['Fit &Page', 'fitPage', undefined]]) {
       const entry = view.find((m: { label: string }) => m.label === label);
       expect(entry.enabled).toBe(true);

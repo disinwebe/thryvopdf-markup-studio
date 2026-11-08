@@ -232,16 +232,18 @@ function createApp(opts = {}) {
     }),
   };
 
-  const docs = createDocs({ dir: opts.docsDir || path.join(path.dirname(file), 'docs'), now, pollMs: opts.pollMs, presenceTtlMs: opts.presenceTtlMs, maxUpload: opts.maxUpload });
+  const docs = createDocs({ dir: opts.docsDir || path.join(path.dirname(file), 'docs'), now, pollMs: opts.pollMs, presenceTtlMs: opts.presenceTtlMs, maxUpload: opts.maxUpload, fs: opts.docsFs });
   const ready = (fn) =>
     authed((s, b, ip, req, url, m) => {
       if (s.user.status !== 'active') return [403, { ok: false, error: 'Account not active.' }];
       if (s.user.mustChange) return [403, { ok: false, error: 'Change your password first.' }];
+      if (!docs.isAvailable()) return [503, { ok: false, error: 'Shared library unavailable. Restart the server to recover the group rename.' }];
       return fn(s.user, b, req, url, m);
     });
   const docRoutes = [
-    ['GET', /^\/api\/docs$/, ready(() => docs.list())],
+    ['GET', /^\/api\/docs$/, ready((u) => docs.list(u))],
     ['POST', /^\/api\/docs$/, ready((u, b, req, url) => docs.upload(u, url.searchParams.get('name') || 'document.pdf', b, { project: url.searchParams.get('project'), rel: url.searchParams.get('rel'), description: url.searchParams.get('description') }))],
+    ['POST', /^\/api\/docs\/groups\/rename$/, ready((u, b) => docs.renameGroup(u, b))],
     ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1]))],
     ['GET', /^\/api\/docs\/([\w-]+)\/state$/, ready((u, b, req, url, m) => docs.state(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/ops$/, ready((u, b, req, url, m) => docs.ops(m[1], u, b))],

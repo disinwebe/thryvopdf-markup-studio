@@ -17,7 +17,7 @@ export function markupCsv(markups: Markup[], filename: string): string {
   const rows: unknown[][] = [['Comment ID', 'Page', 'Type', 'Filename', 'Author', 'Date', 'Comments', 'Status']];
   for (const m of markups) rows.push([
     nums.get(m.id) ?? '', m.page + 1, TOOL_LABEL[m.type], name, m.author,
-    formatMarkupDate(m.date), isReviewMarkup(m) ? m.comments.map((c) => `${c.author}: ${c.text}`).join(' | ') : '', m.status,
+    formatMarkupDate(m.date), isReviewMarkup(m) ? m.comments.map((c) => c.text).join(' | ') : '', m.status,
   ]);
   return toCsv(rows);
 }
