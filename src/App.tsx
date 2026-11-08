@@ -24,6 +24,7 @@ import { markupCsv } from './core/markupCsv';
 import { importStamp } from './app/stampImport';
 import { LicenseInfo, type LicenseInfoStatus } from './components/LicenseInfo';
 import { PanelToggle } from './components/PanelToggle';
+import { FloatingTools } from './components/FloatingTools';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const TOOL_ICONS: Partial<Record<Tool, string>> = {
@@ -67,18 +68,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
   const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
   const [library, setLibrary] = useState(false);
-  useEffect(() => {
-    if (!actions.serverMode || !window.api) return;
-    let cancelled = false;
-    void window.api.sharedDocs({ op: 'list' }).then((result) => {
-      if (cancelled) return;
-      if (result.ok) setLibrary(true);
-      else setMsg(`Shared documents unavailable: ${result.error || 'Could not connect to the server.'}`);
-    }).catch((error: unknown) => {
-      if (!cancelled) setMsg(`Shared documents unavailable: ${String(error)}`);
-    });
-    return () => { cancelled = true; };
-  }, [actions.serverMode]);
+  const [sharedRevision, setSharedRevision] = useState(0);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
@@ -601,6 +591,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                 <ProjectPanel
                   docs={docs}
                   activeId={active.id}
+                  sharedRevision={sharedRevision}
                   onActivate={setActiveId}
                   onOpen={open}
                   onOpenShared={openShared}
@@ -643,6 +634,8 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                 onMessage={say}
               />
               <div className="viewer-controls" aria-label="Page and zoom controls">
+                <FloatingTools tool={tool} onTool={(t) => { setTool(t); setPending(null); }} />
+                <span className="sep" />
                 <button onClick={() => goto(active.page - 1)} title="Previous page" aria-label="Previous page">◀</button>
                 <input className="pg" type="number" aria-label="Page number" min={1} max={active.numPages} value={active.page + 1} onChange={(e) => goto((+e.target.value || 1) - 1)} />
                 <span>/ {active.numPages}</span>
@@ -743,7 +736,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
         )}
       </div>
       <div className="status">{msg}</div>
-      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} />}
+      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} onChanged={() => setSharedRevision((n) => n + 1)} />}
       {defaultsOpen && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Tool defaults">
           <div className="usermgmt tool-dialog">

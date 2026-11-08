@@ -9,6 +9,7 @@ import type { SharedListing } from './SharedLibrary';
 export function ProjectPanel(p: {
   docs: Doc[];
   activeId: string;
+  sharedRevision?: number;
   onActivate(id: string): void;
   onOpen(): void;
   onOpenShared?(d: SharedListing): Promise<void>;
@@ -39,9 +40,10 @@ export function ProjectPanel(p: {
   }, []);
   useEffect(() => {
     void loadShared();
+    try { setCollapsed(loadCollapsedGroups(localStorage)); } catch { /* storage unavailable */ }
     // Auto-refresh only while this tab is mounted (visible) and the window is not hidden.
     return startPolling(() => void loadShared(), SHARED_REFRESH_MS, () => !document.hidden);
-  }, [loadShared]);
+  }, [loadShared, p.sharedRevision]);
   return (
     <div className="panel-body">
       <div className="row">

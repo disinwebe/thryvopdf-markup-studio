@@ -32,6 +32,14 @@ describe('collapsed groups', () => {
     value = 'bad';
     expect(loadCollapsedGroups(store)).toEqual([]);
   });
+  it('keeps shared-library collapse state separate from the Project tab', () => {
+    const data = new Map<string, string>();
+    const store = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => void data.set(key, value) };
+    saveCollapsedGroups(store, ['Project']);
+    saveCollapsedGroups(store, ['Library'], 'pms.sharedLibrary.collapsedGroups');
+    expect(loadCollapsedGroups(store)).toEqual(['Project']);
+    expect(loadCollapsedGroups(store, 'pms.sharedLibrary.collapsedGroups')).toEqual(['Library']);
+  });
 });
 
 describe('native menu wiring', () => {

@@ -48,7 +48,7 @@ interface Window {
     licenseStatus(): Promise<{ ok: boolean; device?: string; id?: string; error?: string }>;
     importLicense(): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
     pickUploads(kind: 'files' | 'folder'): Promise<{ project: string; items: { token: string; name: string; rel: string; size: number }[]; truncated: boolean } | null>;
-    sharedDocs(args: { op: 'list' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta'; id?: string; name?: string; project?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number }): Promise<any>;
+    sharedDocs(args: { op: 'list' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group'; id?: string; name?: string; project?: string; newProject?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
     adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;
     adminAction(args: { email: string; action: string; role?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string }>;

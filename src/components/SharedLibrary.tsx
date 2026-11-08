@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Pick, UploadRow, groupByProject, runUploads, toRows } from '../app/upload';
+import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 
 export interface SharedListing {
   id: string;
@@ -13,10 +14,12 @@ export interface SharedListing {
   project?: string;
   description?: string;
   rel?: string;
+  canRenameGroup?: boolean;
 }
 
 const fmtSize = (n: number) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const NEW = '__new__';
+const COLLAPSE_KEY = 'pms.sharedLibrary.collapsedGroups';
 
 type Staged = { kind: 'current' } | { kind: 'files'; items: Pick[]; truncated: boolean };
 
@@ -26,12 +29,14 @@ export function SharedLibrary({
   onClose,
   onOpen,
   onUpload,
+  onChanged,
 }: {
   me: AuthUser;
   activeName?: string;
   onClose: () => void;
   onOpen: (d: SharedListing) => Promise<void>;
   onUpload: (project: string, description: string) => Promise<{ ok: boolean; message: string }>;
+  onChanged: () => void;
 }) {
   const [docs, setDocs] = useState<SharedListing[]>([]);
   const [error, setError] = useState('');
@@ -42,6 +47,16 @@ export function SharedLibrary({
   const [groupSel, setGroupSel] = useState('');
   const [newGroup, setNewGroup] = useState('');
   const [desc, setDesc] = useState('');
+  const [collapsed, setCollapsed] = useState<string[]>(() => {
+    try { return loadCollapsedGroups(localStorage, COLLAPSE_KEY); } catch { return []; }
+  });
+  const [editingGroup, setEditingGroup] = useState<string | null>(null);
+  const [groupName, setGroupName] = useState('');
+
+  const saveCollapsed = (next: string[]) => {
+    setCollapsed(next);
+    try { saveCollapsedGroups(localStorage, next, COLLAPSE_KEY); } catch { /* storage unavailable */ }
+  };
 
   const patch = (key: string, p: Partial<UploadRow>) => setRows((all) => all.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const groups = [...new Set(docs.map((d) => d.project || '').filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -99,24 +114,31 @@ export function SharedLibrary({
         const r = await onUpload(proj, description);
         setNote(r.message);
         setRows([]);
-        if (r.ok) await load();
+        if (r.ok) { await load(); onChanged(); }
         return;
       }
       setRows(toRows(s.items));
       const res = await runUploads(s.items, (i) => window.api!.sharedDocs({ op: 'upload', token: i.token, name: i.name, project: proj, description, rel: i.rel }), patch);
       setNote(`Uploaded ${res.done} file(s)${res.failed ? `, ${res.failed} failed` : ''}${s.truncated ? '. Only the first 500 PDFs were included.' : ''}`);
       await load();
+      if (res.done) onChanged();
     });
 
-  const editMeta = (d: SharedListing) =>
+  const renameGroup = (project: string) =>
     run(async () => {
-      const description = window.prompt('Description for ' + d.name, d.description || '');
-      if (description === null) return;
-      const project = window.prompt('Group (leave empty for none). Existing: ' + (groups.join(', ') || 'none'), d.project || '');
-      if (project === null) return;
-      const r = await window.api!.sharedDocs({ op: 'meta', id: d.id, project, description });
-      if (!r.ok) setError(r.error || 'Update failed.');
+      const newProject = groupName.trim();
+      if (!newProject) { setError('Enter a group name.'); return; }
+      if (newProject === project) { setEditingGroup(null); return; }
+      const r = await window.api!.sharedDocs({ op: 'rename-group', project, newProject });
+      if (!r.ok) { setError(r.error || 'Group rename failed.'); return; }
+      if (collapsed.includes(project)) saveCollapsed([...collapsed.filter((g) => g !== project), newProject]);
+      try {
+        const projectCollapsed = loadCollapsedGroups(localStorage);
+        if (projectCollapsed.includes(project)) saveCollapsedGroups(localStorage, [...projectCollapsed.filter((g) => g !== project), newProject]);
+      } catch { /* storage unavailable */ }
+      setEditingGroup(null);
       await load();
+      onChanged();
     });
 
   return (
@@ -181,9 +203,24 @@ export function SharedLibrary({
             {groupByProject(docs).map((g) => (
               <Fragment key={'g:' + g.project}>
                 <tr className="group-row">
-                  <td colSpan={6}><b>{g.project || 'Ungrouped'}</b> <span className="muted">({g.docs.length})</span></td>
+                  <td colSpan={6}>
+                    <div className="row">
+                      <button aria-expanded={!collapsed.includes(g.project)} aria-label={`${collapsed.includes(g.project) ? 'Expand' : 'Collapse'} ${g.project || 'Ungrouped'}`} onClick={() => saveCollapsed(collapsed.includes(g.project) ? collapsed.filter((p) => p !== g.project) : [...collapsed, g.project])}>
+                        <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted">({g.docs.length})</span>
+                      </button>
+                      {g.project && (me.role === 'admin' || g.docs.some((d) => d.canRenameGroup)) && (
+                        editingGroup === g.project ? (
+                          <form className="row" onSubmit={(e) => { e.preventDefault(); void renameGroup(g.project); }}>
+                            <label>Group name <input autoFocus maxLength={80} value={groupName} onChange={(e) => setGroupName(e.target.value)} /></label>
+                            <button type="submit" disabled={busy || !groupName.trim()}>Save</button>
+                            <button type="button" disabled={busy} onClick={() => setEditingGroup(null)}>Cancel</button>
+                          </form>
+                        ) : <button disabled={busy} onClick={() => { setError(''); setEditingGroup(g.project); setGroupName(g.project); }}>Rename group</button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
-                {g.docs.map((d) => (
+                {!collapsed.includes(g.project) && g.docs.map((d) => (
                   <tr key={d.id}>
                     <td>
                       {d.rel ? <span className="muted">{d.rel}/</span> : null}{d.name}
@@ -197,7 +234,6 @@ export function SharedLibrary({
                       <button className="primary" disabled={busy} onClick={() => run(() => onOpen(d))}>Open</button>
                       {(me.role === 'admin' || me.name === d.owner) && (
                         <>
-                          <button disabled={busy} onClick={() => editMeta(d)}>Edit info</button>
                           <button
                             disabled={busy}
                             onClick={() =>
@@ -206,6 +242,7 @@ export function SharedLibrary({
                                 const r = await window.api!.sharedDocs({ op: 'delete', id: d.id });
                                 if (!r.ok) setError(r.error || 'Delete failed.');
                                 await load();
+                                if (r.ok) onChanged();
                               })
                             }
                           >
