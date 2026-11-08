@@ -47,6 +47,15 @@ afterAll(() => {
 });
 
 describe('author-only markup deletion', () => {
+  it('syncs comment box dimensions and visibility while rejecting invalid sizes', async () => {
+    const id = (await upload(ann, 'box.pdf')).doc.id;
+    const markup = mk('box1', { calloutSize: { width: 220, height: 110 }, calloutHidden: true });
+    expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [markup] })).code).toBe(200);
+    const shared = (await call('GET', `/api/docs/${id}/state`, bob)).markups[0];
+    expect(shared.calloutSize).toEqual({ width: 220, height: 110 });
+    expect(shared.calloutHidden).toBe(true);
+    expect((await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [{ ...shared, calloutSize: { width: -1, height: 110 } }] })).code).toBe(400);
+  });
   it('stamps authorEmail server-side and lets only the author delete', async () => {
     const id = (await upload(ann, 'a.pdf')).doc.id;
     await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('m1')] });

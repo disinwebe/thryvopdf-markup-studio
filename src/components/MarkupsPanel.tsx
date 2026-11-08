@@ -167,6 +167,10 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         <>
       <div className="muted small" title="Internal annotation ID, saved as /NM in the PDF">Comment #{numberMarkups(doc.markups).get(m.id)} · internal ID: {m.id}</div>
       <h4>Comments</h4>
+      <label>
+        <span>Show comment box on drawing</span>
+        <input type="checkbox" checked={!m.calloutHidden} onChange={(e) => upd({ calloutHidden: !e.target.checked })} />
+      </label>
       {m.comments.map((c) => (
         <div key={c.id} className="comment" title={'Comment ID ' + c.id}>
           <b>{c.author}</b> <span className="muted small">{new Date(c.date).toLocaleString()}</span>

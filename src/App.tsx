@@ -22,14 +22,18 @@ import { toolForKey } from './app/shortcuts';
 import { getCommentSize, setCommentSize } from './core/commentSize';
 import { markupCsv } from './core/markupCsv';
 import { importStamp } from './app/stampImport';
+import { LicenseInfo, type LicenseInfoStatus } from './components/LicenseInfo';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const TOOL_ICONS: Partial<Record<Tool, string>> = {
+  select: '➤', hand: '✋', line: '╱', highlight: '▰', text: 'T', cloud: '☁', rect: '□',
+  ellipse: '○', arrow: '↗', polyline: '⌁', pen: '✎', stamp: '▣', note: '▤',
+};
 const TOOL_HINT: Partial<Record<Tool, string>> = {
   select: 'Select (V)',
   hand: 'Pan (H to toggle, or hold Space while using another tool)',
   line: 'Drawing-only line (not a comment)',
 };
-const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count', 'calibrate'];
 const HISTORY_LIMIT = 100;
 
 type RightTab = 'markups' | 'measure' | 'organize' | 'sheets' | 'search';
@@ -53,7 +57,9 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RightTab>('markups');
-  const [leftTab, setLeftTab] = useState<LeftTab>('pages');
+  const [leftTab, setLeftTab] = useState<LeftTab>('project');
+  const [defaultsOpen, setDefaultsOpen] = useState(false);
+  const [licenseInfo, setLicenseInfo] = useState<LicenseInfoStatus | null>(null);
   const [fit, setFit] = useState<{ mode: 'width' | 'page'; n: number }>({ mode: 'page', n: 0 });
   const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
   const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
@@ -411,13 +417,21 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       case 'pan': setTool('hand'); setPending(null); break;
       case 'delete': if (selectedId) deleteMarkup(selectedId); break;
       case 'theme': setTheme(theme === 'dark' ? 'light' : 'dark'); break;
+      case 'toolDefaults': setDefaultsOpen(true); break;
+      case 'measurePanel': setRightTab('measure'); break;
+      case 'organizePanel': setRightTab('organize'); break;
+      case 'sheetsPanel': setRightTab('sheets'); break;
+      case 'searchPanel': setRightTab('search'); break;
       case 'zoomIn': if (view === 'viewer') zoomBy(1.25); break;
       case 'zoomOut': if (view === 'viewer') zoomBy(1 / 1.25); break;
       case 'fitWidth': if (active && view === 'viewer') setFit((f) => ({ mode: 'width', n: f.n + 1 })); break;
       case 'fitPage': if (active && view === 'viewer') setFit((f) => ({ mode: 'page', n: f.n + 1 })); break;
       case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
       case 'about': void window.api?.showAbout(); break;
-      case 'serverHelp': window.alert('On the server PC, run npm run server and allow its configured port through Windows Firewall. On each client, choose Change on the sign-in screen, enter the server address and test the connection. Back up the server data folder, including its users and documents. Use HTTPS on untrusted networks.'); break;
+      case 'license':
+        if (!window.api) { setLicenseInfo({ ok: false, error: 'Licensing requires the Windows desktop application.' }); break; }
+        void window.api.licenseStatus().then(setLicenseInfo).catch(() => setLicenseInfo({ ok: false, error: 'Could not check the device license.' }));
+        break;
     }
   };
   useEffect(() => window.api?.onMenuAction((action) => menuRef.current(action)), []);
@@ -467,7 +481,6 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       setStyles((s) => ({ ...s, [tool]: { ...(s[tool] ?? defaultStyle(tool)), ...patch } }));
     }
   };
-  const canStyle = editingSelected || !['select', 'hand', 'calibrate'].includes(tool);
   const showStamp = tool === 'stamp' || selected?.type === 'stamp';
   const chooseStamp = async () => {
     try {
@@ -495,45 +508,23 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
 
   const toolBtn = (t: Tool) => (
-    <button key={t} title={TOOL_HINT[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active}>
-      {TOOL_LABEL[t]}
+    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active}>
+      <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>{TOOL_LABEL[t]}
     </button>
   );
 
   return (
     <div className="app" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <div className="bar">
-        <button onClick={open} title="Ctrl+O">Open…</button>
-        <button onClick={() => save(false)} disabled={!active} title="Ctrl+S">Save</button>
-        <button onClick={() => save(true)} disabled={!active}>Save as…</button>
+        <button onClick={open} title="Ctrl+O"><span className="tool-icon" aria-hidden="true">▱</span>Open…</button>
+        <button onClick={() => save(false)} disabled={!active} title="Ctrl+S"><span className="tool-icon" aria-hidden="true">▣</span>Save</button>
+        <button onClick={() => save(true)} disabled={!active}><span className="tool-icon" aria-hidden="true">▣</span>Save as…</button>
         <span className="sep" />
         <button onClick={undo} disabled={!active?.undo.length} title="Ctrl+Z">↶ Undo</button>
         <button onClick={redo} disabled={!active?.redo.length} title="Ctrl+Y">↷ Redo</button>
         <span className="sep" />
-        <button className={view === 'viewer' ? 'on' : ''} onClick={() => setView('viewer')}>Viewer</button>
-        <button className={view === 'compare' ? 'on' : ''} onClick={() => setView('compare')} disabled={docs.length === 0}>Compare</button>
-        {view === 'viewer' && active && (
-          <>
-            <span className="sep" />
-            <button onClick={() => goto(active.page - 1)}>◀</button>
-            <input
-              className="pg"
-              type="number"
-              min={1}
-              max={active.numPages}
-              value={active.page + 1}
-              onChange={(e) => goto((+e.target.value || 1) - 1)}
-            />
-            <span>/ {active.numPages}</span>
-            <button onClick={() => goto(active.page + 1)}>▶</button>
-            <span className="sep" />
-            <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out (Ctrl+-)">－</button>
-            <span className="zoom">{Math.round((active.zoom || 1) * 100)}%</span>
-            <button onClick={() => zoomBy(1.25)} title="Zoom in (Ctrl+=)">＋</button>
-            <button onClick={() => setFit((f) => ({ mode: 'width', n: f.n + 1 }))}>Fit width</button>
-            <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))}>Fit page</button>
-          </>
-        )}
+        <button className={view === 'viewer' ? 'on' : ''} onClick={() => setView('viewer')}><span className="tool-icon" aria-hidden="true">▤</span>Viewer</button>
+        <button className={view === 'compare' ? 'on' : ''} onClick={() => setView('compare')} disabled={docs.length === 0}><span className="tool-icon" aria-hidden="true">◫</span>Compare</button>
         <span className="grow" />
         <span className="who" title={user.email}>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</span>
       </div>
@@ -544,35 +535,6 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
           <span className="sep" />
           <span className="lbl">Markup</span>
           {MARKUP_TOOLS.map(toolBtn)}
-          <span className="sep" />
-          <span className="lbl">Measure</span>
-          {MEASURE_TOOLS.map(toolBtn)}
-          <span className="sep" />
-          {canStyle && (
-            <>
-              <input type="color" title="Color" value={shown.color} onChange={(e) => changeStyle({ color: e.target.value })} />
-              <label title="Line width">
-                W <input type="range" min={1} max={12} value={shown.width} onChange={(e) => changeStyle({ width: +e.target.value })} />
-              </label>
-              <label title="Opacity">
-                α <input type="range" min={0.1} max={1} step={0.05} value={shown.opacity} onChange={(e) => changeStyle({ opacity: +e.target.value })} />
-              </label>
-              <label title="Fill">
-                Fill <input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} />
-              </label>
-              {showStamp && (
-                <>
-                <select value={selected?.type === 'stamp' && editingSelected ? selected.stamp : shown.stamp} onChange={(e) => changeStyle({ stamp: e.target.value, stampImage: undefined })}>
-                  {(selected?.stampImage || shown.stampImage) && <option value="Custom image">Custom image</option>}
-                  {STAMPS.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-                <button onClick={() => void chooseStamp()} title="Import an image or PDF page as a stamp">Import stamp...</button>
-                </>
-              )}
-            </>
-          )}
         </div>
       )}
 
@@ -673,24 +635,23 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                 }}
                 onMessage={say}
               />
+              <div className="viewer-controls" aria-label="Page and zoom controls">
+                <button onClick={() => goto(active.page - 1)} title="Previous page" aria-label="Previous page">◀</button>
+                <input className="pg" type="number" aria-label="Page number" min={1} max={active.numPages} value={active.page + 1} onChange={(e) => goto((+e.target.value || 1) - 1)} />
+                <span>/ {active.numPages}</span>
+                <button onClick={() => goto(active.page + 1)} title="Next page" aria-label="Next page">▶</button>
+                <span className="sep" />
+                <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out (Ctrl+-)" aria-label="Zoom out">−</button>
+                <span>{Math.round((active.zoom || 1) * 100)}%</span>
+                <button onClick={() => zoomBy(1.25)} title="Zoom in (Ctrl+=)" aria-label="Zoom in">＋</button>
+                <button onClick={() => setFit((f) => ({ mode: 'width', n: f.n + 1 }))} title="Fit width"><span aria-hidden="true">↔</span> Width</button>
+                <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))} title="Fit page"><span aria-hidden="true">▣</span> Page</button>
+              </div>
             </div>
             <div className="side right">
               <div className="ptabs">
-                {(
-                  [
-                    ['markups', `Markups (${countOf})`],
-                    ['measure', 'Measure'],
-                    ['organize', 'Organize'],
-                    ['sheets', 'Sheet index'],
-                    ['search', 'Search'],
-                  ] as [RightTab, string][]
-                ).map(([t, label]) => (
-                  <button key={t} className={rightTab === t ? 'on' : ''} onClick={() => setRightTab(t)}>
-                    {label}
-                  </button>
-                ))}
+                <button className="on">Markups ({countOf})</button>
               </div>
-              {rightTab === 'markups' && (
                 <MarkupsPanel
                   doc={active}
                   selectedId={selectedId}
@@ -710,19 +671,28 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                   onDelete={deleteMarkup}
                   onExport={(csv) => exportCsv(csv, downloadName(active.name, '-markups', 'csv'))}
                 />
-              )}
+            </div>
+            {rightTab !== 'markups' && (
+              <div className="modal" role="dialog" aria-modal="true" aria-label="Document tools">
+                <div className="usermgmt tool-dialog">
+                  <div className="row between"><b>{rightTab === 'measure' ? 'Measurements' : rightTab === 'organize' ? 'Organize pages' : rightTab === 'sheets' ? 'Sheet index' : 'Search documents'}</b><button onClick={() => setRightTab('markups')}>Close</button></div>
               {rightTab === 'measure' && (
+                <>
+                <div className="row pad">{(['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'] as Tool[]).map((t) => (
+                  <button key={t} onClick={() => { setTool(t); setRightTab('markups'); }}>{TOOL_LABEL[t]}</button>
+                ))}</div>
                 <MeasurePanel
                   doc={active}
                   pending={pending}
                   subject={subject}
                   onSubject={setSubject}
-                  onTool={(t) => { setTool(t); say('Click two points of a known length on the drawing'); }}
+                  onTool={(t) => { setTool(t); setRightTab('markups'); say('Click two points of a known length on the drawing'); }}
                   onSetCal={setCal}
                   onClearPending={() => setPending(null)}
                   onExport={(csv) => exportCsv(csv, downloadName(active.name, '-takeoff', 'csv'))}
                   onMessage={say}
                 />
+                </>
               )}
               {rightTab === 'organize' && (
                 <OrganizePanel
@@ -759,12 +729,38 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                   }}
                 />
               )}
-            </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
       <div className="status">{msg}</div>
       {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} />}
+      {defaultsOpen && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Tool defaults">
+          <div className="usermgmt tool-dialog">
+            <div className="row between"><b>Tool defaults and stamp</b><button onClick={() => setDefaultsOpen(false)}>Close</button></div>
+            <p>Select a markup tool to set defaults, or select an existing markup to change its properties.</p>
+            {!editingSelected && (tool === 'select' || tool === 'hand') ? <p>Choose a markup tool first.</p> : (
+              <div className="props">
+                <label>Color<input type="color" value={shown.color} onChange={(e) => changeStyle({ color: e.target.value })} /></label>
+                <label>Line width<input type="range" min={1} max={12} value={shown.width} onChange={(e) => changeStyle({ width: +e.target.value })} /></label>
+                <label>Opacity<input type="range" min={0.1} max={1} step={0.05} value={shown.opacity} onChange={(e) => changeStyle({ opacity: +e.target.value })} /></label>
+                <label>Fill<input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} /></label>
+              </div>
+            )}
+            {showStamp && <>
+              <label>Stamp <select value={selected?.type === 'stamp' && editingSelected ? selected.stamp : shown.stamp} onChange={(e) => changeStyle({ stamp: e.target.value, stampImage: undefined })}>
+                {(selected?.stampImage || shown.stampImage) && <option value="Custom image">Custom image</option>}
+                {STAMPS.map((s) => <option key={s}>{s}</option>)}
+              </select></label>
+              <button onClick={() => void chooseStamp()}>Import stamp...</button>
+            </>}
+          </div>
+        </div>
+      )}
+      {licenseInfo && <LicenseInfo status={licenseInfo} onClose={() => setLicenseInfo(null)} />}
     </div>
   );
 }

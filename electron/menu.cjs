@@ -33,6 +33,7 @@ function menuTemplate(state, send, platform = process.platform) {
       { ...item('&Users...', 'users', usable && admin), visible: admin },
       item('&Password...', 'password', usable && passwordAvailable),
       item('&Theme: toggle light / dark', 'theme', usable),
+      item('Tool &defaults...', 'toolDefaults', doc),
     ] },
     { label: '&View', submenu: [
       item('Zoom &In', 'zoomIn', doc && viewerActive, 'CmdOrCtrl+='),
@@ -40,11 +41,16 @@ function menuTemplate(state, send, platform = process.platform) {
       { type: 'separator' },
       item('Fit &Width', 'fitWidth', doc && viewerActive),
       item('Fit &Page', 'fitPage', doc && viewerActive),
+      { type: 'separator' },
+      item('&Measurements...', 'measurePanel', doc && viewerActive),
+      item('O&rganize pages...', 'organizePanel', doc && viewerActive),
+      item('Sheet inde&x...', 'sheetsPanel', doc && viewerActive),
+      item('&Search documents...', 'searchPanel', doc && viewerActive),
     ] },
     { label: '&Help', submenu: [
       item('&Keyboard shortcuts', 'shortcuts', usable),
       item('&About this software', 'about', usable),
-      item('&Server connection and deployment', 'serverHelp', usable),
+      item('&License...', 'license', usable),
     ] },
   ];
   if (platform === 'darwin') menu.unshift({ label: 'ThryvoPDF Markup Studio', submenu: [{ role: 'about' }, { role: 'hide' }, item('Quit', 'quit', true, 'CmdOrCtrl+Q')] });

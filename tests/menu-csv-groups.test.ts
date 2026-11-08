@@ -13,12 +13,13 @@ describe('markup CSV', () => {
     const m = { id: 'm', type: 'rect', page: 0, date, status: 'None', author: 'Anne', comments: [{ author: 'Anne', text: 'a, b' }] } as Markup;
     const line = { ...m, id: 'line', type: 'line' } as Markup;
     const csv = markupCsv([m, line], 'C:\\drawings\\test.pdf');
-    expect(csv).toContain('Comment ID,Page,Type,Filename,Status,Author,Date,Comments\r\n');
-    expect(csv).toContain('1,1,Rectangle,test.pdf,None,Anne,2026-11-06 1:34 PM,"Anne: a, b"');
+    expect(csv).toContain('Comment ID,Page,Type,Filename,Author,Date,Comments,Status\r\n');
+    expect(csv).toContain('1,1,Rectangle,test.pdf,Anne,2026-11-06 1:34 PM,"Anne: a, b",None');
     expect(csv).toContain(',1,Line,test.pdf');
     expect(csv.split('\r\n')[0]).not.toMatch(/Text|Subject/);
     expect(formatMarkupDate(new Date(2026, 0, 1, 0, 5).toISOString())).toBe('2026-01-01 12:05 AM');
     expect(formatMarkupDate('invalid')).toBe('invalid');
+    expect(markupCsv([{ ...m, calloutHidden: true }], 'test.pdf')).toContain('"Anne: a, b",None');
   });
 });
 
@@ -59,6 +60,10 @@ describe('native menu wiring', () => {
       entry.click();
       expect(send).toHaveBeenCalledWith(action);
     }
+    const help = menu[4].submenu;
+    expect(help.some((entry: { label: string }) => entry.label.includes('Server'))).toBe(false);
+    help.find((entry: { label: string }) => entry.label === '&License...').click();
+    expect(send).toHaveBeenCalledWith('license');
     const inactive = menuTemplate({ signedIn: true, blocked: true, documentOpen: true }, send, 'win32');
     expect(inactive[0].submenu.find((m: { label: string }) => m.label === '&Save').enabled).toBe(false);
     expect(inactive[3].submenu[0].enabled).toBe(false);
