@@ -5,6 +5,8 @@ import { translate } from '../src/core/geometry';
 import { saveWithState, readState } from '../src/core/annotations';
 import { Markup } from '../src/core/types';
 import { PDFDocument } from 'pdf-lib';
+import { markupCsv } from '../src/core/markupCsv';
+import { buildAppearance } from '../src/core/annotations';
 
 const m = (extra: Partial<Markup> = {}): Markup => ({
   id: 'a', page: 0, type: 'arrow', points: [{ x: 10, y: 10 }, { x: 90, y: 60 }], color: '#f00', width: 2, opacity: 1,
@@ -38,6 +40,23 @@ describe('comment callout geometry', () => {
     const st = await readState(await PDFDocument.load(out));
     expect(st.markups[0].callout).toEqual({ x: 150, y: 120 });
     expect(st.markups[0].comments[0].authorEmail).toBe('ann@x');
+  });
+  it('persists resized and hidden callouts while retaining comments and the numbered tag', async () => {
+    const item = m({ callout: { x: 150, y: 120 }, calloutSize: { width: 220, height: 110 }, calloutHidden: true });
+    expect(calloutLayout(item)).toBeNull();
+    expect(markupCsv([item], 'drawing.pdf')).toContain('Check the beam size here please');
+    const source = await PDFDocument.create();
+    source.addPage([600, 400]);
+    const out = await saveWithState(await source.save(), { markups: [item], calibrations: {}, sheets: {}, bookmarks: [] });
+    const stored = (await readState(await PDFDocument.load(out))).markups[0];
+    expect(stored.calloutSize).toEqual({ width: 220, height: 110 });
+    expect(stored.calloutHidden).toBe(true);
+    const shown = { ...stored, calloutHidden: false };
+    expect(calloutLayout(shown)).toMatchObject({ x: 150, y: 120, w: 220, h: 110 });
+    const hiddenAppearance = buildAppearance(stored, { x0: 0, y0: 0, w: 600, h: 400, rotation: 0 }, undefined, 1);
+    expect(hiddenAppearance.ops).toContain('(#1) Tj');
+    expect(hiddenAppearance.ops).not.toContain('Check the beam size here please');
+    expect(buildAppearance(shown, { x0: 0, y0: 0, w: 600, h: 400, rotation: 0 }, undefined, 1).ops).toContain('Check the beam size here please');
   });
 });
 

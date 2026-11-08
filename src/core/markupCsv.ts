@@ -14,10 +14,10 @@ export function formatMarkupDate(value: string): string {
 export function markupCsv(markups: Markup[], filename: string): string {
   const nums = numberMarkups(markups);
   const name = filename.split(/[\\/]/).pop() || filename;
-  const rows: unknown[][] = [['Comment ID', 'Page', 'Type', 'Filename', 'Status', 'Author', 'Date', 'Comments']];
+  const rows: unknown[][] = [['Comment ID', 'Page', 'Type', 'Filename', 'Author', 'Date', 'Comments', 'Status']];
   for (const m of markups) rows.push([
-    nums.get(m.id) ?? '', m.page + 1, TOOL_LABEL[m.type], name, m.status, m.author,
-    formatMarkupDate(m.date), isReviewMarkup(m) ? m.comments.map((c) => `${c.author}: ${c.text}`).join(' | ') : '',
+    nums.get(m.id) ?? '', m.page + 1, TOOL_LABEL[m.type], name, m.author,
+    formatMarkupDate(m.date), isReviewMarkup(m) ? m.comments.map((c) => `${c.author}: ${c.text}`).join(' | ') : '', m.status,
   ]);
   return toCsv(rows);
 }

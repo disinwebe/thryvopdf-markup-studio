@@ -25,7 +25,13 @@ input.pg { width: 56px; }
 .side { width: 300px; background: var(--panel); display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 .side.right { width: 360px; border-right: 0; border-left: 1px solid var(--line); }
 .ptabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px; border-bottom: 1px solid var(--line); }
-.center { flex: 1; min-width: 0; display: flex; }
+.center { flex: 1; min-width: 0; display: flex; position: relative; }
+.viewer-controls { position: absolute; z-index: 3; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 3px; max-width: calc(100% - 16px); overflow-x: auto; white-space: nowrap; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px var(--shadow); font-size: 11px; }
+.viewer-controls button { padding: 2px 5px; }
+.viewer-controls input.pg { width: 43px; padding: 2px; }
+.tool-icon { display: inline-block; min-width: 1.15em; margin-right: 4px; font-size: 14px; text-align: center; }
+.tool-dialog { width: min(600px, 95vw); }
+.tool-dialog textarea { display: block; width: 100%; }
 .scroller { flex: 1; overflow: auto; background: var(--canvas); position: relative; }
 .page { position: relative; margin: 20px auto; box-shadow: 0 2px 12px var(--shadow); background: #fff; }
 .page canvas, .page svg, .capture { position: absolute; left: 0; top: 0; }

@@ -5,6 +5,9 @@ import { isReviewMarkup } from './numbering';
 
 export const CALLOUT_W = 150;
 export const CALLOUT_PAD = 10;
+export const CALLOUT_MIN_W = 80;
+export const CALLOUT_MIN_H = 45;
+export const CALLOUT_MAX = 4000;
 const MAX_SHOWN = 4;
 
 export interface CalloutLayout {
@@ -48,17 +51,18 @@ export function defaultCalloutPos(m: Pick<Markup, 'points'>): Pt {
 }
 
 export function calloutLayout(m: Markup, fs: number = getCommentSize()): CalloutLayout | null {
-  if (!isReviewMarkup(m) || !m.comments.length) return null;
+  if (!isReviewMarkup(m) || !m.comments.length || m.calloutHidden) return null;
   const HEAD = (fs * 13) / 9;
   const LINE = (fs * 11) / 9;
   const pos = m.callout ?? defaultCalloutPos(m);
+  const width = Math.min(CALLOUT_MAX, Math.max(CALLOUT_MIN_W, m.calloutSize?.width ?? CALLOUT_W));
   const shown = m.comments.slice(-MAX_SHOWN);
   const rows = shown.map((c) => ({
     head: c.author + (c.edited ? ' (edited)' : ''),
-    lines: wrapText(c.text, CALLOUT_W - CALLOUT_PAD * 2, fs),
+    lines: wrapText(c.text, width - CALLOUT_PAD * 2, fs),
   }));
   const h = CALLOUT_PAD * 2 + HEAD + rows.reduce((s, r) => s + HEAD * 0.9 + r.lines.length * LINE + 3, 0);
-  const box = { x: pos.x, y: pos.y, w: CALLOUT_W, h };
+  const box = { x: pos.x, y: pos.y, w: width, h: Math.max(h, Math.min(CALLOUT_MAX, m.calloutSize?.height ?? h)) };
   const centre = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
   const anchor = anchorOf(m, centre);
   const ex = Math.min(Math.max(anchor.x, box.x), box.x + box.w);

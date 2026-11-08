@@ -32,6 +32,8 @@ function validMarkup(m) {
     if (typeof c.text !== 'string' || c.text.length > 5000 || typeof c.date !== 'string') return 'Invalid comment text.';
   }
   if (m.callout !== undefined && (!m.callout || !Number.isFinite(m.callout.x) || !Number.isFinite(m.callout.y))) return 'Invalid comment box position.';
+  if (m.calloutHidden !== undefined && typeof m.calloutHidden !== 'boolean') return 'Invalid comment box visibility.';
+  if (m.calloutSize !== undefined && (!m.calloutSize || !Number.isFinite(m.calloutSize.width) || !Number.isFinite(m.calloutSize.height) || m.calloutSize.width < 80 || m.calloutSize.width > 4000 || m.calloutSize.height < 45 || m.calloutSize.height > 4000)) return 'Invalid comment box size.';
   if (m.stampImage !== undefined) {
     const i = m.stampImage;
     if (m.type !== 'stamp' || !i || typeof i !== 'object' ||

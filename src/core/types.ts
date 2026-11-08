@@ -68,6 +68,10 @@ export interface Markup {
   comments: Comment[];
   /** top-left of the movable comment box, page space; default is placed beside the markup */
   callout?: Pt;
+  /** Per-annotation callout dimensions in page coordinates. */
+  calloutSize?: { width: number; height: number };
+  /** Hide the drawing callout without deleting the review thread. */
+  calloutHidden?: boolean;
 }
 
 export type Unit = 'ft' | 'in' | 'm' | 'mm';

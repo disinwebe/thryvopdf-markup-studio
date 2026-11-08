@@ -6,7 +6,7 @@ import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas } from '../pdf/pdfjs';
 import { MarkupShape } from './MarkupShape';
 import { numberMarkups } from '../core/numbering';
-import { calloutLayout, hitCallout, moveCallout } from '../core/callout';
+import { CALLOUT_MAX, CALLOUT_MIN_H, CALLOUT_MIN_W, calloutLayout, hitCallout, moveCallout } from '../core/callout';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
@@ -16,6 +16,7 @@ type Drag =
   | { kind: 'pan'; sx: number; sy: number; sl: number; st: number }
   | { kind: 'move'; start: Pt; orig: Markup; began: boolean }
   | { kind: 'callout'; start: Pt; orig: Markup; from: Pt; began: boolean }
+  | { kind: 'callout-resize'; start: Pt; orig: Markup; width: number; height: number; began: boolean }
   | { kind: 'handle'; key: HandleKey; orig: Markup; began: boolean }
   | { kind: 'two'; moved: boolean }
   | { kind: 'pen' };
@@ -205,6 +206,11 @@ export function PageView(p: PageViewProps) {
 
     if (tool === 'select') {
       if (selected) {
+        const box = calloutLayout(selected);
+        if (box && dist({ x: box.x + box.w, y: box.y + box.h }, pt) * zoom <= 10) {
+          drag.current = { kind: 'callout-resize', start: pt, orig: selected, width: box.w, height: box.h, began: false };
+          return;
+        }
         const h = handlesOf(selected).find((h) => dist(h.p, pt) * zoom <= 9);
         if (h) {
           drag.current = { kind: 'handle', key: h.key, orig: selected, began: false };
@@ -305,6 +311,15 @@ export function PageView(p: PageViewProps) {
         p.onBeginEdit();
       }
       p.onLive(doc.markups.map((m) => (m.id === dg.orig.id ? moveCallout(dg.orig, { x: dg.from.x + dx, y: dg.from.y + dy }) : m)));
+    } else if (dg.kind === 'callout-resize') {
+      if (!dg.began) {
+        if (dist(dg.start, pt) * zoom < 3) return;
+        dg.began = true;
+        p.onBeginEdit();
+      }
+      const width = Math.max(CALLOUT_MIN_W, Math.min(CALLOUT_MAX, dg.width + pt.x - dg.start.x));
+      const height = Math.max(CALLOUT_MIN_H, Math.min(CALLOUT_MAX, dg.height + pt.y - dg.start.y));
+      p.onLive(doc.markups.map((m) => m.id === dg.orig.id ? { ...dg.orig, calloutSize: { width, height } } : m));
     } else if (dg.kind === 'handle') {
       if (!dg.began) {
         dg.began = true;
@@ -369,6 +384,7 @@ export function PageView(p: PageViewProps) {
     tool === 'hand' ? 'grab' : tool === 'select' ? 'default' : 'crosshair';
   const hs = selected && tool === 'select' ? handlesOf(selected) : [];
   const hsz = 5 / zoom;
+  const selectedCallout = selected && tool === 'select' ? calloutLayout(selected) : null;
 
   return (
     <div className="scroller" ref={scroller}>
@@ -408,6 +424,10 @@ export function PageView(p: PageViewProps) {
                 strokeWidth={1.5 / zoom}
               />
             ))}
+            {selectedCallout && (
+              <rect x={selectedCallout.x + selectedCallout.w - hsz} y={selectedCallout.y + selectedCallout.h - hsz}
+                width={hsz * 2} height={hsz * 2} fill="#fff" stroke="#1976d2" strokeWidth={1.5 / zoom} />
+            )}
           </svg>
           <div
             className="capture"
