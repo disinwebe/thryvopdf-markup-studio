@@ -42,10 +42,9 @@ function menuTemplate(state, send, platform = process.platform) {
       item('Fit &Width', 'fitWidth', doc && viewerActive),
       item('Fit &Page', 'fitPage', doc && viewerActive),
       { type: 'separator' },
-      item('&Measurements...', 'measurePanel', doc && viewerActive),
-      item('O&rganize pages...', 'organizePanel', doc && viewerActive),
-      item('Sheet inde&x...', 'sheetsPanel', doc && viewerActive),
-      item('&Search documents...', 'searchPanel', doc && viewerActive),
+      item('Or&ganize pages...', 'organizePanel', doc && viewerActive),
+      item('Toggle &left panel', 'toggleLeftPanel', doc && viewerActive, 'CmdOrCtrl+Alt+L'),
+      item('Toggle &right panel', 'toggleRightPanel', doc && viewerActive, 'CmdOrCtrl+Alt+R'),
     ] },
     { label: '&Help', submenu: [
       item('&Keyboard shortcuts', 'shortcuts', usable),

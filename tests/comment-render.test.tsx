@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream } from 'pdf-lib';
 import { MarkupShape } from '../src/components/MarkupShape';
 import { DEFAULT_CAL } from '../src/core/measurement';
 import { buildAppearance, readState, saveWithState } from '../src/core/annotations';
@@ -27,6 +27,23 @@ describe('visible review comments', () => {
     expect(appearance.ops).toContain(`100 220 m 250 220 l 250 ${+(300 - 80 - box.h).toFixed(3)} l 100 ${+(300 - 80 - box.h).toFixed(3)} l h B`);
     expect(appearance.ops).toContain('/GS1 gs 0.882 0.114 0.282 RG 1.5 w');
     expect(appearance.ops).toContain('(#1) Tj');
+  });
+  it('omits comment author from saved appearance and Contents without changing the app review data', async () => {
+    const comment = { ...m.comments[0], author: 'Distinct Author', text: 'Author: this text is literal' };
+    const original = await PDFDocument.create();
+    original.addPage([400, 300]);
+    const bytes = await saveWithState(await original.save(), { markups: [{ ...m, comments: [comment] }], calibrations: {}, sheets: {}, bookmarks: [] });
+    const saved = await PDFDocument.load(bytes);
+    const annotation = (saved.getPages()[0].node.Annots() as PDFArray).lookup(0, PDFDict);
+    expect(annotation.lookup(PDFName.of('Contents'), PDFHexString).decodeText()).toBe(comment.text);
+    expect(annotation.lookup(PDFName.of('T'), PDFHexString).decodeText()).toBe('A');
+    const ap = annotation.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N'));
+    expect(ap).toBeInstanceOf(PDFRawStream);
+    const ops = new TextDecoder().decode((ap as PDFRawStream).contents);
+    expect(ops).toContain('(Author: this text is literal) Tj');
+    expect(ops).not.toContain('Distinct Author');
+    expect((await readState(saved)).markups[0].comments[0]).toEqual(comment);
+    expect(renderToStaticMarkup(<svg><MarkupShape m={{ ...m, comments: [comment] }} cal={DEFAULT_CAL} tag={1} /></svg>)).toContain('Distinct Author');
   });
   it('does not render a tag or comment box for a legacy stamp', async () => {
     expect(calloutLayout(stamp)).toBeNull();

@@ -34,7 +34,7 @@ describe('annotation IDs and comments in the PDF', () => {
     const items = reviewItems(doc);
     expect(items).toHaveLength(2);
     const p1 = items.find((x) => str(x.d.get(PDFName.of('NM'))) === 'aaa')!;
-    expect(str(p1.d.get(PDFName.of('Contents')))).toBe('Check this\n\nBob: first\nBob: second');
+    expect(str(p1.d.get(PDFName.of('Contents')))).toBe('Check this\n\nfirst\nsecond');
     const popup = p1.d.lookup(PDFName.of('Popup'), PDFDict);
     expect(popup.get(PDFName.of('Parent'))).toBe(p1.ref);
   });

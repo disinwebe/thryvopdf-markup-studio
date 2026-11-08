@@ -352,7 +352,6 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     let txt = '';
     for (const r of co.rows) {
       const head = y + co.fs;
-      txt += `BT /F1 ${f(co.headFs)} Tf 0.62 0.07 0.21 rg ${tm({ x: co.x + CALLOUT_PAD, y: head })} (${latin1(r.head)}) Tj ET\n`;
       r.lines.forEach((ln, j) => {
         txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + CALLOUT_PAD, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
       });
@@ -561,7 +560,7 @@ function nameForeignAnnots(page: PDFPage) {
 
 /** /Contents carries the markup's own text followed by its comment thread, so any viewer shows the comments. */
 export function contentsOf(m: Markup): string {
-  const thread = m.comments.map((c) => c.author + ': ' + c.text).join('\n');
+  const thread = m.comments.map((c) => c.text).join('\n');
   return [m.text ?? '', thread].filter(Boolean).join('\n\n');
 }
 

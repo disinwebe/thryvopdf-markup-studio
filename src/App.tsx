@@ -23,6 +23,7 @@ import { getCommentSize, setCommentSize } from './core/commentSize';
 import { markupCsv } from './core/markupCsv';
 import { importStamp } from './app/stampImport';
 import { LicenseInfo, type LicenseInfoStatus } from './components/LicenseInfo';
+import { PanelToggle } from './components/PanelToggle';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const TOOL_ICONS: Partial<Record<Tool, string>> = {
@@ -58,6 +59,8 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RightTab>('markups');
   const [leftTab, setLeftTab] = useState<LeftTab>('project');
+  const [leftPanelVisible, setLeftPanelVisible] = useState(true);
+  const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const [defaultsOpen, setDefaultsOpen] = useState(false);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfoStatus | null>(null);
   const [fit, setFit] = useState<{ mode: 'width' | 'page'; n: number }>({ mode: 'page', n: 0 });
@@ -417,6 +420,8 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       case 'pan': setTool('hand'); setPending(null); break;
       case 'delete': if (selectedId) deleteMarkup(selectedId); break;
       case 'theme': setTheme(theme === 'dark' ? 'light' : 'dark'); break;
+      case 'toggleLeftPanel': setLeftPanelVisible((visible) => !visible); break;
+      case 'toggleRightPanel': setRightPanelVisible((visible) => !visible); break;
       case 'toolDefaults': setDefaultsOpen(true); break;
       case 'measurePanel': setRightTab('measure'); break;
       case 'organizePanel': setRightTab('organize'); break;
@@ -426,7 +431,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
       case 'zoomOut': if (view === 'viewer') zoomBy(1 / 1.25); break;
       case 'fitWidth': if (active && view === 'viewer') setFit((f) => ({ mode: 'width', n: f.n + 1 })); break;
       case 'fitPage': if (active && view === 'viewer') setFit((f) => ({ mode: 'page', n: f.n + 1 })); break;
-      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
+      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Alt+L / Ctrl+Alt+R: toggle left / right panel\nCtrl+Z / Ctrl+Shift+Z: Undo / Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
       case 'about': void window.api?.showAbout(); break;
       case 'license':
         if (!window.api) { setLicenseInfo({ ok: false, error: 'Licensing requires the Windows desktop application.' }); break; }
@@ -580,7 +585,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
           <ComparePanel docs={docs} activeId={active.id} onOpenRevision={async () => addDocs(await pickFiles(), false)} onMessage={say} />
         ) : (
           <>
-            <div className="side left">
+            <div className="side left" id="left-panel" hidden={!leftPanelVisible}>
               <div className="ptabs">
                 {(['project', 'pages', 'bookmarks'] as LeftTab[]).map((t) => (
                   <button key={t} className={leftTab === t ? 'on' : ''} onClick={() => setLeftTab(t)}>
@@ -615,6 +620,8 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
               )}
             </div>
             <div className="center">
+              <PanelToggle side="left" visible={leftPanelVisible} onToggle={() => setLeftPanelVisible((visible) => !visible)} />
+              <PanelToggle side="right" visible={rightPanelVisible} onToggle={() => setRightPanelVisible((visible) => !visible)} />
               <PageView
                 key={active.id}
                 doc={active}
@@ -648,7 +655,7 @@ export default function App({ user, actions }: { user: AuthUser; actions: { serv
                 <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))} title="Fit page"><span aria-hidden="true">▣</span> Page</button>
               </div>
             </div>
-            <div className="side right">
+            <div className="side right" id="right-panel" hidden={!rightPanelVisible}>
               <div className="ptabs">
                 <button className="on">Markups ({countOf})</button>
               </div>

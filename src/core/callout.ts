@@ -4,7 +4,7 @@ import { BOX_TYPES, Markup, Pt } from './types';
 import { isReviewMarkup } from './numbering';
 
 export const CALLOUT_W = 150;
-export const CALLOUT_PAD = 10;
+export const CALLOUT_PAD = 7;
 export const CALLOUT_MIN_W = 80;
 export const CALLOUT_MIN_H = 45;
 export const CALLOUT_MAX = 4000;
