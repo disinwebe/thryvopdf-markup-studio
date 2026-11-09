@@ -6,6 +6,30 @@ const path = require('node:path');
 const http = require('node:http');
 const { SERVICE, validate, serviceArgs, parseImage, addresses } = require('./control.cjs');
 
+const { sendMail, normalizeSmtp } = require('../server/notify.cjs');
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const NEEDS_AUTH = ['smtp.office365.com', 'smtp-mail.outlook.com', 'smtp.gmail.com'];
+function needAuth(c) {
+  if (c.provider === 'graph') {
+    if (!/^[A-Za-z0-9.-]+$/.test(c.tenantId) || !/^[0-9a-fA-F-]{36}$/.test(c.clientId) || !c.clientSecret) throw new Error('Enter the Directory (tenant) ID, the Application (client) ID (a GUID) and the client secret value.');
+    return;
+  }
+  if (NEEDS_AUTH.includes(c.host.toLowerCase()) && (!c.user || !c.password)) throw new Error('This provider requires signing in: enter the SMTP user (full mailbox address) and its password or app password, then save.');
+}
+function friendly(err) {
+  const m = err.message || String(err);
+  if (/AADSTS7000215|AADSTS7000222|invalid_client/.test(m)) return m + ' Hint: the client secret is wrong or expired. Paste the secret VALUE (not the secret ID).';
+  if (/AADSTS700016|AADSTS90002|AADSTS900023/.test(m)) return m + ' Hint: check the tenant ID and application (client) ID.';
+  if (/Graph error 403|ErrorAccessDenied/.test(m)) return m + ' Hint: grant the app the Microsoft Graph application permission Mail.Send and click Grant admin consent (and check any Exchange application access policy).';
+  if (/Graph error 404|MailboxNotEnabledForRESTAPI|ResourceNotFound/.test(m)) return m + ' Hint: the From mailbox must exist and be licensed for Exchange Online.';
+  if (/5\.7\.57|530 /.test(m)) return m + ' Hint: the server did not accept the sign-in. Check the SMTP user and password, and that Authenticated SMTP is enabled for this mailbox.';
+  if (/535|5\.7\.139|5\.7\.3|534/.test(m)) return m + ' Hint: sign-in was rejected. Use an app password (Gmail/Outlook with 2-step verification), or ask a Microsoft 365 administrator to enable SMTP AUTH and allow basic authentication for this mailbox.';
+  return m;
+}
+function readNotify(dir) {
+  try { return normalizeSmtp(JSON.parse(fs.readFileSync(path.join(dir, 'notify.json'), 'utf8')).smtp); } catch { return normalizeSmtp(); }
+}
 app.setName('ThryvoPDF Server Manager');
 app.setPath('userData', path.join(app.getPath('appData'), 'ThryvoPDF Server Manager'));
 const run = promisify(execFile);
@@ -89,6 +113,40 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('manager:firewall', async (e) => { own(e); await shell.openExternal('https://support.microsoft.com/windows/risks-of-allowing-apps-through-windows-firewall-654559af-3f54-3dcf-349f-71ccd90bcc5c'); });
   ipcMain.handle('manager:logs', async (e) => { own(e); const s = await status(); const file = path.join(s.config.dataDir, 'service.log'); if (!fs.existsSync(file)) throw new Error('No service log exists yet. The service must be able to write to its data folder.'); const err = await shell.openPath(file); if (err) throw new Error(err); });
+  ipcMain.handle('manager:notify-get', async (e) => {
+    own(e);
+    const s = await status();
+    const c = readNotify(s.config.dataDir);
+    return { enabled: c.enabled, provider: c.provider, host: c.host, port: c.port, secure: c.secure, user: c.user, from: c.from, hasPassword: !!c.password, tenantId: c.tenantId, clientId: c.clientId, hasSecret: !!c.clientSecret };
+  });
+  ipcMain.handle('manager:notify-save', async (e, input) => {
+    own(e);
+    const s = await status();
+    const prev = readNotify(s.config.dataDir);
+    const next = normalizeSmtp({ ...input, password: typeof input?.password === 'string' && input.password ? input.password : prev.password, clientSecret: typeof input?.clientSecret === 'string' && input.clientSecret.trim() ? input.clientSecret : prev.clientSecret });
+    const fromAddr = (/<([^>]+)>/.exec(next.from) || [null, next.from])[1];
+    if (next.enabled && !EMAIL_RE.test(fromAddr)) throw new Error('Enter a valid From address (for example ThryvoPDF <noreply@example.com>).');
+    if (next.enabled && next.provider !== 'graph' && !next.host) throw new Error('Enter an SMTP host.');
+    if (next.enabled) needAuth(next);
+    try {
+      fs.mkdirSync(s.config.dataDir, { recursive: true });
+      const file = path.join(s.config.dataDir, 'notify.json');
+      fs.writeFileSync(file + '.tmp', JSON.stringify({ smtp: next }, null, 2));
+      fs.renameSync(file + '.tmp', file);
+    } catch (err) {
+      throw new Error('Could not save email settings to the data folder (' + (err.code || err.message) + '). Run the manager as administrator or grant your account write access. The service applies changes on the next notification without a restart.');
+    }
+  });
+  ipcMain.handle('manager:notify-test', async (e, to) => {
+    own(e);
+    if (typeof to !== 'string' || !EMAIL_RE.test(to.trim())) throw new Error('Enter a valid test recipient address.');
+    const s = await status();
+    const c = readNotify(s.config.dataDir);
+    if (c.provider !== 'graph' && !c.host) throw new Error('Save SMTP settings first.');
+    needAuth(c);
+    try { await sendMail(c, to.trim(), 'ThryvoPDF test email', 'Email notifications from your ThryvoPDF server are working.'); }
+    catch (err) { throw new Error('Test email failed: ' + friendly(err)); }
+  });
   ipcMain.handle('manager:copy', (e, value) => { own(e); if (typeof value !== 'string' || !/^http:\/\/[0-9.]+:\d+$/.test(value)) throw new Error('Invalid address.'); clipboard.writeText(value); });
 });
 app.on('window-all-closed', () => app.quit());

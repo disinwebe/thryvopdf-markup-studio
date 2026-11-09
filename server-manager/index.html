@@ -29,6 +29,37 @@
       <p class="muted">Service actions explicitly request administrator approval. Uninstall leaves the data folder and its LocalService permissions in place. Stop and uninstall the service before uninstalling or upgrading this manager.</p>
     </section>
     <section>
+      <h2>Assignment notifications</h2>
+      <p class="muted">When someone is assigned to a shared document, they always get an in-app alert. Optionally also send an email through your SMTP server. Settings are stored in <code>notify.json</code> in the data folder (including the SMTP password, so keep that folder restricted) and apply without restarting the service.</p>
+      <label><input id="smtp-enabled" type="checkbox"> Send email notifications</label>
+      <label for="smtp-provider">Email provider</label>
+      <select id="smtp-provider">
+        <option value="graph">Microsoft 365 - Microsoft Graph (recommended)</option>
+        <option value="custom">Other / custom SMTP server</option>
+        <option value="m365">Microsoft 365 (Exchange Online)</option>
+        <option value="outlook">Outlook.com / Hotmail</option>
+        <option value="gmail">Gmail / Google Workspace</option>
+      </select>
+      <p id="smtp-hint" class="muted"></p>
+      <div id="smtp-fields">
+      <label for="smtp-host">SMTP host</label><input id="smtp-host" type="text" autocomplete="off">
+      <label for="smtp-port">SMTP port</label><input id="smtp-port" type="number" min="1" max="65535" value="587">
+      <label><input id="smtp-secure" type="checkbox"> Use implicit TLS (usually port 465); otherwise STARTTLS is used when offered</label>
+      <label for="smtp-user">SMTP user (optional)</label><input id="smtp-user" type="text" autocomplete="off">
+      <label for="smtp-password">SMTP password</label><input id="smtp-password" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved password">
+      </div>
+      <div id="graph-fields" hidden>
+        <label for="graph-tenant">Directory (tenant) ID</label><input id="graph-tenant" type="text" autocomplete="off">
+        <label for="graph-client">Application (client) ID</label><input id="graph-client" type="text" autocomplete="off">
+        <label for="graph-secret">Client secret value</label><input id="graph-secret" type="password" autocomplete="new-password">
+      </div>
+      <label for="smtp-from">From address</label><input id="smtp-from" type="text" placeholder="ThryvoPDF &lt;noreply@example.com&gt;">
+      <div class="buttons"><button id="smtp-save" class="primary">Save email settings</button></div>
+      <label for="smtp-test-to">Send a test email to</label>
+      <div class="buttons"><input id="smtp-test-to" type="text"><button id="smtp-test">Send test</button></div>
+      <p id="smtp-status" role="status"></p>
+    </section>
+    <section>
       <h2>Connect and protect</h2>
       <div id="addresses"></div>
       <p class="warning">The service uses unencrypted HTTP. Use a trusted network; the standalone server supports TLS via its documented configuration. Windows Firewall is not changed automatically.</p>

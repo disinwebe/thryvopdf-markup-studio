@@ -10,7 +10,7 @@ button { padding: 7px 12px; border: 1px solid #98a7b8; border-radius: 5px; backg
 button:hover:enabled { background: #e6effc; }
 button:disabled { opacity: .5; cursor: default; }
 .primary { color: white; background: #175cd3; border-color: #175cd3; }
-input { box-sizing: border-box; padding: 8px; border: 1px solid #98a7b8; border-radius: 4px; }
+input, select { box-sizing: border-box; padding: 8px; border: 1px solid #98a7b8; border-radius: 4px; }
 #data { flex: 1; min-width: 300px; }
 label { display: block; margin: 12px 0 5px; font-weight: 600; }
 .muted { color: #526276; font-size: 13px; }

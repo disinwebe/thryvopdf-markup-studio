@@ -114,3 +114,12 @@ button.link { background: none; border: 0; color: var(--acc); }
 .props .comment-input { box-sizing: border-box; padding: 8px 10px; width: 100%; }
 .props .comment-size { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .props .comment-size select { max-width: 80px; }
+.notifications { position: fixed; right: 12px; bottom: 12px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.notifications .badge { background: #d71920; color: #fff; }
+.notifications .toast, .notifications .notif-list { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-width: 360px; box-shadow: 0 4px 16px rgba(0,0,0,.35); font-size: 12px; }
+.notifications .toast { display: flex; gap: 8px; align-items: center; }
+.notifications .notif-list { max-height: 50vh; overflow: auto; }
+.notifications ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.notifications li { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.notifications li.unread span { font-weight: 600; }
+.notifications time { opacity: .7; }

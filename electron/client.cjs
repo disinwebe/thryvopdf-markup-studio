@@ -130,6 +130,12 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
       return call(cfg.serverUrl, 'POST', '/api/admin/update', a, session.token);
     },
 
+    async notifications(a = {}) {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Not signed in.' };
+      if (a.read) return call(cfg.serverUrl, 'POST', '/api/notifications/read', a.read === 'all' ? { all: true } : { ids: a.read }, session.token);
+      return call(cfg.serverUrl, 'GET', '/api/notifications', null, session.token);
+    },
+
     async docs(a = {}) {
       if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Shared documents need a signed-in server connection.' };
       const health = await call(cfg.serverUrl, 'GET', '/api/health');

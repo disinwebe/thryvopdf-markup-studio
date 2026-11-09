@@ -30,6 +30,7 @@ import { SaveIcon } from './components/SaveIcon';
 import { normalizePdfFilename } from './app/filename';
 import { isReviewMarkup } from './core/numbering';
 import { PendingRegistrationsNotice, type PendingRegistrationState } from './components/PendingRegistrations';
+import { NotificationBell, type NotificationsApi } from './components/Notifications';
 import { TabNameEditor } from './components/TabNameEditor';
 import { loadMarkupStyleDefaults, saveMarkupStyleDefaults } from './app/styleDefaults';
 import { KeyIcon } from './components/KeyIcon';
@@ -52,7 +53,7 @@ type LeftTab = 'pages' | 'bookmarks' | 'project';
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; serverSetup?: () => void; pendingRegistrations?: PendingRegistrationState | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
+export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; serverSetup?: () => void; pendingRegistrations?: PendingRegistrationState | null; notifications?: NotificationsApi | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
   const readOnly = viewOnly;
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -593,6 +594,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         {viewOnly && <><span className="muted">Unlicensed viewing — editing is disabled.</span><button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>License information…</button><button onClick={onImportLicense}>Import license…</button></>}
         <span className="who" title={user.email}>{viewOnly ? <><b>Guest viewer</b></> : <>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</>}</span>
         <PendingRegistrationsNotice state={actions.pendingRegistrations ?? null} onManageUsers={() => actions.manageUsers?.()} />
+      <NotificationBell api={actions.notifications ?? null} onOpenShared={() => setLibrary(true)} />
         {!viewOnly && <button className="toolbar-logout" onClick={() => void logout()} title="Logout"><KeyIcon />Logout</button>}
       </div>
       {readOnly && <div className="collab warn" role="status">Read-only viewer mode - a license is required to edit or save. <button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>Activate...</button></div>}
