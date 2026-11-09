@@ -37,7 +37,7 @@ async function call(method: string, path: string, token?: string, body?: any, ra
 }
 const rename = (token: string | undefined, project: string, newProject: any) => call('POST', '/api/docs/groups/rename', token, { project, newProject });
 const upload = (token: string, project: string, name: string, rel = '', description = '') =>
-  call('POST', `/api/docs?name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}&rel=${encodeURIComponent(rel)}&description=${encodeURIComponent(description)}`, token, undefined, PDF);
+  call('POST', `/api/docs?member=admin&member=ann%40example.com&member=bob%40example.com&member=other%40example.com&name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}&rel=${encodeURIComponent(rel)}&description=${encodeURIComponent(description)}`, token, undefined, PDF);
 
 beforeAll(async () => {
   dir = mkdtempSync(join(process.cwd(), '.group-rename-test-'));

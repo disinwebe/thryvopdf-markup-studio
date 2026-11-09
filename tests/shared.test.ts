@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const req = createRequire(import.meta.url);
 const { start } = req('../server/server.cjs');
-const { validMarkup } = req('../server/docs.cjs');
+const { createDocs, validMarkup } = req('../server/docs.cjs');
 
 const ADMIN_PW = 'InitialAdmin1';
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
@@ -56,7 +56,7 @@ describe('shared documents', () => {
   });
 
   it('uploads a PDF and another user opens identical bytes', async () => {
-    const up = await call('POST', '/api/docs?name=' + encodeURIComponent('..\\Plan A'), ann, undefined, PDF);
+    const up = await call('POST', '/api/docs?member=bob%40example.com&name=' + encodeURIComponent('..\\Plan A'), ann, undefined, PDF);
     expect(up.code).toBe(201);
     expect(up.doc).toMatchObject({ name: 'Plan A.pdf', owner: 'Ann Lee' });
     id = up.doc.id;
@@ -70,6 +70,43 @@ describe('shared documents', () => {
   it('rejects non-PDF uploads and unknown ids', async () => {
     expect((await call('POST', '/api/docs?name=x.pdf', ann, undefined, Buffer.from('hello world, not a pdf'))).code).toBe(400);
     expect((await call('GET', '/api/docs/nope/state', ann)).code).toBe(404);
+  });
+
+  it('restricts new uploads and all document routes to explicitly selected users', async () => {
+    const up = await call('POST', '/api/docs?name=private.pdf', ann, undefined, PDF);
+    const privateId = up.doc.id;
+    expect((await call('GET', '/api/docs', bob)).docs.map((d: any) => d.id)).not.toContain(privateId);
+    for (const [method, suffix] of [['GET', 'file'], ['GET', 'state'], ['GET', 'events?since=0&pr=0'], ['POST', 'ops'], ['POST', 'leave'], ['POST', 'meta'], ['DELETE', '']]) {
+      expect((await call(method, `/api/docs/${privateId}${suffix ? '/' + suffix : ''}`, bob, method === 'POST' ? {} : undefined)).code).toBe(403);
+    }
+    expect((await call('GET', `/api/docs/${privateId}/file`, admin)).code).toBe(403);
+    expect((await call('POST', `/api/docs/${privateId}/members`, bob, { members: ['bob@example.com'] })).code).toBe(403);
+    expect((await call('POST', `/api/docs/${privateId}/members`, ann, { members: ['missing@example.com'] })).code).toBe(400);
+    expect((await call('POST', `/api/docs/${privateId}/members`, ann, { members: ['bob@example.com'] })).code).toBe(200);
+    expect((await call('GET', `/api/docs/${privateId}/file`, bob)).bytes).toEqual(PDF);
+    const state = await call('GET', `/api/docs/${privateId}/state`, bob);
+    const waiting = call('GET', `/api/docs/${privateId}/events?since=${state.version}&pr=${state.pr}`, bob);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect((await call('POST', `/api/docs/${privateId}/members`, ann, { members: [] })).code).toBe(200);
+    expect((await waiting).code).toBe(403);
+    expect((await call('GET', `/api/docs/${privateId}/state`, bob)).code).toBe(403);
+    await call('DELETE', `/api/docs/${privateId}`, ann);
+  });
+
+  it('restricts legacy documents to their uploader until access is granted', () => {
+    const docsDir = join(dir, 'legacy-access');
+    const owner = { email: 'ann@example.com', name: 'Ann Lee', role: 'user' };
+    const other = { email: 'bob@example.com', name: 'Bob Ray', role: 'user' };
+    const store = createDocs({ dir: docsDir });
+    const doc = store.upload(owner, 'legacy.pdf', PDF)[1].doc;
+    const file = join(docsDir, doc.id + '.json');
+    const record = JSON.parse(readFileSync(file, 'utf8'));
+    delete record.members;
+    writeFileSync(file, JSON.stringify(record));
+    const legacy = createDocs({ dir: docsDir });
+    expect(legacy.file(doc.id, other)[0]).toBe(403);
+    expect(legacy.setMembers(doc.id, owner, ['bob@example.com'])[0]).toBe(200);
+    expect(createDocs({ dir: docsDir }).file(doc.id, other)[0]).toBe(200);
   });
 
   it('persists markups with author attribution and validates input', async () => {
@@ -165,7 +202,7 @@ describe('shared documents', () => {
 
   it('groups uploads into projects with sanitized relative folders', async () => {
     const up = async (name: string, project: string, rel: string) =>
-      call('POST', `/api/docs?name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}&rel=${encodeURIComponent(rel)}`, ann, undefined, PDF);
+      call('POST', `/api/docs?member=bob%40example.com&name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}&rel=${encodeURIComponent(rel)}`, ann, undefined, PDF);
     const a = await up('A-101.pdf', 'Tower B', 'Arch/Level 1');
     const b = await up('S-201.pdf', 'Tower B', '..\\..\\Struct//L2');
     const c = await up('M-1.pdf', '<script>x', '');
@@ -180,7 +217,7 @@ describe('shared documents', () => {
   });
 
   it('accepts a large markup batch (more than the old 16 KB limit)', async () => {
-    const up = await call('POST', '/api/docs?name=big.pdf', ann, undefined, PDF);
+    const up = await call('POST', '/api/docs?member=bob%40example.com&name=big.pdf', ann, undefined, PDF);
     const many = Array.from({ length: 400 }, (_, i) => mk('big' + i, { text: 'x'.repeat(100) }));
     const r = await call('POST', `/api/docs/${up.doc.id}/ops`, ann, { upserts: many });
     expect(r.ok).toBe(true);
@@ -205,7 +242,7 @@ describe('shared documents', () => {
   });
 
   it('keeps annotation and comment ids stable through sync and restart-style reads', async () => {
-    const up = await call('POST', '/api/docs?name=ids.pdf', ann, undefined, PDF);
+    const up = await call('POST', '/api/docs?member=bob%40example.com&name=ids.pdf', ann, undefined, PDF);
     const base = mk('stable-1', { comments: [{ id: 'cm1', author: 'x', date: 'd', text: 'one' }] });
     await call('POST', `/api/docs/${up.doc.id}/ops`, ann, { upserts: [base] });
     const seen = (await call('GET', `/api/docs/${up.doc.id}/state`, bob)).markups[0];
@@ -221,7 +258,7 @@ describe('shared documents', () => {
     expect((await call('DELETE', `/api/docs/${id}`, bob)).code).toBe(403);
     expect((await call('DELETE', `/api/docs/${id}`, ann)).ok).toBe(true);
     expect((await call('GET', `/api/docs/${id}/state`, ann)).code).toBe(404);
-    const up = await call('POST', '/api/docs?name=b.pdf', bob, undefined, PDF);
+    const up = await call('POST', '/api/docs?member=admin&name=b.pdf', bob, undefined, PDF);
     expect((await call('DELETE', `/api/docs/${up.doc.id}`, admin)).ok).toBe(true);
   });
 

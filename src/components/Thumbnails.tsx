@@ -63,10 +63,12 @@ export function BookmarksPanel({
   doc,
   onGoto,
   onChange,
+  readOnly = false,
 }: {
   doc: Doc;
   onGoto(i: number): void;
   onChange(b: Doc['bookmarks']): void;
+  readOnly?: boolean;
 }) {
   const [title, setTitle] = useState('');
   const add = () => {
@@ -86,21 +88,21 @@ export function BookmarksPanel({
   return (
     <div className="panel-body">
       <div className="row">
-        <input value={title} placeholder="Bookmark title (current page)" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
-        <button onClick={add}>Add</button>
+        <input disabled={readOnly} value={title} placeholder="Bookmark title (current page)" onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+        <button disabled={readOnly} onClick={add}>Add</button>
       </div>
       {doc.bookmarks.length === 0 && <p className="muted">No bookmarks. They are saved into the PDF outline.</p>}
       {doc.bookmarks.map((b, i) => (
         <div key={i} className="bm" style={{ paddingLeft: b.level * 14 }}>
-          <input value={b.title} onChange={(e) => upd(i, { title: e.target.value })} />
+          <input value={b.title} readOnly={readOnly} onChange={(e) => upd(i, { title: e.target.value })} />
           <button title="Go to page" onClick={() => onGoto(b.page)}>
             p{b.page + 1}
           </button>
-          <button title="Move up" onClick={() => move(i, -1)}>↑</button>
+          {!readOnly && <><button title="Move up" onClick={() => move(i, -1)}>↑</button>
           <button title="Move down" onClick={() => move(i, 1)}>↓</button>
           <button title="Outdent" onClick={() => upd(i, { level: Math.max(0, b.level - 1) })}>◂</button>
           <button title="Indent" onClick={() => upd(i, { level: Math.min(4, b.level + 1) })}>▸</button>
-          <button title="Delete" onClick={() => onChange(doc.bookmarks.filter((_, k) => k !== i))}>✕</button>
+          <button title="Delete" onClick={() => onChange(doc.bookmarks.filter((_, k) => k !== i))}>✕</button></>}
         </div>
       ))}
     </div>

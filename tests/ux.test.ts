@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { COMMENT_SIZE_DEFAULT, COMMENT_SIZE_KEY, clampCommentSize, loadCommentSize, saveCommentSize } from '../src/core/commentSize';
 import { calloutLayout } from '../src/core/callout';
-import { SHARED_REFRESH_MS, startPolling, toolForKey } from '../src/app/shortcuts';
+import { SHARED_REFRESH_MS, historyShortcut, startPolling, toolForKey } from '../src/app/shortcuts';
 
 const mem = () => {
   const m = new Map<string, string>();
@@ -30,6 +30,15 @@ describe('comment text size preference', () => {
 });
 
 describe('tool shortcuts', () => {
+  it('recognizes undo and both redo shortcuts without taking over input editing', () => {
+    expect(historyShortcut({ key: 'z', ctrlKey: true })).toBe('undo');
+    expect(historyShortcut({ key: 'Z', ctrlKey: true, shiftKey: true })).toBe('redo');
+    expect(historyShortcut({ key: 'y', ctrlKey: true })).toBe('redo');
+    expect(historyShortcut({ key: 'z', metaKey: true })).toBe('undo');
+    expect(historyShortcut({ key: 'z', ctrlKey: true, target: { tagName: 'INPUT' } as any })).toBeNull();
+    expect(historyShortcut({ key: 'z', ctrlKey: true, target: { tagName: 'DIV', isContentEditable: true } as any })).toBeNull();
+    expect(historyShortcut({ key: 'z', ctrlKey: true, altKey: true })).toBeNull();
+  });
   it('V selects, H toggles pan', () => {
     expect(toolForKey({ key: 'v' }, 'pen')).toBe('select');
     expect(toolForKey({ key: 'H' }, 'select')).toBe('hand');

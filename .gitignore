@@ -1,6 +1,8 @@
 node_modules
 dist
 release
+release-server-manager
+server-manager/build
 *.log
 
 shot.png

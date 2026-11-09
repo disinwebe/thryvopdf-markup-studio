@@ -114,7 +114,7 @@ function createApp(opts = {}) {
   const activeAdmins = () => users.filter((u) => u.role === 'admin' && u.status === 'active').length;
 
   const handlers = {
-    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true }],
+    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true, docsAccess: true }],
 
     'POST /api/register': (req, b, ip) => {
       const r = regs.get(ip);
@@ -237,19 +237,29 @@ function createApp(opts = {}) {
     authed((s, b, ip, req, url, m) => {
       if (s.user.status !== 'active') return [403, { ok: false, error: 'Account not active.' }];
       if (s.user.mustChange) return [403, { ok: false, error: 'Change your password first.' }];
-      if (!docs.isAvailable()) return [503, { ok: false, error: 'Shared library unavailable. Restart the server to recover the group rename.' }];
+      if (!docs.isAvailable()) return [503, { ok: false, error: 'Shared library unavailable. Restart the server to recover the group operation.' }];
       return fn(s.user, b, req, url, m);
     });
+  const validateMembers = (members) => Array.isArray(members) && members.length <= 500 &&
+    members.every((email) => typeof email === 'string' && email === normEmail(email) && find(email)?.status === 'active');
+  const invalidMembers = [400, { ok: false, error: 'Select valid active users for document access.' }];
   const docRoutes = [
     ['GET', /^\/api\/docs$/, ready((u) => docs.list(u))],
-    ['POST', /^\/api\/docs$/, ready((u, b, req, url) => docs.upload(u, url.searchParams.get('name') || 'document.pdf', b, { project: url.searchParams.get('project'), rel: url.searchParams.get('rel'), description: url.searchParams.get('description') }))],
+    ['GET', /^\/api\/docs\/users$/, ready(() => [200, { ok: true, users: users.filter((u) => u.status === 'active').map((u) => ({ name: u.name, email: u.email, discipline: u.discipline })) }])],
+    ['POST', /^\/api\/docs$/, ready((u, b, req, url) => {
+      const members = url.searchParams.getAll('member');
+      if (!validateMembers(members)) return invalidMembers;
+      return docs.upload(u, url.searchParams.get('name') || 'document.pdf', b, { project: url.searchParams.get('project'), rel: url.searchParams.get('rel'), description: url.searchParams.get('description'), members: [...new Set(members)] });
+    })],
     ['POST', /^\/api\/docs\/groups\/rename$/, ready((u, b) => docs.renameGroup(u, b))],
-    ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1]))],
+    ['POST', /^\/api\/docs\/groups\/delete$/, ready((u, b) => docs.deleteGroup(u, b))],
+    ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1], u))],
     ['GET', /^\/api\/docs\/([\w-]+)\/state$/, ready((u, b, req, url, m) => docs.state(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/ops$/, ready((u, b, req, url, m) => docs.ops(m[1], u, b))],
     ['GET', /^\/api\/docs\/([\w-]+)\/events$/, ready((u, b, req, url, m) => docs.events(m[1], u, Number(url.searchParams.get('since')), Number(url.searchParams.get('pr') || 0)))],
     ['POST', /^\/api\/docs\/([\w-]+)\/leave$/, ready((u, b, req, url, m) => docs.leave(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/meta$/, ready((u, b, req, url, m) => docs.meta(m[1], u, b))],
+    ['POST', /^\/api\/docs\/([\w-]+)\/members$/, ready((u, b, req, url, m) => validateMembers(b.members) ? docs.setMembers(m[1], u, [...new Set(b.members)]) : invalidMembers)],
   ['DELETE', /^\/api\/docs\/([\w-]+)$/, ready((u, b, req, url, m) => docs.remove(m[1], u))],
   ];
 
@@ -316,7 +326,13 @@ async function start(opts = {}) {
   const { listener, seeded } = createApp(opts);
   const tls = opts.tlsKey && opts.tlsCert ? { key: fs.readFileSync(opts.tlsKey), cert: fs.readFileSync(opts.tlsCert) } : null;
   const srv = tls ? https.createServer(tls, listener) : http.createServer(listener);
-  return new Promise((resolve) => srv.listen(opts.port ?? 8787, opts.host || '0.0.0.0', () => resolve({ server: srv, port: srv.address().port, tls: !!tls, seeded })));
+  return new Promise((resolve, reject) => {
+    srv.once('error', reject);
+    srv.listen(opts.port ?? 8787, opts.host || '0.0.0.0', () => {
+      srv.removeListener('error', reject);
+      resolve({ server: srv, port: srv.address().port, tls: !!tls, seeded });
+    });
+  });
 }
 
 module.exports = { createApp, start, MIN_PASSWORD, EMAIL_RE };

@@ -57,9 +57,7 @@ describe('older server without shared documents', () => {
     await c.login({ email: 'a@x', password: 'p' });
     const r = await c.docs({ op: 'upload', name: 'a.pdf', bytes: Buffer.from('%PDF-1.4'), project: 'P', rel: 'x' });
     expect(r.ok).toBe(false);
-    expect(r.error).toContain('POST /api/docs');
-    expect(r.error).not.toContain('()');
-    expect(r.error).toMatch(/older build/);
+    expect(r.error).toMatch(/does not enforce document access permissions/);
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -79,7 +77,7 @@ describe('older server without shared documents', () => {
   };
 
   it('distinguishes a proxy/path problem when health reports docs:true', async () => {
-    const c = await mkClient({ ok: true, hasUsers: true, docs: true });
+    const c = await mkClient({ ok: true, hasUsers: true, docs: true, docsAccess: true });
     await c.login({ email: 'a@x', password: 'p' });
     const r = await c.docs({ op: 'list' });
     expect(r.error).toContain('GET /api/docs');

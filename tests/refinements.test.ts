@@ -25,7 +25,7 @@ describe('markup property and comment refinements', () => {
 
   it('lays out each markup property as a full-width vertical row', () => {
     const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
-    expect(css).toMatch(/\.props\s*>\s*label\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
-    expect(css).toMatch(/\.props\s*>\s*label\s+input[^}]*width:\s*100%/);
+    expect(css).toMatch(/\.props-fields\s*>\s*label\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
+    expect(css).toMatch(/\.props-fields\s*>\s*label\s+input[^}]*width:\s*100%/);
   });
 });

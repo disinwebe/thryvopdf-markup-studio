@@ -5,6 +5,13 @@ export const isTypingTarget = (t: EventTarget | null): boolean => {
   return !!el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable === true);
 };
 
+export function historyShortcut(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; target?: EventTarget | null }): 'undo' | 'redo' | null {
+  if ((!e.ctrlKey && !e.metaKey) || e.altKey || isTypingTarget(e.target ?? null)) return null;
+  const key = e.key.toLowerCase();
+  if (key === 'z') return e.shiftKey ? 'redo' : 'undo';
+  return key === 'y' && !e.shiftKey ? 'redo' : null;
+}
+
 /** Tool selected by a plain key press (no Ctrl/Alt/Meta), or null. H toggles Pan back to Select. */
 export function toolForKey(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; target?: EventTarget | null }, current: Tool): Tool | null {
   if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target ?? null)) return null;

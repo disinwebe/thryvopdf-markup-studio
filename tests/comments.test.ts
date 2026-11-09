@@ -109,6 +109,22 @@ describe('annotation IDs and comments in the PDF', () => {
     expect(str(item.d.get(PDFName.of('NM')))).toBe('uuid-1');
   });
 
+  it('keeps comment text author-free in /Contents and labels its author beside the saved callout number', async () => {
+    const markup = mk('uuid-comment', [c('comment-1', 'Keep this wording.', 'Bob')]);
+    const out = await saveWithState(await blank(), { markups: [markup], calibrations: {}, sheets: {}, bookmarks: [] });
+    const doc = await PDFDocument.load(out);
+    const item = reviewItems(doc)[0];
+    expect(str(item.d.get(PDFName.of('Contents')))).toBe('Keep this wording.');
+
+    const ap = item.d.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as unknown as { getContents(): Uint8Array };
+    const ops = Buffer.from(ap.getContents()).toString('latin1');
+    expect(ops).toMatch(/\(#1\) Tj ET\nBT[^]*\(Bob\) Tj ET/);
+    expect(ops).toContain('(Keep this wording.) Tj');
+
+    const restored = await readState(doc);
+    expect(restored.markups[0].comments).toEqual(markup.comments);
+  });
+
   it('round-trips ids and comments, and re-saving does not duplicate popups', async () => {
     const m = mk('keep-me', [c('c1', 'hello')]);
     const once = await saveWithState(await blank(), { markups: [m], calibrations: {}, sheets: {}, bookmarks: [] });
@@ -125,27 +141,47 @@ describe('annotation IDs and comments in the PDF', () => {
     const cleared = await saveWithState(twice, { ...st2, markups: [] });
     expect(annots(await PDFDocument.load(cleared)).length).toBe(0);
   });
-  it('repairs missing or duplicate ids on load and names foreign annotations once', async () => {
+  it('preserves direct and indirect foreign annotations without adding names or dropping them', async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([400, 300]);
     const foreign = doc.context.register(doc.context.obj({ Type: 'Annot', Subtype: 'Square', Rect: [0, 0, 10, 10] }));
     const named = doc.context.register(doc.context.obj({ Type: 'Annot', Subtype: 'Square', Rect: [0, 0, 10, 10] }));
     (doc.context.lookup(named, PDFDict) as PDFDict).set(PDFName.of('NM'), PDFString.of('theirs'));
-    page.node.addAnnot(foreign);
-    page.node.addAnnot(named);
+    const direct = doc.context.obj({
+      Type: 'Annot',
+      Subtype: 'Text',
+      Rect: [20, 20, 30, 30],
+      Contents: PDFHexString.fromText('External comment'),
+      CustomData: PDFString.of('preserve-me'),
+    }) as PDFDict;
+    page.node.set(PDFName.of('Annots'), doc.context.obj([direct, foreign, named]) as PDFArray);
     const base = await doc.save();
-    const dup = [mk('same', [c('x', 'a'), c('x', 'b')]), mk('same', [])];
-    const saved = await saveWithState(base, { markups: dup, calibrations: {}, sheets: {}, bookmarks: [] });
+    const untouchedBase = base.slice();
+    const duplicates = [mk('same', [c('x', 'first'), c('x', 'second')]), mk('same', [])];
+    const saved = await saveWithState(base, { markups: duplicates, calibrations: {}, sheets: {}, bookmarks: [] });
+    expect(base).toEqual(untouchedBase);
+
     const loaded = await PDFDocument.load(saved);
-    const names = reviewItems(loaded).map((x) => str(x.d.get(PDFName.of('NM'))));
-    expect(names.every(Boolean)).toBe(true);
-    expect(names).toContain('theirs');
+    const savedAnnots = loaded.getPages()[0].node.Annots() as PDFArray;
+    expect(savedAnnots.get(0)).toBeInstanceOf(PDFDict);
+    expect(savedAnnots.get(1)).toBeInstanceOf(PDFRef);
+    const savedDirect = savedAnnots.lookup(0, PDFDict);
+    expect(savedDirect.get(PDFName.of('NM'))).toBeUndefined();
+    expect(str(savedDirect.get(PDFName.of('Contents')))).toBe('External comment');
+    expect(str(savedDirect.get(PDFName.of('CustomData')))).toBe('preserve-me');
+    expect(str(savedAnnots.lookup(1, PDFDict).get(PDFName.of('NM')))).toBeUndefined();
+    expect(str(savedAnnots.lookup(2, PDFDict).get(PDFName.of('NM')))).toBe('theirs');
+
     const fixed = await readState(loaded);
     expect(new Set(fixed.markups.map((m) => m.id)).size).toBe(2);
     expect(new Set(fixed.markups[0].comments.map((x) => x.id)).size).toBe(2);
     const again = await saveWithState(saved, fixed);
-    expect(reviewItems(await PDFDocument.load(again)).map((x) => str(x.d.get(PDFName.of('NM')))))
-      .toContain('theirs');
+    const againAnnots = (await PDFDocument.load(again)).getPages()[0].node.Annots() as PDFArray;
+    expect(againAnnots.get(0)).toBeInstanceOf(PDFDict);
+    expect(againAnnots.lookup(0, PDFDict).get(PDFName.of('NM'))).toBeUndefined();
+    expect(str(againAnnots.lookup(0, PDFDict).get(PDFName.of('Contents')))).toBe('External comment');
+    expect(str(againAnnots.lookup(1, PDFDict).get(PDFName.of('NM')))).toBeUndefined();
+    expect(str(againAnnots.lookup(2, PDFDict).get(PDFName.of('NM')))).toBe('theirs');
   });
 
   it('generates unique ids', () => {

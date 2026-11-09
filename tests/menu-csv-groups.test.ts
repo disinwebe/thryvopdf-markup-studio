@@ -43,6 +43,21 @@ describe('collapsed groups', () => {
 });
 
 describe('native menu wiring', () => {
+  it('supplies semantic icons without changing menu actions or shortcuts', () => {
+    const send = vi.fn();
+    const icons = vi.fn((name: string) => `icon:${name}`);
+    const menu = menuTemplate({ signedIn: true, documentOpen: true }, send, 'win32', icons);
+    const file = menu[0].submenu;
+    expect(file.find((m: { label: string }) => m.label === '&Open PDF...').icon).toBe('icon:open');
+    expect(file.find((m: { label: string }) => m.label === '&Save').icon).toBe('icon:save');
+    expect(file.find((m: { label: string }) => m.label === 'Save &As...').icon).toBe('icon:saveAs');
+    file.find((m: { label: string }) => m.label === '&Save').click();
+    expect(send).toHaveBeenCalledWith('save');
+    expect(file.find((m: { label: string }) => m.label === '&Logout').icon).toBe('icon:key');
+    expect(file.find((m: { label: string }) => m.label === '&Quit').icon).toBe('icon:exit');
+    expect(file.find((m: { label: string }) => m.label === 'Open S&hared...').icon).toBe('icon:open');
+    expect(icons).toHaveBeenCalledWith('license');
+  });
   it('disables document and server actions when unavailable and sends selected actions', () => {
     const send = vi.fn();
     const menu = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: true, selected: true, canUndo: true, serverMode: true, admin: true, passwordAvailable: true }, send, 'win32');
@@ -81,7 +96,7 @@ describe('native menu wiring', () => {
     expect(inactive[0].submenu.find((m: { label: string }) => m.label === '&Save').enabled).toBe(false);
     expect(inactive[3].submenu[0].enabled).toBe(false);
     const loggedOut = menuTemplate({}, send, 'win32');
-    expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === 'S&hared Documents...').enabled).toBe(false);
+    expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === 'Open S&hared...').enabled).toBe(false);
     expect(loggedOut[2].submenu[0].visible).toBe(false);
     const compare = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: false, admin: false }, send, 'win32');
     expect(compare[3].submenu[0].enabled).toBe(false);
@@ -98,5 +113,16 @@ describe('native menu wiring', () => {
       expect(keys).not.toContain(undefined);
       expect(new Set(keys).size).toBe(keys.length);
     }
+  });
+
+  it('keeps PDF viewing and license import available without activation', () => {
+    const send = vi.fn();
+    const menu = menuTemplate({ viewOnly: true, documentOpen: true, viewerActive: true }, send, 'win32');
+    const file = menu[0].submenu;
+    expect(file.find((m: { label: string }) => m.label === '&Open PDF...').enabled).toBe(true);
+    expect(file.find((m: { label: string }) => m.label === '&Save').enabled).toBe(false);
+    expect(file.find((m: { label: string }) => m.label === '&Logout').enabled).toBe(false);
+    menu[4].submenu.find((m: { label: string }) => m.label === '&License...').click();
+    expect(send).toHaveBeenCalledWith('license');
   });
 });

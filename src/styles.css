@@ -11,6 +11,7 @@ button.on, button.primary { background: var(--acc); border-color: var(--acc); co
 button.big { padding: 10px 24px; font-size: 15px; }
 input[type=color] { padding: 0; width: 28px; height: 24px; }
 input[type=range] { width: 80px; padding: 0; vertical-align: middle; }
+input[type=checkbox] { width: auto; flex: none; margin: 0; padding: 0; }
 input.pg { width: 56px; }
 .app { display: flex; flex-direction: column; height: 100%; }
 .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -21,6 +22,8 @@ input.pg { width: 56px; }
 .tab { padding: 4px 10px; background: var(--tab); border-radius: 4px 4px 0 0; white-space: nowrap; cursor: pointer; }
 .tab.active { background: var(--panel); }
 .tab .x { border: 0; background: none; padding: 0 4px; }
+.tab-name-editor { display: inline-flex; align-items: center; gap: 3px; }
+.tab-name-editor input { width: 180px; }
 .main { flex: 1; display: flex; min-height: 0; }
 .side { width: 300px; background: var(--panel); display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 .side.right { width: 360px; border-right: 0; border-left: 1px solid var(--line); }
@@ -34,8 +37,12 @@ input.pg { width: 56px; }
 .viewer-controls button { padding: 2px 5px; }
 .viewer-controls input.pg { width: 43px; padding: 2px; }
 .tool-icon { display: inline-block; min-width: 1.15em; margin-right: 4px; font-size: 14px; text-align: center; }
+.folder-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 5px; }
+.toolbar-svg { width: 1.2em; height: 1.2em; vertical-align: -0.2em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
 .tool-dialog { width: min(600px, 95vw); }
 .tool-dialog textarea { display: block; width: 100%; }
+.comment-popup { width: min(460px, 95vw); }
+.comment-popup textarea { display: block; width: 100%; margin-top: 6px; resize: vertical; }
 .scroller { flex: 1; overflow: auto; background: var(--canvas); position: relative; }
 .page { position: relative; margin: 20px auto; box-shadow: 0 2px 12px var(--shadow); background: #fff; }
 .page canvas, .page svg, .capture { position: absolute; left: 0; top: 0; }
@@ -50,11 +57,19 @@ input.pg { width: 56px; }
 .item:hover { background: var(--item-h); }
 .item.active { background: var(--item-a); border-color: var(--acc); }
 .props, .box { border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 8px 0; }
-.props > label { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin: 8px 0; }
-.props > label input:not([type=color]):not([type=checkbox]), .props > label select { width: 100%; }
+.props-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.props-fields > label { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin: 8px 0; }
+.props-fields > label.inline-check { flex-direction: row; align-items: center; gap: 8px; }
+.props-fields > label.inline-check input[type=checkbox] { margin: 0; }
+.props-fields > label input:not([type=color]):not([type=checkbox]), .props-fields > label select { width: 100%; }
+label:has(> input[type=checkbox]), .props > label:has(> input[type=checkbox]), .upload-form label:has(> input[type=checkbox]) { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+.upload-form input[type=checkbox] { width: auto; }
 .grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
 .badge { padding: 1px 6px; border-radius: 8px; background: var(--ctl-h); font-size: 11px; }
-.pending-registrations { position: fixed; right: 12px; bottom: 32px; z-index: 5; max-width: min(360px, calc(100vw - 24px)); padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); box-shadow: 0 2px 8px var(--shadow); }
+.pending-registrations .badge { background: #d71920; color: #fff; }
+.server-setup { width: 680px; }
+.server-setup > label { display: block; margin: 8px 0; }
+.server-setup > label input { display: block; width: 100%; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; }
 .muted { color: var(--mut); } .small { font-size: 11px; }
 .ok { color: #4ade80; } .warn { color: #fbbf24; } .danger { color: #f87171; }
@@ -80,6 +95,7 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 .auth-card input, .auth-card select { padding: 6px 8px; font-size: 13px; }
 button.link { background: none; border: 0; color: var(--acc); }
 .who { color: var(--mut); }
+.toolbar-logout { white-space: nowrap; }
 .auth-card .row { display: flex; gap: 8px; } .auth-card .ok { color: #2e8b57; font-size: 12px; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; } .usermgmt { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; max-width: 95vw; max-height: 85vh; overflow: auto; } .usermgmt table { border-collapse: collapse; width: 100%; font-size: 12px; } .usermgmt td, .usermgmt th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; } .usermgmt .acts button { margin-right: 4px; } .row.between { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
 .collab { padding: 4px 10px; background: var(--collab); border-bottom: 1px solid var(--collab-l); font-size: 12px; color: #123; }

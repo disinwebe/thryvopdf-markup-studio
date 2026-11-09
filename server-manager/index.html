@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <title>ThryvoPDF Server Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>ThryvoPDF Server Manager</h1>
+    <p>Configure a Windows background service for shared documents. It keeps running when this manager closes, while this PC is on.</p>
+    <section>
+      <h2>Service and health</h2>
+      <p id="service-status" role="status">Loading service status...</p>
+      <p id="health-status"></p>
+      <p class="muted">This manager controls the Windows service only. The foreground server in ThryvoPDF Markup Studio is separate and stops when that app closes. Do not run both on the same port or data folder.</p>
+      <div class="buttons">
+        <button id="refresh">Refresh status</button><button id="start">Start</button><button id="stop">Stop</button><button id="restart">Restart</button><button id="logs">Open service log</button>
+      </div>
+    </section>
+    <section>
+      <h2>Configuration</h2>
+      <label for="port">TCP port</label><input id="port" type="number" min="1" max="65535" value="8787">
+      <label for="data">Server data folder</label><div class="buttons"><input id="data" type="text" readonly><button id="choose">Choose folder...</button></div>
+      <p class="muted">Installing grants the Windows LocalService account inherited Modify access to this folder and its contents. Choose a dedicated local folder; restrict access because it contains accounts and documents. Do not share a data folder with a running server. To change settings, uninstall the service and install it again; data is not deleted.</p>
+      <div class="buttons"><button id="install" class="primary">Install service...</button><button id="uninstall">Uninstall service...</button></div>
+      <p class="muted">Service actions explicitly request administrator approval. Uninstall leaves the data folder and its LocalService permissions in place. Stop and uninstall the service before uninstalling or upgrading this manager.</p>
+    </section>
+    <section>
+      <h2>Connect and protect</h2>
+      <div id="addresses"></div>
+      <p class="warning">The service uses unencrypted HTTP. Use a trusted network; the standalone server supports TLS via its documented configuration. Windows Firewall is not changed automatically.</p>
+      <p>For LAN access, an administrator can create a scoped inbound TCP rule for the selected port and trusted private network in Windows Defender Firewall. Do not expose this service publicly.</p>
+      <button id="firewall">Open Microsoft firewall guidance</button>
+      <p>For a consistent backup, stop the service and copy the entire data folder securely, including <code>users.json</code> and <code>docs</code>. Start it again afterward. The initial admin password, if generated, is in <code>ADMIN-INITIAL-PASSWORD.txt</code> inside the data folder, restricted to Administrators, SYSTEM and LocalService. An administrator should read it privately, change the password at first login, and delete the file.</p>
+    </section>
+    <p id="error" class="error" role="alert"></p>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

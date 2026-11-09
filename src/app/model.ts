@@ -42,6 +42,11 @@ export interface SharedInfo {
   error?: string;
 }
 
+export function renamedTab(d: Pick<Doc, 'name' | 'shared'>, name: string): string | null {
+  const trimmed = name.trim();
+  return d.shared || !trimmed || /[\\/:*?"<>|]/.test(trimmed) ? null : trimmed;
+}
+
 export const stateOf = (d: Doc): DocState => ({
   markups: d.markups,
   calibrations: d.calibrations,
@@ -119,6 +124,10 @@ export function defaultStyle(tool: Tool): Style {
     default:
       return { ...base };
   }
+}
+
+export function toolStyle(tool: Tool, custom: Partial<Style> | undefined, defaults: Partial<Pick<Style, 'color' | 'width' | 'opacity'>>, subject = ''): Style {
+  return { ...defaultStyle(tool), ...custom, ...defaults, subject };
 }
 
 export function makeMarkup(

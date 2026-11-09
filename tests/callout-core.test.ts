@@ -20,6 +20,18 @@ describe('comment callout geometry', () => {
     expect(l.anchor).toEqual({ x: 90, y: 60 });
     expect(l.rows[0].head).toBe('Ann');
   });
+  it('lays out comment text with independent font sizes', () => {
+    const item = m({
+      comments: [
+        { id: 'small', author: 'A', date: '', text: 'small text', fontSize: 7 },
+        { id: 'large', author: 'B', date: '', text: 'large text', fontSize: 18 },
+      ],
+    });
+    const layout = calloutLayout(item, 9)!;
+    expect(layout.rows.map((row) => row.fs)).toEqual([7, 18]);
+    expect(layout.rows[1].lineH).toBeGreaterThan(layout.rows[0].lineH);
+    expect(layout.h).toBeGreaterThan(calloutLayout(m(), 9)!.h);
+  });
   it('connects boxes at the border point nearest the comment box', () => {
     expect(anchorOf({ type: 'rect', points: [{ x: 0, y: 0 }, { x: 100, y: 50 }] }, { x: 300, y: 25 })).toEqual({ x: 100, y: 25 });
   });
@@ -40,6 +52,20 @@ describe('comment callout geometry', () => {
     const st = await readState(await PDFDocument.load(out));
     expect(st.markups[0].callout).toEqual({ x: 150, y: 120 });
     expect(st.markups[0].comments[0].authorEmail).toBe('ann@x');
+  });
+  it('persists individual comment font sizes in the saved PDF metadata and appearance', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([600, 400]);
+    const item = m({ comments: [
+      { id: 'small', author: 'Ann', date: '', text: 'Small text', fontSize: 7 },
+      { id: 'large', author: 'Bob', date: '', text: 'Large text', fontSize: 18 },
+    ] });
+    const saved = await saveWithState(await source.save(), { markups: [item], calibrations: {}, sheets: {}, bookmarks: [] });
+    const stored = (await readState(await PDFDocument.load(saved))).markups[0];
+    expect(stored.comments.map((comment) => comment.fontSize)).toEqual([7, 18]);
+    const appearance = buildAppearance(stored, { x0: 0, y0: 0, w: 600, h: 400, rotation: 0 }, undefined, 1);
+    expect(appearance.ops).toContain('/F1 7 Tf');
+    expect(appearance.ops).toContain('/F1 18 Tf');
   });
   it('persists resized and hidden callouts while retaining comments and the numbered tag', async () => {
     const item = m({ callout: { x: 150, y: 120 }, calloutSize: { width: 220, height: 110 }, calloutHidden: true });

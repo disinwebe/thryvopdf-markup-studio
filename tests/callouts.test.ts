@@ -55,14 +55,14 @@ describe('comment callouts: authorization and sync', () => {
   const state = async (tok: string) => (await call('GET', '/api/docs/' + id + '/state', tok)).markups;
 
   beforeAll(async () => {
-    id = (await call('POST', '/api/docs?name=c.pdf', ann, undefined, PDF)).doc.id;
+    id = (await call('POST', '/api/docs?member=bob%40example.com&member=admin&name=c.pdf', ann, undefined, PDF)).doc.id;
     await ops(ann, { upserts: [mk('m1', { callout: { x: 100, y: 50 }, comments: [cm('c1', 'Ann says')] })] });
     await ops(bob, { upserts: [mk('m1', { callout: { x: 100, y: 50 }, comments: [cm('c1', 'Ann says'), cm('c2', 'Bob says')] })] });
   });
 
   describe('shared custom stamps', () => {
     it('synchronizes and reopens a persisted stamp with its image and opacity', async () => {
-      const id = (await call('POST', '/api/docs?name=stamps.pdf', ann, undefined, PDF)).doc.id;
+      const id = (await call('POST', '/api/docs?member=bob%40example.com&name=stamps.pdf', ann, undefined, PDF)).doc.id;
       const image = { data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', width: 1, height: 1 };
       const stamp = mk('stamp1', { type: 'stamp', stampImage: image, opacity: 0.4 });
       expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [stamp] })).code).toBe(200);

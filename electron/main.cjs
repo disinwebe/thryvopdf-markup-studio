@@ -1,9 +1,12 @@
-const { app, BrowserWindow, ipcMain, dialog, net, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, Menu, nativeTheme, nativeImage, clipboard, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('./client.cjs');
-const { menuTemplate } = require('./menu.cjs');
+const { menuTemplate, applyNativeTheme } = require('./menu.cjs');
 const { createLicenseStore, MAX_LICENSE_BYTES } = require('./license.cjs');
+const { renamePdfFile, writeSavedFile } = require('./fileOps.cjs');
+const { requireAccess, sharedOperationRequiresLicense } = require('./access.cjs');
+const { createServerControl } = require('./server-control.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
 // Keep the pre-rename data folder so existing installs keep their settings and accounts.
@@ -31,11 +34,18 @@ function createWindow() {
     },
   });
   let rendererSignedIn = false;
+  let currentMenuState = {};
   const installMenu = (state) => {
+    currentMenuState = state;
+    const iconForAction = (name) => {
+      const theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+      const image = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'menu', `${name}-${theme}.png`));
+      return image.isEmpty() ? undefined : image.resize({ width: 16, height: 16 });
+    };
     const menu = Menu.buildFromTemplate(menuTemplate(state, (action) => {
       if (action === 'quit' && !rendererSignedIn) app.quit();
       else win.webContents.send('menu-action', action);
-    }));
+    }, process.platform, iconForAction));
     if (process.platform === 'darwin') Menu.setApplicationMenu(menu);
     else { win.setMenu(menu); win.setMenuBarVisibility(true); }
   };
@@ -44,10 +54,15 @@ function createWindow() {
     if (e.sender !== win.webContents) return;
     rendererSignedIn = state.signedIn === true;
     const user = auth.current();
-    installMenu({ ...state, signedIn: !!user && state.signedIn === true, admin: user?.role === 'admin', passwordAvailable: !!user?.email });
+    installMenu({ ...state, signedIn: (!!user && state.signedIn === true) || state.viewOnly === true, admin: user?.role === 'admin', passwordAvailable: !!user?.email });
   };
   ipcMain.on('menu-state', onMenuState);
+  const onTheme = (e, theme) => {
+    if (e.sender === win.webContents && applyNativeTheme(nativeTheme, theme)) installMenu(currentMenuState);
+  };
+  ipcMain.on('theme', onTheme);
   win.on('closed', () => ipcMain.removeListener('menu-state', onMenuState));
+  win.on('closed', () => ipcMain.removeListener('theme', onTheme));
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) win.loadURL(devUrl);
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
@@ -77,16 +92,17 @@ function createWindow() {
   }
 }
 
-let auth, license;
-const licensed = (fn) => (...a) => {
-  const status = license.status();
-  if (!status.ok) throw new Error(status.error || 'This device is not licensed.');
+let auth, license, serverControl;
+const guard = (fn) => (...a) => {
+  requireAccess(auth, license, true);
   return fn(...a);
 };
-const guard = (fn) => (...a) => {
-  const status = license.status();
-  if (!status.ok) throw new Error(status.error || 'This device is not licensed.');
-  if (!auth.current()) throw new Error('Not signed in');
+const readGuard = (fn) => (...a) => {
+  requireAccess(auth, license);
+  return fn(...a);
+};
+const viewerAccess = (fn) => (...a) => {
+  if (license.status().ok && !auth.current()) throw new Error('Not signed in');
   return fn(...a);
 };
 
@@ -96,15 +112,17 @@ const toBuf = (p) => {
   return { path: p, name: path.basename(p), data: new Uint8Array(b.buffer, b.byteOffset, b.byteLength) };
 };
 
-ipcMain.handle('startup-files', guard(() => startupPaths().map(toBuf)));
+ipcMain.handle('startup-files', viewerAccess(() => startupPaths().map(toBuf)));
 
-ipcMain.handle('open-files', guard(async (e, opts = {}) => {
+ipcMain.handle('open-files', viewerAccess(async (e, opts = {}) => {
   const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
     properties: ['openFile', ...(opts.multi === false ? [] : ['multiSelections'])],
     filters: opts.filters || [{ name: 'PDF', extensions: ['pdf'] }],
   });
   return r.canceled ? [] : r.filePaths.map(toBuf);
 }));
+
+ipcMain.handle('rename-file', guard((e, args = {}) => renamePdfFile(args.path, args.name, allowed, fs)));
 
 ipcMain.handle('pick-stamp', guard(async (e) => {
   const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
@@ -121,7 +139,7 @@ ipcMain.handle('pick-stamp', guard(async (e) => {
 
 ipcMain.handle('save-file', guard(async (e, { defaultName, data, filters, path: existing }) => {
   const write = (p) => {
-    fs.writeFileSync(p, typeof data === 'string' ? data : Buffer.from(data));
+    writeSavedFile(p, data, fs);
     allowed.add(p);
     return p;
   };
@@ -191,6 +209,18 @@ ipcMain.handle('save-many', guard(async (e, { files }) => {
 
 app.whenReady().then(() => {
   const ud = app.getPath('userData');
+  serverControl = createServerControl({ configFile: path.join(ud, 'server-control.json'), defaultDir: path.join(ud, 'server-data') });
+  ipcMain.handle('server-control-status', () => serverControl.status());
+  ipcMain.handle('server-control-run', (_e, action, config) => serverControl.perform(action, config));
+  ipcMain.handle('server-control-folder', async (e) => {
+    const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), { properties: ['openDirectory', 'createDirectory'] });
+    return r.canceled ? null : r.filePaths[0] || null;
+  });
+  ipcMain.handle('server-control-copy', (_e, address) => {
+    if (!serverControl.status().addresses.includes(address)) throw new Error('Choose a current server address.');
+    clipboard.writeText(address);
+  });
+  ipcMain.handle('server-control-firewall-help', () => shell.openExternal('https://support.microsoft.com/windows/risks-of-allowing-apps-through-windows-firewall-654559af-3f54-3dcf-349f-71ccd90bcc5c'));
   license = createLicenseStore({ file: path.join(ud, 'device-license.json'), publicKeyFile: path.join(__dirname, '..', 'dist', 'license-public.pem') });
   auth = createClient({ configFile: path.join(ud, 'server.json'), localFile: path.join(ud, 'users.json'), fetch: net.fetch.bind(net) });
   ipcMain.handle('license-status', () => license.status());
@@ -204,20 +234,20 @@ app.whenReady().then(() => {
       return license.activate(fs.readFileSync(r.filePaths[0], 'utf8'));
     } catch { return { ok: false, error: 'Could not read the license file.' }; }
   });
-  ipcMain.handle('auth-status', licensed(() => auth.status()));
-  ipcMain.handle('auth-register', licensed((e, a) => auth.register(a || {})));
-  ipcMain.handle('auth-login', licensed((e, a) => auth.login(a || {})));
-  ipcMain.handle('auth-logout', licensed(() => auth.logout()));
+  ipcMain.handle('auth-status', () => auth.status());
+  ipcMain.handle('auth-register', (e, a) => auth.register(a || {}));
+  ipcMain.handle('auth-login', (e, a) => auth.login(a || {}));
+  ipcMain.handle('auth-logout', () => auth.logout());
   ipcMain.handle('quit-app', () => app.quit());
   ipcMain.handle('app-version', () => app.getVersion());
-  ipcMain.handle('show-about', licensed(async (e) => {
+  ipcMain.handle('show-about', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win) return;
     await dialog.showMessageBox(win, {
       type: 'info', title: 'About this software', message: `ThryvoPDF Markup Studio ${app.getVersion()}`,
       detail: 'PDF review, markup and shared drawing collaboration.\nDeveloped by: TRL 2026', buttons: ['OK'],
     });
-  }));
+  });
   ipcMain.handle('shared-docs', guard((e, a = {}) => {
     if (!auth.docs) return { ok: false, error: 'Shared documents are unavailable.' };
     if (a.op === 'upload' && a.token) {
@@ -233,11 +263,11 @@ app.whenReady().then(() => {
     return auth.docs(a);
   }));
   // Password changes must remain available during mandatory first-login changes.
-  ipcMain.handle('auth-change-password', licensed((e, a) => auth.changePassword(a || {})));
-  ipcMain.handle('auth-admin-list', guard(() => auth.adminList()));
-  ipcMain.handle('auth-admin-action', guard((e, a) => auth.adminAction(a || {})));
-  ipcMain.handle('auth-test', licensed((e, url) => auth.test(url)));
-  ipcMain.handle('auth-configure', licensed((e, a) => auth.configure(a || {})));
+  ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
+  ipcMain.handle('auth-admin-list', readGuard(() => auth.adminList()));
+  ipcMain.handle('auth-admin-action', readGuard((e, a) => auth.adminAction(a || {})));
+  ipcMain.handle('auth-test', (e, url) => auth.test(url));
+  ipcMain.handle('auth-configure', (e, a) => auth.configure(a || {}));
   createWindow();
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });
