@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Doc } from '../app/model';
-import { groupByProject } from '../app/upload';
+import { filterDocumentsByName, formatReviewStatusCounts, groupByProject, reviewStatusCounts } from '../app/upload';
 import { SHARED_REFRESH_MS, startPolling } from '../app/shortcuts';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 import { isReviewMarkup } from '../core/numbering';
@@ -37,6 +37,7 @@ export function ProjectPanel(p: {
   };
   const [shared, setShared] = useState<SharedListing[]>([]);
   const [sharedErr, setSharedErr] = useState('');
+  const [sharedSearch, setSharedSearch] = useState('');
   const [reviewBusy, setReviewBusy] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try { return loadCollapsedGroups(localStorage); } catch { return []; }
@@ -118,12 +119,23 @@ export function ProjectPanel(p: {
             <span className="grow" />
             <button onClick={() => void loadShared()} title="Reload the shared list">Refresh</button>
           </div>
+          <input
+            type="search"
+            className="shared-search"
+            aria-label="Search shared document filenames"
+            placeholder="Search filenames"
+            value={sharedSearch}
+            onChange={(event) => setSharedSearch(event.target.value)}
+          />
           {sharedErr && <div className="danger small">{sharedErr}</div>}
           {!sharedErr && !shared.length && <div className="muted small">No shared documents yet.</div>}
-          {groupByProject(shared).map((g) => (
+          {!sharedErr && shared.length > 0 && !filterDocumentsByName(shared, sharedSearch).length && <div className="muted small">No filenames match your search.</div>}
+          {groupByProject(filterDocumentsByName(shared, sharedSearch)).map((g) => {
+            const counts = reviewStatusCounts(g.docs);
+            return (
             <div key={'g:' + g.project} className="group">
               <button className="group-title group-toggle" aria-expanded={!collapsed.includes(g.project)} onClick={() => toggleGroup(g.project)}>
-                <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted small">({g.docs.length})</span>
+                <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted small">{formatReviewStatusCounts(counts)}</span>
               </button>
               {!collapsed.includes(g.project) && g.docs.map((d) => {
                 const review = d.reviews?.find((item) => item.email === p.me.email);
@@ -167,7 +179,7 @@ export function ProjectPanel(p: {
                 );
               })}
             </div>
-          ))}
+          );})}
         </div>
       )}
     </div>

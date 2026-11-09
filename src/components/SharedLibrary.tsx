@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
-import { Pick, UploadRow, groupByProject, runUploads, toRows } from '../app/upload';
+import { Pick, UploadRow, filterDocumentsByName, formatReviewStatusCounts, groupByProject, reviewStatusCounts, runUploads, toRows } from '../app/upload';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 
 export interface SharedListing {
@@ -73,6 +73,7 @@ export function SharedLibrary({
 }) {
   const [docs, setDocs] = useState<SharedListing[]>([]);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<UploadRow[]>([]);
   const [note, setNote] = useState('');
@@ -287,18 +288,28 @@ export function SharedLibrary({
             ))}
           </div>
         )}
+        <input
+          type="search"
+          className="shared-search"
+          aria-label="Search shared document filenames"
+          placeholder="Search filenames"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
         <table>
           <thead>
             <tr><th>Name</th><th>Uploaded by</th><th>Size</th><th>Markups</th><th>Review status</th><th>Working now</th><th /></tr>
           </thead>
           <tbody>
-            {groupByProject(docs).map((g) => (
+            {groupByProject(filterDocumentsByName(docs, search)).map((g) => {
+              const counts = reviewStatusCounts(g.docs);
+              return (
               <Fragment key={'g:' + g.project}>
                 <tr className="group-row">
                   <td colSpan={7}>
                     <div className="row">
                       <button aria-expanded={!collapsed.includes(g.project)} aria-label={`${collapsed.includes(g.project) ? 'Expand' : 'Collapse'} ${g.project || 'Ungrouped'}`} onClick={() => saveCollapsed(collapsed.includes(g.project) ? collapsed.filter((p) => p !== g.project) : [...collapsed, g.project])}>
-                        <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted">({g.docs.length})</span>
+                        <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted">{formatReviewStatusCounts(counts)}</span>
                       </button>
                       {!readOnly && g.project && (me.role === 'admin' || g.docs.some((d) => d.canRenameGroup)) && (
                         editingGroup === g.project ? (
@@ -378,7 +389,10 @@ export function SharedLibrary({
                   </tr>
                 ))}
               </Fragment>
-            ))}
+            );})}
+            {!!docs.length && !filterDocumentsByName(docs, search).length && (
+              <tr><td colSpan={7} className="muted">No filenames match your search.</td></tr>
+            )}
             {!docs.length && !error && (
               <tr><td colSpan={6} className="muted">No shared documents yet.</td></tr>
             )}

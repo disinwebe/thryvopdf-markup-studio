@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { groupByProject } from '../src/app/upload';
+import { filterDocumentsByName, formatReviewStatusCounts, groupByProject, reviewStatusCounts } from '../src/app/upload';
 import { canDeleteMarkup } from '../src/core/comments';
 
 const req = createRequire(import.meta.url);
@@ -140,5 +140,17 @@ describe('grouping helper for the Project tab', () => {
     ]);
     expect(g.map((x) => x.project)).toEqual(['A', 'Z', '']);
     expect(g[1].docs.map((d) => d.name)).toEqual(['a.pdf', 'b.pdf']);
+  });
+
+  it('filters document filenames case-insensitively and counts a document done only when all assigned reviewers are done', () => {
+    const docs = [
+      { name: 'Plan-A.pdf', reviews: [{ done: true }, { done: true }] },
+      { name: 'Plan-B.pdf', reviews: [{ done: true }, { done: false }] },
+      { name: 'Plan-C.pdf', reviews: [] },
+    ];
+    expect(filterDocumentsByName(docs, 'plan-b').map((doc) => doc.name)).toEqual(['Plan-B.pdf']);
+    expect(filterDocumentsByName(docs, 'missing')).toEqual([]);
+    expect(reviewStatusCounts(docs)).toEqual({ pending: 2, done: 1 });
+    expect(formatReviewStatusCounts(reviewStatusCounts(docs))).toBe('(2 - Pending, 1 Done.)');
   });
 });
