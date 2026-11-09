@@ -80,7 +80,7 @@ const cleanRel = (r) =>
     .slice(0, 12)
     .join('/');
 
-function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000, maxUpload = 150 * 1024 * 1024, fs = defaultFs }) {
+function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000, maxUpload = 150 * 1024 * 1024, fs = defaultFs, onAssign = () => {} }) {
   fs.mkdirSync(dir, { recursive: true });
   const docs = new Map();
   const journal = path.join(dir, '.group-rename-journal');
@@ -255,6 +255,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       fs.writeFileSync(path.join(dir, id + '.pdf'), bytes);
       persist(d);
       docs.set(id, d);
+      onAssign(d, user, d.members);
       return [201, { ok: true, doc: info(d, user) }];
     },
 
@@ -400,11 +401,13 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       const d = get(id);
       if (!d) return NOT_FOUND;
       if (d.owner !== user.email) return [403, { ok: false, error: 'Only the uploader can change document access.' }];
+      const added = members.filter((m) => !d.members.includes(m));
       d.members = members;
       for (const email of d.presence.keys()) if (!canAccess(d, { email })) d.presence.delete(email);
       d.presenceRev++;
       persist(d);
       wake(d);
+      onAssign(d, user, added);
       return [200, { ok: true, doc: info(d, user) }];
     },
   };

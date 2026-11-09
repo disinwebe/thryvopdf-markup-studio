@@ -6,6 +6,7 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const { createDocs } = require('./docs.cjs');
+const { createNotifier } = require('./notify.cjs');
 
 const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -114,7 +115,7 @@ function createApp(opts = {}) {
   const activeAdmins = () => users.filter((u) => u.role === 'admin' && u.status === 'active').length;
 
   const handlers = {
-    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true, docsAccess: true }],
+    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true, docsAccess: true, notifications: true }],
 
     'POST /api/register': (req, b, ip) => {
       const r = regs.get(ip);
@@ -222,6 +223,7 @@ function createApp(opts = {}) {
         case 'delete':
           if (self || lastAdmin) return bad('You cannot delete yourself or the last administrator.');
           users = users.filter((x) => x !== u);
+          notifier.dropUser(u.email);
           dropSessions(u.email);
           break;
         default:
@@ -232,7 +234,12 @@ function createApp(opts = {}) {
     }),
   };
 
-  const docs = createDocs({ dir: opts.docsDir || path.join(path.dirname(file), 'docs'), now, pollMs: opts.pollMs, presenceTtlMs: opts.presenceTtlMs, maxUpload: opts.maxUpload, fs: opts.docsFs });
+  const notifier = createNotifier({ dir: path.dirname(file), now, send: opts.sendMail, log: (m) => console.error(m) });
+  const onAssign = (doc, by, emails) => {
+    const recipients = emails.map(find).filter((u) => u && u.status === 'active').map((u) => ({ name: u.name, email: u.email }));
+    if (recipients.length) notifier.assigned(doc, { name: by.name, email: by.email }, recipients).catch(() => {});
+  };
+  const docs = createDocs({ onAssign, dir: opts.docsDir || path.join(path.dirname(file), 'docs'), now, pollMs: opts.pollMs, presenceTtlMs: opts.presenceTtlMs, maxUpload: opts.maxUpload, fs: opts.docsFs });
   const ready = (fn) =>
     authed((s, b, ip, req, url, m) => {
       if (s.user.status !== 'active') return [403, { ok: false, error: 'Account not active.' }];
@@ -243,6 +250,12 @@ function createApp(opts = {}) {
   const validateMembers = (members) => Array.isArray(members) && members.length <= 500 &&
     members.every((email) => typeof email === 'string' && email === normEmail(email) && find(email)?.status === 'active');
   const invalidMembers = [400, { ok: false, error: 'Select valid active users for document access.' }];
+  handlers['GET /api/notifications'] = authed((s) => [200, { ok: true, ...notifier.list(s.user.email) }]);
+  handlers['POST /api/notifications/read'] = authed((s, b) => {
+    const ids = b.all === true ? 'all' : Array.isArray(b.ids) ? b.ids.filter((i) => typeof i === 'string').slice(0, 500) : [];
+    notifier.markRead(s.user.email, ids);
+    return [200, { ok: true, ...notifier.list(s.user.email) }];
+  });
   const docRoutes = [
     ['GET', /^\/api\/docs$/, ready((u) => docs.list(u))],
     ['GET', /^\/api\/docs\/users$/, ready(() => [200, { ok: true, users: users.filter((u) => u.status === 'active').map((u) => ({ name: u.name, email: u.email, discipline: u.discipline })) }])],

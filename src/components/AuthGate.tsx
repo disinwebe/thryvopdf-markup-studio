@@ -2,10 +2,11 @@ import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react';
 import { DISCIPLINE_LIST } from '../core/types';
 import { ChangePassword, UserManagement } from './AccountPanels';
 import { usePendingRegistrations, type PendingRegistrationState } from './PendingRegistrations';
+import { useNotifications, type NotificationsApi } from './Notifications';
 import { ServerSetup } from './ServerSetup';
 
 type View = 'setup' | 'register' | 'login' | 'awaiting';
-type Actions = { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; serverSetup?: () => void; pendingRegistrations?: PendingRegistrationState | null };
+type Actions = { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; serverSetup?: () => void; pendingRegistrations?: PendingRegistrationState | null; notifications?: NotificationsApi | null };
 
 export default function AuthGate({ children }: { children: (user: AuthUser, actions: Actions) => ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -18,6 +19,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
   const [url, setUrl] = useState('');
   const [f, setF] = useState({ name: '', email: '', discipline: DISCIPLINE_LIST[0], password: '', confirm: '' });
   const pendingRegistrations = usePendingRegistrations(user, st?.mode === 'server');
+  const notifications = useNotifications(user, st?.mode === 'server');
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const refresh = useCallback(async () => {
@@ -100,7 +102,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
       </div>
     );
   if (user) {
-    const actions: Actions = { serverMode: st?.mode === 'server', uiBlocked: !!panel, logout, changePassword: () => setPanel('password'), manageUsers: user.role === 'admin' ? () => setPanel('users') : undefined, serverSetup: () => setPanel('server'), pendingRegistrations };
+    const actions: Actions = { serverMode: st?.mode === 'server', uiBlocked: !!panel, logout, changePassword: () => setPanel('password'), manageUsers: user.role === 'admin' ? () => setPanel('users') : undefined, serverSetup: () => setPanel('server'), pendingRegistrations, notifications };
     return (
       <>
         {children(user, actions)}

@@ -264,6 +264,7 @@ app.whenReady().then(() => {
   }));
   // Password changes must remain available during mandatory first-login changes.
   ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
+  ipcMain.handle('auth-notifications', readGuard((e, a) => auth.notifications(a || {})));
   ipcMain.handle('auth-admin-list', readGuard(() => auth.adminList()));
   ipcMain.handle('auth-admin-action', readGuard((e, a) => auth.adminAction(a || {})));
   ipcMain.handle('auth-test', (e, url) => auth.test(url));

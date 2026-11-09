@@ -64,7 +64,11 @@ Accounts can live on one central server PC so every client PC shares the same us
 - Administrators manage users from **Option > Users** and change their password from **Option > Password**. User management: approve/reject pending, disable/enable, change role (user/admin), reset password (a temporary password is shown once; the user must change it at next login) and delete. Rules are enforced on the server by role; the last active admin and yourself cannot be disabled, demoted or deleted. Disabling, resetting or deleting a user ends their sessions.
 - Existing accounts from an earlier server version become active users. Local-account mode has no roles or approval.
 
-Administrators signed in to the server see a non-modal pending-registration badge that opens user management. It checks the authenticated user list immediately and approximately once per minute, without receiving passwords. The badge updates after the next check when users are approved or rejected; connection errors are displayed and retried. No email notifications are sent.
+Administrators signed in to the server see a non-modal pending-registration badge that opens user management. It checks the authenticated user list immediately and approximately once per minute, without receiving passwords. The badge updates after the next check when users are approved or rejected; connection errors are displayed and retried. No registration emails are sent.
+
+## Assignment notifications
+
+When an uploader grants a user access to a shared document (at upload or later via **Manage access**), that user gets an in-app alert (Notifications button, bottom-right, refreshed about every 30 seconds) and, if configured, an email. Configure SMTP in **ThryvoPDF Server Manager > Assignment notifications** (or `notify.json` in the server data folder: `{"smtp":{"enabled":true,"host":"","port":587,"secure":false,"user":"","password":"","from":"ThryvoPDF <noreply@example.com>"}}`). Use the manager's test button to verify. The SMTP password is stored in that file, so keep the data folder restricted. Email failures never block uploads; they are logged to the server console.
 
 ## Shared documents (multi-user collaboration)
 
