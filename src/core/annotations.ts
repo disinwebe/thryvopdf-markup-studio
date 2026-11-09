@@ -5,6 +5,7 @@ import {
   PDFHexString,
   PDFName,
   PDFNumber,
+  PDFObject,
   PDFPage,
   PDFRef,
   PDFString,
@@ -24,7 +25,7 @@ import {
 import { DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
 import { TAG_R, isReviewMarkup, numberMarkups, tagAnchor } from './numbering';
-import { CALLOUT_PAD, calloutLayout } from './callout';
+import { calloutLayout, calloutTextRuns } from './callout';
 
 export interface PageGeom {
   x0: number;
@@ -348,16 +349,10 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
       { x: co.x + co.w, y: co.y + co.h }, { x: co.x, y: co.y + co.h },
     ];
     const corners = viewCorners.map(cv);
-    let y = co.y + CALLOUT_PAD + co.headH / 0.9;
-    let txt = '';
-    for (const r of co.rows) {
-      const head = y + co.fs;
-      r.lines.forEach((ln, j) => {
-        txt += `BT /F1 ${f(co.fs)} Tf 0.13 0.13 0.13 rg ${tm({ x: co.x + CALLOUT_PAD, y: head + co.lineH * (j + 1) })} (${latin1(ln)}) Tj ET\n`;
-      });
-      y += co.headH + r.lines.length * co.lineH + co.rowGap;
-    }
-    if (tag) txt = `BT /F1 ${f(co.fs)} Tf 0.882 0.114 0.282 rg ${tm({ x: co.x + CALLOUT_PAD, y: co.y + CALLOUT_PAD + co.fs })} (#${tag}) Tj ET\n` + txt;
+    const txt = calloutTextRuns(co, tag).map((run) => {
+      const color = run.kind === 'number' ? '0.882 0.114 0.282' : run.kind === 'author' ? '0.62 0.07 0.21' : '0.13 0.13 0.13';
+      return `BT /F1 ${f(run.size)} Tf ${color} rg ${tm(run)} (${latin1(run.text)}) Tj ET\n`;
+    }).join('');
     ops += `\nq /GS1 gs 0.882 0.114 0.282 RG 1.5 w ${f(E.x)} ${f(E.y)} m ${f(A.x)} ${f(A.y)} l S `;
     ops += `1 1 1 rg ${path(viewCorners, true)} B\n${txt}Q`;
     const xs = [...corners.map((c) => c.x), A.x];
@@ -407,7 +402,6 @@ export async function writeAnnotations(
     removeLineContent(page);
     setPageData(page, { lines: [] });
   }
-  for (const page of pages) nameForeignAnnots(page);
   const numbers = numberMarkups(markups);
   const byPage = new Map<number, Markup[]>();
   for (const m of markups) byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
@@ -496,6 +490,34 @@ function removeLineContent(page: PDFPage) {
   page.node.delete(KEY_LINE_STREAMS);
 }
 
+/** Removes our saved appearances only from a throwaway copy used for display. */
+export async function pdfBytesForDisplay(bytes: Uint8Array): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  let changed = false;
+  for (const page of doc.getPages()) {
+    const annots = page.node.Annots();
+    let hasOwn = false;
+    if (annots) {
+      for (let i = 0; i < annots.size(); i++) {
+        const dict = annots.lookupMaybe(i, PDFDict);
+        if (dict?.has(KEY_MARKUP) || dict?.has(KEY_REPLY)) {
+          hasOwn = true;
+          break;
+        }
+      }
+    }
+    if (hasOwn) {
+      removeOwnAnnots(page);
+      changed = true;
+    }
+    if (page.node.has(KEY_LINE_STREAMS)) {
+      removeLineContent(page);
+      changed = true;
+    }
+  }
+  return changed ? doc.save() : bytes;
+}
+
 /** Plain line tools are PDF page content, not review annotations. */
 function writeLineContent(page: PDFPage, g: PageGeom, lines: Markup[]) {
   const drawable = lines.filter((m) => m.points.length >= 2);
@@ -538,27 +560,7 @@ function writeLineContent(page: PDFPage, g: PageGeom, lines: Markup[]) {
   page.node.set(KEY_LINE_STREAMS, page.doc.context.obj(created));
 }
 
-/** Gives annotations from other tools a stable /NM when they have none, never reusing a name already present. */
-function nameForeignAnnots(page: PDFPage) {
-  const annots = page.node.Annots();
-  if (!annots) return;
-  const isStr = (v: unknown): v is PDFString | PDFHexString => v instanceof PDFString || v instanceof PDFHexString;
-  const seen = new Set<string>();
-  for (let i = 0; i < annots.size(); i++) {
-    const nm = annots.lookupMaybe(i, PDFDict)?.get(PDFName.of('NM'));
-    if (isStr(nm)) seen.add(nm.decodeText());
-  }
-  for (let i = 0; i < annots.size(); i++) {
-    const d = annots.lookupMaybe(i, PDFDict);
-    if (!d || d.has(KEY_MARKUP) || d.has(KEY_REPLY) || isStr(d.get(PDFName.of('NM')))) continue;
-    let id = 'ext-' + uid();
-    while (seen.has(id)) id = 'ext-' + uid();
-    seen.add(id);
-    d.set(PDFName.of('NM'), PDFString.of(id));
-  }
-}
-
-/** /Contents carries the markup's own text followed by its comment thread, so any viewer shows the comments. */
+/** /Contents carries markup and comment text; author metadata remains in the saved markup state. */
 export function contentsOf(m: Markup): string {
   const thread = m.comments.map((c) => c.text).join('\n');
   return [m.text ?? '', thread].filter(Boolean).join('\n\n');
@@ -567,12 +569,12 @@ export function contentsOf(m: Markup): string {
 function removeOwnAnnots(page: PDFPage) {
   const annots = page.node.Annots();
   if (!annots) return;
-  const keep: PDFRef[] = [];
+  const keep: PDFObject[] = [];
   for (let i = 0; i < annots.size(); i++) {
     const raw = annots.get(i);
     const d = annots.lookupMaybe(i, PDFDict);
     if (d?.has(KEY_MARKUP) || d?.has(KEY_REPLY)) continue;
-    if (raw instanceof PDFRef) keep.push(raw);
+    keep.push(raw);
   }
   page.node.set(PDFName.of('Annots'), page.doc.context.obj(keep));
 }

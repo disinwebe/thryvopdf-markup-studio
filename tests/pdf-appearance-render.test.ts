@@ -5,7 +5,7 @@ import { degrees, PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream } from '
 import { AnnotationMode, getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 import { readState, saveWithState } from '../src/core/annotations';
-import { calloutLayout } from '../src/core/callout';
+import { CALLOUT_PAD, calloutLayout, calloutTextRuns } from '../src/core/callout';
 import type { Markup, MarkupType } from '../src/core/types';
 
 const review: Markup = {
@@ -29,6 +29,58 @@ function pixels(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, 
 }
 
 describe('saved PDF annotation appearances', () => {
+  it('rasterizes all shared-layout comment text runs at their viewer baselines', async () => {
+    const markup: Markup = { ...review, comments: [
+      { id: '1', author: 'Alice', text: 'First review', date: '2026-01-01', fontSize: 18 },
+      { id: '2', author: 'Bob', text: 'Second review', date: '2026-01-02', fontSize: 7 },
+    ] };
+    const source = await PDFDocument.create();
+    source.addPage([460, 360]);
+    const saved = await saveWithState(await source.save(), { markups: [markup], calibrations: {}, sheets: {}, bookmarks: [] });
+    const pdf = await getDocument({ data: saved, standardFontDataUrl }).promise;
+    try {
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, viewport, annotationMode: AnnotationMode.ENABLE }).promise;
+      for (const run of calloutTextRuns(calloutLayout(markup)!, 1)) {
+        const x = Math.floor(run.x * 2);
+        const y = Math.floor((run.y - run.size) * 2);
+        const w = Math.ceil(Math.min(run.text.length * run.size * 0.7, 100) * 2);
+        const h = Math.ceil(run.size * 2);
+        const ink = run.kind === 'body' ? (r: number, g: number, b: number) => r < 100 && g < 100 && b < 100 : (r: number, g: number, b: number) => r > 100 && g < 120 && b < 140;
+        expect(pixels(ctx, x, y, w, h, ink), run.text).toBeGreaterThan(2);
+      }
+    } finally {
+      await pdf.destroy();
+    }
+  });
+  it('renders the comment author beside the saved PDF comment number', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([460, 360]);
+    const saved = await saveWithState(await source.save(), { markups: [review], calibrations: {}, sheets: {}, bookmarks: [] });
+    const pdf = await getDocument({ data: saved, standardFontDataUrl }).promise;
+    try {
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 1 });
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const ctx = canvas.getContext('2d');
+      await page.render({
+        canvasContext: ctx as unknown as CanvasRenderingContext2D,
+        viewport,
+        annotationMode: AnnotationMode.ENABLE,
+      }).promise;
+      const box = calloutLayout(review)!;
+      const rose = (r: number, g: number, b: number) => r > 100 && g < 100 && b < 130;
+      const authorX = box.x + CALLOUT_PAD + 12;
+      const authorY = box.y + CALLOUT_PAD + box.fs * 0.2;
+      expect(pixels(ctx, authorX, authorY, 24, 14, rose)).toBeGreaterThan(0);
+    } finally {
+      await pdf.destroy();
+    }
+  });
+
   for (const rotation of [0, 90, 180, 270]) {
     it(`renders the tag, leader and bordered box at their page coordinates after reopening (${rotation} degrees)`, async () => {
       const source = await PDFDocument.create();

@@ -34,6 +34,7 @@ export function saveTheme(t: Theme, s: Store | null = store()) {
 
 export function applyTheme(t: Theme) {
   if (typeof document !== 'undefined') document.documentElement.dataset.theme = t;
+  if (typeof window !== 'undefined') window.api?.setNativeTheme?.(t);
 }
 
 export function useTheme(): [Theme, (t: Theme) => void] {

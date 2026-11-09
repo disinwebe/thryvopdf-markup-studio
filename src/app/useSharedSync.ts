@@ -12,7 +12,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Keeps tabs that hold a server-hosted document in sync: pushes local markup changes (debounced) and applies
  * server-authoritative changes and presence received through a long-poll loop.
  */
-export function useSharedSync(docs: Doc[], docsRef: { current: Doc[] }, updateDoc: UpdateDoc) {
+export function useSharedSync(docs: Doc[], docsRef: { current: Doc[] }, updateDoc: UpdateDoc, readOnly = false) {
   const cid = useRef(uid()).current;
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inflight = useRef(new Set<string>());
@@ -24,6 +24,7 @@ export function useSharedSync(docs: Doc[], docsRef: { current: Doc[] }, updateDo
 
   const flush = async (id: string) => {
     timers.current.delete(id);
+    if (readOnly) return;
     const d = docsRef.current.find((x) => x.id === id);
     if (!d?.shared || inflight.current.has(id)) return;
     const diff = diffMarkups(d.markups, d.shared.synced);
@@ -65,6 +66,7 @@ export function useSharedSync(docs: Doc[], docsRef: { current: Doc[] }, updateDo
   };
 
   useEffect(() => {
+    if (readOnly) return;
     for (const d of docs) {
       const s = d.shared;
       if (!s || s.status === 'expired' || timers.current.has(d.id) || inflight.current.has(d.id)) continue;

@@ -63,7 +63,7 @@ describe('client shared docs', () => {
     };
     const a = await mkUser('Ann', 'ann@example.com');
     const b = await mkUser('Bob', 'bob@example.com');
-    const up = await a.docs({ op: 'upload', name: 'plan.pdf', bytes: PDF });
+    const up = await a.docs({ op: 'upload', name: 'plan.pdf', bytes: PDF, members: ['bob@example.com'] });
     expect(up.ok).toBe(true);
     const id = up.doc.id;
     const open = await b.docs({ op: 'open', id });

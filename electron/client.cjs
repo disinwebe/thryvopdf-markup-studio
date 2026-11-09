@@ -131,6 +131,10 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     },
 
     async docs(a = {}) {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Shared documents need a signed-in server connection.' };
+      const health = await call(cfg.serverUrl, 'GET', '/api/health');
+      if (!health.ok) return health;
+      if (health.docsAccess !== true) return { ok: false, error: 'This server does not enforce document access permissions. Update its server folder and restart it before using shared documents.' };
       const r = await this.docsRaw(a);
       if (!r || !r.notFound) return r;
       const h = await call(cfg.serverUrl, 'GET', '/api/health');
@@ -149,7 +153,8 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
       const id = encodeURIComponent(a.id || '');
       switch (a.op) {
         case 'list': return call(u, 'GET', '/api/docs', null, t);
-        case 'upload': return call(u, 'POST', '/api/docs?name=' + encodeURIComponent(a.name || 'document.pdf') + '&project=' + encodeURIComponent(a.project || '') + '&rel=' + encodeURIComponent(a.rel || '') + '&description=' + encodeURIComponent(a.description || ''), a.bytes, t, { bytes: true, timeout: 120000 });
+        case 'users': return call(u, 'GET', '/api/docs/users', null, t);
+        case 'upload': return call(u, 'POST', '/api/docs?name=' + encodeURIComponent(a.name || 'document.pdf') + '&project=' + encodeURIComponent(a.project || '') + '&rel=' + encodeURIComponent(a.rel || '') + '&description=' + encodeURIComponent(a.description || '') + (a.members || []).map((email) => '&member=' + encodeURIComponent(email)).join(''), a.bytes, t, { bytes: true, timeout: 120000 });
         case 'open': {
           const file = await call(u, 'GET', '/api/docs/' + id + '/file', null, t, { download: true, timeout: 120000 });
           if (!file.ok) return file;
@@ -160,7 +165,9 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
         case 'poll': return call(u, 'GET', '/api/docs/' + id + '/events?since=' + Number(a.since) + '&pr=' + Number(a.pr || 0), null, t, { timeout: 40000 });
         case 'leave': return call(u, 'POST', '/api/docs/' + id + '/leave', {}, t);
         case 'rename-group': return call(u, 'POST', '/api/docs/groups/rename', { project: a.project, newProject: a.newProject }, t);
+        case 'delete-group': return call(u, 'POST', '/api/docs/groups/delete', { project: a.project, revision: a.revision }, t);
         case 'meta': return call(u, 'POST', '/api/docs/' + id + '/meta', { project: a.project, description: a.description }, t);
+        case 'members': return call(u, 'POST', '/api/docs/' + id + '/members', { members: a.members }, t);
     case 'delete': return call(u, 'DELETE', '/api/docs/' + id, null, t);
         default: return { ok: false, error: 'Unknown operation.' };
       }

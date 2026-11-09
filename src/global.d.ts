@@ -26,16 +26,30 @@ interface AuthStatus {
   error?: string;
 }
 type AuthResult = { ok: true; user: AuthUser; pending?: undefined } | { ok: true; pending: true; message: string; user?: undefined } | { ok: false; error: string };
+interface ServerControlStatus {
+  config: { port: number; dataDir: string };
+  running: boolean;
+  addresses: string[];
+  error: string;
+  initialPasswordFile: string | null;
+}
 
 interface Window {
   api?: {
-    setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; serverMode: boolean; blocked: boolean }): void;
+    setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; serverMode: boolean; blocked: boolean; viewOnly?: boolean }): void;
+    setNativeTheme(theme: 'dark' | 'light'): void;
+    serverControlStatus(): Promise<ServerControlStatus>;
+    serverControlRun(action: 'start' | 'stop' | 'restart', config: { port: number; dataDir: string }): Promise<ServerControlStatus>;
+    serverControlFolder(): Promise<string | null>;
+    serverControlCopy(address: string): Promise<void>;
+    serverControlFirewallHelp(): Promise<void>;
     onMenuAction(fn: (action: string) => void): () => void;
     quitApp(): Promise<void>;
     appVersion(): Promise<string>;
     showAbout(): Promise<void>;
     startupFiles(): Promise<PickedFile[]>;
     openFiles(opts?: { multi?: boolean; filters?: { name: string; extensions: string[] }[] }): Promise<PickedFile[]>;
+    renameFile(args: { path: string; name: string }): Promise<{ ok: boolean; path?: string; error?: string }>;
     pickStamp(): Promise<PickedFile | null>;
     saveFile(args: {
       defaultName: string;
@@ -48,7 +62,7 @@ interface Window {
     licenseStatus(): Promise<{ ok: boolean; device?: string; id?: string; error?: string }>;
     importLicense(): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
     pickUploads(kind: 'files' | 'folder'): Promise<{ project: string; items: { token: string; name: string; rel: string; size: number }[]; truncated: boolean } | null>;
-    sharedDocs(args: { op: 'list' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group'; id?: string; name?: string; project?: string; newProject?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number }): Promise<any>;
+    sharedDocs(args: { op: 'list' | 'users' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group' | 'delete-group' | 'members'; id?: string; name?: string; project?: string; newProject?: string; revision?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; members?: string[]; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
     adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;
     adminAction(args: { email: string; action: string; role?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string }>;

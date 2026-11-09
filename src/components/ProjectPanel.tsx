@@ -1,25 +1,39 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Doc } from '../app/model';
 import { groupByProject } from '../app/upload';
 import { SHARED_REFRESH_MS, startPolling } from '../app/shortcuts';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 import { isReviewMarkup } from '../core/numbering';
 import type { SharedListing } from './SharedLibrary';
+import { normalizePdfFilename } from '../app/filename';
 
 export function ProjectPanel(p: {
   docs: Doc[];
   activeId: string;
   sharedRevision?: number;
+  viewOnly?: boolean;
   onActivate(id: string): void;
   onOpen(): void;
   onOpenShared?(d: SharedListing): Promise<void>;
   onClose(id: string): void;
-  onRename(id: string, name: string): void;
+  onRename(id: string, name: string): void | Promise<void>;
   onMove(i: number, dir: number): void;
   onMerge(): void;
+  readOnly?: boolean;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [originalName, setOriginalName] = useState('');
+  const cancelRename = useRef(false);
+  const finishRename = (id: string) => {
+    if (cancelRename.current) {
+      cancelRename.current = false;
+      return;
+    }
+    const next = normalizePdfFilename(name);
+    if (next && next !== originalName) void p.onRename(id, next);
+    setEditing(null);
+  };
   const [shared, setShared] = useState<SharedListing[]>([]);
   const [sharedErr, setSharedErr] = useState('');
   const [collapsed, setCollapsed] = useState<string[]>(() => {
@@ -30,14 +44,19 @@ export function ProjectPanel(p: {
     try { saveCollapsedGroups(localStorage, next); } catch { /* storage unavailable */ }
     return next;
   });
+  const hasShared = !!p.onOpenShared;
   const loadShared = useCallback(async () => {
-    if (!window.api?.sharedDocs) return;
-    const r = await window.api.sharedDocs({ op: 'list' });
-    if (r.ok) {
-      setShared(r.docs || []);
-      setSharedErr('');
-    } else setSharedErr(r.expired ? 'Session expired. Log out and sign in again.' : r.error || 'Shared documents unavailable.');
-  }, []);
+    if (!hasShared || !window.api?.sharedDocs) return;
+    try {
+      const r = await window.api.sharedDocs({ op: 'list' });
+      if (r.ok) {
+        setShared(r.docs || []);
+        setSharedErr('');
+      } else setSharedErr(r.expired ? 'Session expired. Log out and sign in again.' : r.error || 'Shared documents unavailable.');
+    } catch {
+      setSharedErr('Shared documents unavailable. Check your connection and sign-in.');
+    }
+  }, [hasShared]);
   useEffect(() => {
     void loadShared();
     try { setCollapsed(loadCollapsedGroups(localStorage)); } catch { /* storage unavailable */ }
@@ -48,7 +67,7 @@ export function ProjectPanel(p: {
     <div className="panel-body">
       <div className="row">
         <button onClick={p.onOpen}>Add PDFs…</button>
-        <button onClick={p.onMerge} disabled={p.docs.length < 2} title="Merge all open documents, in this order, into a new PDF">
+        <button onClick={p.onMerge} disabled={p.readOnly || p.docs.length < 2} title="Merge all open documents, in this order, into a new PDF">
           Merge all
         </button>
       </div>
@@ -62,14 +81,20 @@ export function ProjectPanel(p: {
                 value={name}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => setName(e.target.value)}
-                onBlur={() => {
-                  if (name.trim()) p.onRename(d.id, name.trim().replace(/(?<!\.pdf)$/i, ''));
-                  setEditing(null);
+                onBlur={() => finishRename(d.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  if (e.key === 'Escape') { e.preventDefault(); cancelRename.current = true; setName(originalName); setEditing(null); }
                 }}
-                onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
               />
             ) : (
-              <b onDoubleClick={() => { setEditing(d.id); setName(d.name); }} title="Double-click to rename">
+              <b onDoubleClick={() => {
+                if (p.viewOnly || d.shared) return;
+                cancelRename.current = false;
+                setEditing(d.id);
+                setName(d.name);
+                setOriginalName(d.name);
+              }} title={p.viewOnly || d.shared ? undefined : 'Double-click to rename'}>
                 {d.name}
               </b>
             )}

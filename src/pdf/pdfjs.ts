@@ -2,13 +2,43 @@ import * as pdfjs from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { Raster } from '../core/compare';
+import { pdfBytesForDisplay } from '../core/annotations';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 export type { PDFDocumentProxy, PDFPageProxy };
 
 export async function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
-  return pdfjs.getDocument({ data: bytes.slice() }).promise;
+  let displayBytes = bytes;
+  try {
+    displayBytes = await pdfBytesForDisplay(bytes);
+  } catch (error) {
+    console.warn('Could not prepare PDF annotation display; using the original PDF.', error);
+  }
+  return pdfjs.getDocument({ data: displayBytes.slice() }).promise;
+}
+
+export interface PdfComment {
+  id: string;
+  subtype: string;
+  author: string;
+  text: string;
+}
+
+/** Returns standard PDF comments, excluding duplicate popup entries. */
+export async function pagePdfComments(pdf: PDFDocumentProxy, index: number): Promise<PdfComment[]> {
+  const page = await pdf.getPage(index + 1);
+  const annotations = await page.getAnnotations({ intent: 'display' });
+  const popupIds = new Set(annotations.map((a) => a.popupRef).filter(Boolean));
+  return annotations
+    .filter((a) => !(a.annotationFlags & 34) && !(a.subtype === 'Popup' && popupIds.has(a.id)))
+    .map((a) => ({
+      id: a.id,
+      subtype: a.subtype || 'Annotation',
+      author: a.titleObj?.str || '',
+      text: a.contentsObj?.str || '',
+    }))
+    .filter((a) => a.text.trim().length > 0);
 }
 
 export async function pageSize(pdf: PDFDocumentProxy, index: number) {
@@ -33,7 +63,7 @@ export async function renderToCanvas(
   return page.render({
     canvasContext: ctx,
     viewport,
-    annotationMode: pdfjs.AnnotationMode.DISABLE,
+    annotationMode: pdfjs.AnnotationMode.ENABLE,
   });
 }
 
@@ -54,7 +84,7 @@ export async function renderRaster(
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, w, h);
-  await page.render({ canvasContext: ctx, viewport, annotationMode: pdfjs.AnnotationMode.DISABLE }).promise;
+  await page.render({ canvasContext: ctx, viewport, annotationMode: pdfjs.AnnotationMode.ENABLE }).promise;
   const img = ctx.getImageData(0, 0, w, h);
   return { raster: { data: img.data, width: w, height: h }, canvas };
 }

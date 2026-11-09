@@ -2,7 +2,7 @@ import { arrowHead, boxCenter, boxOf, cloudPoints, rectPoly, wrapText, approxTex
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
 import { TAG_R, isReviewMarkup, tagAnchor } from '../core/numbering';
-import { CALLOUT_PAD, calloutLayout } from '../core/callout';
+import { calloutLayout, calloutTextRuns } from '../core/callout';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
 const d = (p: Pt[], close = false) => 'M' + p.map((q) => `${q.x} ${q.y}`).join(' L') + (close ? ' Z' : '');
@@ -194,29 +194,16 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
           <line x1={co.edge.x} y1={co.edge.y} x2={co.anchor.x} y2={co.anchor.y} stroke="#e11d48" strokeWidth={1.2} />
           <circle cx={co.anchor.x} cy={co.anchor.y} r={2.5} fill="#e11d48" />
           <rect x={co.x} y={co.y} width={co.w} height={co.h} fill="#fff" stroke="#e11d48" strokeWidth={1.5} />
-          {tag && <text x={co.x + CALLOUT_PAD} y={co.y + CALLOUT_PAD + co.fs} fontSize={co.fs} fontWeight={700} fill="#e11d48">#{tag}</text>}
-          {(() => {
-            let y = co.y + CALLOUT_PAD + co.headH / 0.9;
-            return co.rows.map((r, i) => {
-              const head = y + co.fs;
-              const out = (
-                <g key={i}>
-                  <text x={co.x + CALLOUT_PAD} y={head} fontSize={co.headFs} fontWeight={700} fill="#9f1239">{r.head}</text>
-                  {r.lines.map((ln, j) => (
-                    <text key={j} x={co.x + CALLOUT_PAD} y={head + co.lineH * (j + 1)} fontSize={co.fs} fill="#222">{ln}</text>
-                  ))}
-                </g>
-              );
-              y += co.headH + r.lines.length * co.lineH + co.rowGap;
-              return out;
-            });
-          })()}
+          {calloutTextRuns(co, tag).map((run, i) => (
+            <text key={i} x={run.x} y={run.y} fontSize={run.size} fontFamily="Helvetica, Arial, sans-serif" fontWeight={400}
+              fill={run.kind === 'number' ? '#e11d48' : run.kind === 'author' ? '#9e1236' : '#212121'}>{run.text}</text>
+          ))}
         </g>
       )}
       {a && tag && (
         <g className="review-tag">
           <circle cx={a.x} cy={a.y} r={TAG_R} fill="#e11d48" stroke="#fff" strokeWidth={1} />
-          <text x={a.x} y={a.y + 3} fontSize={tag > 99 ? 6 : 8} fontWeight={700} fill="#fff" textAnchor="middle">#{tag}</text>
+          <text x={a.x} y={a.y + (tag > 99 ? 6 : 8) * 0.35} fontSize={tag > 99 ? 6 : 8} fontFamily="Helvetica, Arial, sans-serif" fontWeight={400} fill="#fff" textAnchor="middle">#{tag}</text>
         </g>
       )}
     </g>

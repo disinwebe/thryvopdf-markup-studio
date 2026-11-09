@@ -29,7 +29,7 @@ const user = async (name: string, email: string) => {
   return (await call('POST', '/api/login', undefined, { email, password: 'correct horse' })).token as string;
 };
 const upload = (tok: string, name: string, project = '', description = '') =>
-  call('POST', `/api/docs?name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}&description=${encodeURIComponent(description)}`, tok, undefined, PDF);
+  call('POST', `/api/docs?member=bob%40example.com&member=admin&name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}&description=${encodeURIComponent(description)}`, tok, undefined, PDF);
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'pms-groups-'));
@@ -55,6 +55,17 @@ describe('author-only markup deletion', () => {
     expect(shared.calloutSize).toEqual({ width: 220, height: 110 });
     expect(shared.calloutHidden).toBe(true);
     expect((await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [{ ...shared, calloutSize: { width: -1, height: 110 } }] })).code).toBe(400);
+  });
+  it('stores per-comment sizes and rejects out-of-range or foreign-author changes', async () => {
+    const id = (await upload(ann, 'comment-size.pdf')).doc.id;
+    const markup = mk('font-size', { comments: [{ id: 'comment1', author: 'spoof', date: '2026-01-01', text: 'first', fontSize: 14 }] });
+    expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [markup] })).code).toBe(200);
+    const shared = (await call('GET', `/api/docs/${id}/state`, bob)).markups[0];
+    expect(shared.comments[0]).toMatchObject({ fontSize: 14, author: 'Ann Lee', authorEmail: 'ann@example.com' });
+    expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [{ ...shared, comments: [{ ...shared.comments[0], fontSize: 19 }] }] })).code).toBe(400);
+    expect((await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [{ ...shared, comments: [{ ...shared.comments[0], fontSize: 10 }] }] })).code).toBe(403);
+    expect((await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [{ ...shared, comments: [{ ...shared.comments[0], fontSize: 10 }] }] })).code).toBe(200);
+    expect((await call('GET', `/api/docs/${id}/state`, bob)).markups[0].comments[0].fontSize).toBe(10);
   });
   it('stamps authorEmail server-side and lets only the author delete', async () => {
     const id = (await upload(ann, 'a.pdf')).doc.id;

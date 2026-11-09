@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Doc, TOOL_LABEL } from '../app/model';
 import { defaultSubject, measureLabel, DEFAULT_CAL } from '../core/measurement';
 import { markupCsv } from '../core/markupCsv';
@@ -6,6 +6,7 @@ import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN } from '../core/commentSize';
 import { Actor, canDeleteComment, canDeleteMarkup, canEditComment } from '../core/comments';
 import { isReviewMarkup, numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
+import { PdfComments } from './PdfComments';
 
 export interface MarkupsPanelProps {
   doc: Doc;
@@ -18,6 +19,9 @@ export interface MarkupsPanelProps {
   onExport(csv: string): void;
   commentSize: number;
   onCommentSize(size: number): void;
+  readOnly?: boolean;
+  focusCommentId?: string | null;
+  onCommentFocused?(): void;
 }
 
 export function MarkupsPanel(p: MarkupsPanelProps) {
@@ -47,6 +51,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
 
   return (
     <div className="panel-body">
+      <PdfComments pdf={doc.pdf} page={doc.page} />
       <div className="row">
         <input placeholder="Search markups" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
@@ -61,7 +66,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           <option value="all">All pages</option>
           <option value="page">This page</option>
         </select>
-        <button onClick={exportCsv} title="Export markup list as CSV">CSV</button>
+        <button onClick={exportCsv} disabled={p.readOnly} title="Export markup list as CSV">CSV</button>
       </div>
       <div className="list">
         {rows.length === 0 && <p className="muted">No markups.</p>}
@@ -84,14 +89,22 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
   );
 }
 
-function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onCommentSize }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
+function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onCommentSize, readOnly = false, focusCommentId, onCommentFocused }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
   const [comment, setComment] = useState('');
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const commentInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusCommentId === m.id) {
+      commentInput.current?.focus();
+      onCommentFocused?.();
+    }
+  }, [focusCommentId, m.id, onCommentFocused]);
   const upd = (patch: Partial<Markup>, key?: string) => onUpdate(m.id, patch, key);
   const cal = doc.calibrations[m.page] ?? DEFAULT_CAL;
   const hasFill = ['rect', 'ellipse', 'cloud', 'text', 'callout', 'm-area'].includes(m.type);
   return (
     <div className="props">
+      <fieldset className="props-fields" disabled={readOnly}>
       <h4>
         {TOOL_LABEL[m.type]} properties
         <button className="danger" disabled={!canDeleteMarkup(m, user)} title={canDeleteMarkup(m, user) ? undefined : "Only the author can delete this markup"} onClick={() => onDelete(m.id)}>Delete</button>
@@ -114,7 +127,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         <span>{Math.round(m.opacity * 100)}%</span>
       </label>
       {hasFill && m.type !== 'm-area' && (
-        <label>
+        <label className="inline-check">
           Fill
           <input type="checkbox" checked={!!m.fill} onChange={(e) => upd({ fill: e.target.checked ? '#ffffff' : undefined })} />
           {m.fill && <input type="color" value={m.fill} onChange={(e) => upd({ fill: e.target.value }, 'fill')} />}
@@ -167,7 +180,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         <>
       <div className="muted small" title="Internal annotation ID, saved as /NM in the PDF">Comment #{numberMarkups(doc.markups).get(m.id)} · internal ID: {m.id}</div>
       <h4>Comments</h4>
-      <label>
+      <label className="inline-check">
         <span>Show comment box on drawing</span>
         <input type="checkbox" checked={!m.calloutHidden} onChange={(e) => upd({ calloutHidden: !e.target.checked })} />
       </label>
@@ -193,6 +206,19 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           ) : (
             <div>{c.text}</div>
           )}
+          <label className="comment-size">
+            Comment text size
+            <select
+              aria-label={`Comment text size for ${c.author}`}
+              value={c.fontSize ?? commentSize}
+              onChange={(e) => {
+                const fontSize = +e.target.value;
+                upd({ comments: m.comments.map((item) => item.id === c.id ? { ...item, fontSize: fontSize === commentSize ? undefined : fontSize } : item) });
+              }}
+            >
+              {Array.from({ length: COMMENT_SIZE_MAX - COMMENT_SIZE_MIN + 1 }, (_, i) => COMMENT_SIZE_MIN + i).map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
           {editing?.id !== c.id && (
             <div className="row">
               {canEditComment(c, user) && <button onClick={() => setEditing({ id: c.id, text: c.text })}>Edit</button>}
@@ -204,7 +230,9 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       <div className="row">
         <input
           className="comment-input"
+          ref={commentInput}
           value={comment}
+          aria-label="Add Comment"
           placeholder="Add a comment / reply"
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => {
@@ -215,14 +243,15 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           }}
         />
       </div>
-      <label className="comment-size">
-        Comment text size
+        </>
+      )}
+      {!readOnly && <label className="comment-size">
+        Default comment text size
         <select value={commentSize} onChange={(e) => onCommentSize(+e.target.value)}>
           {Array.from({ length: COMMENT_SIZE_MAX - COMMENT_SIZE_MIN + 1 }, (_, i) => COMMENT_SIZE_MIN + i).map((size) => <option key={size} value={size}>{size}</option>)}
         </select>
-      </label>
-        </>
-      )}
+      </label>}
+      </fieldset>
     </div>
   );
 }

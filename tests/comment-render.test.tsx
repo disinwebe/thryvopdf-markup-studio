@@ -4,14 +4,60 @@ import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream } f
 import { MarkupShape } from '../src/components/MarkupShape';
 import { DEFAULT_CAL } from '../src/core/measurement';
 import { buildAppearance, readState, saveWithState } from '../src/core/annotations';
-import { calloutLayout } from '../src/core/callout';
+import { calloutLayout, calloutTextRuns } from '../src/core/callout';
 import { markupCsv } from '../src/core/markupCsv';
+import { MarkupsPanel } from '../src/components/MarkupsPanel';
 import type { Markup } from '../src/core/types';
 
 const m: Markup = { id: 'm1', type: 'rect', page: 0, points: [{ x: 10, y: 20 }, { x: 70, y: 60 }], color: '#000000', width: 2, opacity: 0.3, status: 'None', author: 'A', date: '2026-01-01T00:00:00Z', comments: [{ id: 'c1', author: 'B', date: '2026-01-01', text: 'Review text' }], callout: { x: 100, y: 80 } };
 const stamp: Markup = { ...m, id: 'stamp', type: 'stamp', stamp: 'APPROVED' };
 
 describe('visible review comments', () => {
+  it('uses the same font sizes, baselines and order for viewer and PDF comment runs', () => {
+    const markup: Markup = { ...m, comments: [
+      { id: 'one', author: 'Alice', date: '2026-01-01', text: 'First review', fontSize: 18 },
+      { id: 'two', author: 'Bob', date: '2026-01-02', text: 'Second review', fontSize: 7, edited: '2026-01-03' },
+    ] };
+    const box = calloutLayout(markup)!;
+    const runs = calloutTextRuns(box, 1);
+    expect(runs.map((r) => r.text)).toEqual(['#1', 'Alice', 'First review', 'Bob (edited)', 'Second review']);
+    expect(runs[0].y).toBe(runs[1].y);
+    expect(runs[1].y - runs[1].size).toBeGreaterThanOrEqual(box.y);
+    expect(Math.max(...runs.map((r) => r.y))).toBeLessThan(box.y + box.h);
+    const svg = renderToStaticMarkup(<svg><MarkupShape m={markup} cal={DEFAULT_CAL} tag={1} /></svg>);
+    const ops = buildAppearance(markup, { x0: 0, y0: 0, w: 400, h: 300, rotation: 0 }, DEFAULT_CAL, 1).ops;
+    const f = (n: number) => String(+n.toFixed(3));
+    for (const run of runs) {
+      expect(svg).toContain(`x="${run.x}" y="${run.y}" font-size="${run.size}" font-family="Helvetica, Arial, sans-serif" font-weight="400"`);
+      expect(ops).toContain(`/F1 ${f(run.size)} Tf`);
+      const escaped = run.text.replace(/([\\()])/g, '\\$1');
+      expect(ops).toContain(`1 0 0 1 ${f(run.x)} ${f(300 - run.y)} Tm (${escaped}) Tj`);
+    }
+  });
+  it('exposes an independent size control per comment and the focused Add Comment editor', () => {
+    const markup: Markup = { ...m, comments: [
+      { id: 'one', author: 'A', date: '2026-01-01', text: 'first', fontSize: 7 },
+      { id: 'two', author: 'B', date: '2026-01-02', text: 'second', fontSize: 18 },
+    ] };
+    const panel = renderToStaticMarkup(<MarkupsPanel
+      doc={{ id: 'doc', name: 'file.pdf', bytes: new Uint8Array(), pdf: {} as any, numPages: 1, markups: [markup], undo: [], redo: [], calibrations: {}, sheets: {}, bookmarks: [], dirty: false, page: 0, zoom: 1, textCache: new Map() }}
+      selectedId={markup.id}
+      author="A"
+      user={{ name: 'A', email: 'a@example.test', role: 'user' }}
+      onSelect={() => {}}
+      onUpdate={() => {}}
+      onDelete={() => {}}
+      onExport={() => {}}
+      commentSize={9}
+      onCommentSize={() => {}}
+      focusCommentId={markup.id}
+    />);
+    expect(panel).toContain('aria-label="Comment text size for A"');
+    expect(panel).toContain('aria-label="Comment text size for B"');
+    expect(panel).toContain('aria-label="Add Comment"');
+    expect(panel).toContain('value="7" selected');
+    expect(panel).toContain('value="18" selected');
+  });
   it('renders a high contrast numbered tag, border and leader on screen', () => {
     const svg = renderToStaticMarkup(<svg><MarkupShape m={m} cal={DEFAULT_CAL} tag={1} /></svg>);
     expect(svg).toContain('class="review-tag"');
@@ -41,7 +87,24 @@ describe('visible review comments', () => {
     expect(ap).toBeInstanceOf(PDFRawStream);
     const ops = new TextDecoder().decode((ap as PDFRawStream).contents);
     expect(ops).toContain('(Author: this text is literal) Tj');
-    expect(ops).not.toContain('Distinct Author');
+    expect(ops).toContain('(Distinct Author) Tj');
+    expect((await readState(saved)).markups[0].comments[0]).toEqual(comment);
+    expect(renderToStaticMarkup(<svg><MarkupShape m={{ ...m, comments: [comment] }} cal={DEFAULT_CAL} tag={1} /></svg>)).toContain('Distinct Author');
+  });
+  it('shows the comment author in the saved appearance but not in Contents without changing review data', async () => {
+    const comment = { ...m.comments[0], author: 'Distinct Author', text: 'Author: this text is literal' };
+    const original = await PDFDocument.create();
+    original.addPage([400, 300]);
+    const bytes = await saveWithState(await original.save(), { markups: [{ ...m, comments: [comment] }], calibrations: {}, sheets: {}, bookmarks: [] });
+    const saved = await PDFDocument.load(bytes);
+    const annotation = (saved.getPages()[0].node.Annots() as PDFArray).lookup(0, PDFDict);
+    expect(annotation.lookup(PDFName.of('Contents'), PDFHexString).decodeText()).toBe(comment.text);
+    expect(annotation.lookup(PDFName.of('T'), PDFHexString).decodeText()).toBe('A');
+    const ap = annotation.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N'));
+    expect(ap).toBeInstanceOf(PDFRawStream);
+    const ops = new TextDecoder().decode((ap as PDFRawStream).contents);
+    expect(ops).toContain('(Author: this text is literal) Tj');
+    expect(ops).toContain('(Distinct Author) Tj');
     expect((await readState(saved)).markups[0].comments[0]).toEqual(comment);
     expect(renderToStaticMarkup(<svg><MarkupShape m={{ ...m, comments: [comment] }} cal={DEFAULT_CAL} tag={1} /></svg>)).toContain('Distinct Author');
   });

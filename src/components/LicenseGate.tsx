@@ -1,8 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import type { LicenseInfoStatus } from './LicenseInfo';
 
-export default function LicenseGate({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<{ ok: boolean; device?: string; error?: string } | null>(null);
-  const [busy, setBusy] = useState(false);
+export interface LicenseGateState {
+  licensed: boolean;
+  status: LicenseInfoStatus;
+  importLicense(): Promise<void>;
+}
+
+export default function LicenseGate({ children }: { children: (state: LicenseGateState) => ReactNode }) {
+  const [status, setStatus] = useState<LicenseInfoStatus | null>(null);
+
   useEffect(() => {
     if (!window.api) {
       setStatus({ ok: false, error: 'Licensing requires the Windows desktop application.' });
@@ -10,27 +17,21 @@ export default function LicenseGate({ children }: { children: ReactNode }) {
     }
     window.api.licenseStatus().then(setStatus).catch(() => setStatus({ ok: false, error: 'Could not check the device license.' }));
   }, []);
-  const activate = async () => {
-    if (!window.api) return;
-    setBusy(true);
+
+  const importLicense = useCallback(async () => {
+    if (!window.api) {
+      setStatus((current) => ({ ok: false, device: current?.device, error: 'Licensing requires the Windows desktop application.' }));
+      return;
+    }
     try {
       const result = await window.api.importLicense();
       if (result.ok) setStatus(await window.api.licenseStatus());
-      else if (!result.cancelled) setStatus((s) => ({ ok: false, device: s?.device, error: result.error || 'Activation failed.' }));
+      else if (!result.cancelled) setStatus((current) => ({ ok: false, device: current?.device, error: result.error || 'Activation failed.' }));
     } catch {
-      setStatus((s) => ({ ok: false, device: s?.device, error: 'Could not import the license file.' }));
-    } finally { setBusy(false); }
-  };
+      setStatus((current) => ({ ok: false, device: current?.device, error: 'Could not import or verify the license file.' }));
+    }
+  }, []);
+
   if (!status) return <div className="auth">Checking device license...</div>;
-  if (status.ok) return <>{children}</>;
-  return <div className="auth"><div className="auth-card">
-    <h1>ThryvoPDF Markup Studio</h1>
-    <h2>Activate this device</h2>
-    <p>Send this device request to the software owner to obtain a perpetual license file.</p>
-    <label>Device request
-      <textarea readOnly rows={3} value={status.device || 'Unavailable'} aria-label="Device request" />
-    </label>
-    {status.error && <div className="danger" role="alert">{status.error}</div>}
-    <button className="primary" disabled={busy || !status.device} onClick={() => void activate()}>Import license file...</button>
-  </div></div>;
+  return <>{children({ licensed: status.ok, status, importLicense })}</>;
 }

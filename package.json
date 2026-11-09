@@ -13,13 +13,14 @@
     "electron": "electron .",
     "test": "vitest run",
     "server": "node server/server.cjs",
-    "dist": "npm run build && electron-builder --win nsis --publish never"
+    "dist": "npm run build && electron-builder --win nsis --publish never",
+    "dist:server-manager": "node scripts/build-server-manager.cjs"
   },
   "build": {
     "appId": "com.planmarkupstudio.app",
     "productName": "ThryvoPDF Markup Studio",
     "publish": null,
-    "files": ["dist/**", "electron/**", "assets/icon.*", "package.json"],
+    "files": ["dist/**", "electron/**", "server/*.cjs", "assets/icon.*", "assets/menu/*.png", "package.json"],
     "directories": { "output": "release" },
     "win": { "target": ["nsis"], "icon": "assets/icon.ico" },
     "nsis": { "installerIcon": "assets/icon.ico", "uninstallerIcon": "assets/icon.ico", "oneClick": false, "allowToChangeInstallationDirectory": true }

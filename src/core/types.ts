@@ -41,6 +41,8 @@ export interface Comment {
   date: string;
   text: string;
   edited?: string;
+  /** Optional per-comment appearance override; absent uses the device's default comment size. */
+  fontSize?: number;
 }
 
 export interface Markup {
@@ -66,6 +68,8 @@ export interface Markup {
   date: string;
   subject?: string;
   comments: Comment[];
+  /** Text size for this review annotation's comment callout. */
+  commentSize?: number;
   /** top-left of the movable comment box, page space; default is placed beside the markup */
   callout?: Pt;
   /** Per-annotation callout dimensions in page coordinates. */
