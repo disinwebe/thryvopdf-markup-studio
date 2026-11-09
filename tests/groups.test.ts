@@ -82,12 +82,13 @@ describe('author-only markup deletion', () => {
     expect((await call('GET', `/api/docs/${id}/state`, bob)).markups).toHaveLength(0);
   });
 
-  it('keeps the original author when another user edits the markup', async () => {
+  it('rejects another user editing the markup', async () => {
     const id = (await upload(ann, 'b.pdf')).doc.id;
     await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('m1')] });
-    await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [mk('m1', { color: '#00ff00', author: 'Bob Ray', authorEmail: 'bob@example.com' })] });
+    const denied = await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [mk('m1', { color: '#00ff00', author: 'Bob Ray', authorEmail: 'bob@example.com' })] });
+    expect(denied.code).toBe(403);
     const m = (await call('GET', `/api/docs/${id}/state`, ann)).markups[0];
-    expect([m.color, m.authorEmail]).toEqual(['#00ff00', 'ann@example.com']);
+    expect([m.color, m.authorEmail]).toEqual(['#ff0000', 'ann@example.com']);
   });
 
   it('mirrors the rule in the client helper', () => {

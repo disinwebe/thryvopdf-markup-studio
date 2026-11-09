@@ -13,7 +13,7 @@ interface AuthUser {
   status?: string;
   mustChange?: boolean;
 }
-interface AppNotification { id: string; type: 'assignment'; docId: string; docName: string; by: string; message: string; created: string; read: boolean }
+interface AppNotification { id: string; type: 'assignment' | 'registration' | 'review'; docId?: string; docName?: string; by?: string; message: string; created: string; read: boolean }
 interface ManagedUser extends AuthUser {
   created?: string;
 }
@@ -27,23 +27,10 @@ interface AuthStatus {
   error?: string;
 }
 type AuthResult = { ok: true; user: AuthUser; pending?: undefined } | { ok: true; pending: true; message: string; user?: undefined } | { ok: false; error: string };
-interface ServerControlStatus {
-  config: { port: number; dataDir: string };
-  running: boolean;
-  addresses: string[];
-  error: string;
-  initialPasswordFile: string | null;
-}
-
 interface Window {
   api?: {
     setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; serverMode: boolean; blocked: boolean; viewOnly?: boolean }): void;
     setNativeTheme(theme: 'dark' | 'light'): void;
-    serverControlStatus(): Promise<ServerControlStatus>;
-    serverControlRun(action: 'start' | 'stop' | 'restart', config: { port: number; dataDir: string }): Promise<ServerControlStatus>;
-    serverControlFolder(): Promise<string | null>;
-    serverControlCopy(address: string): Promise<void>;
-    serverControlFirewallHelp(): Promise<void>;
     onMenuAction(fn: (action: string) => void): () => void;
     quitApp(): Promise<void>;
     appVersion(): Promise<string>;
@@ -58,12 +45,13 @@ interface Window {
       filters?: { name: string; extensions: string[] }[];
       path?: string;
     }): Promise<string | null>;
+    openSavedPdf(path: string): Promise<{ ok: boolean; error?: string }>;
     saveMany(args: { files: { name: string; data: Uint8Array }[] }): Promise<string | null>;
     authStatus(): Promise<AuthStatus>;
     licenseStatus(): Promise<{ ok: boolean; device?: string; id?: string; error?: string }>;
     importLicense(): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
     pickUploads(kind: 'files' | 'folder'): Promise<{ project: string; items: { token: string; name: string; rel: string; size: number }[]; truncated: boolean } | null>;
-    sharedDocs(args: { op: 'list' | 'users' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group' | 'delete-group' | 'members'; id?: string; name?: string; project?: string; newProject?: string; revision?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; members?: string[]; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number }): Promise<any>;
+    sharedDocs(args: { op: 'list' | 'users' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group' | 'delete-group' | 'members' | 'review'; id?: string; name?: string; project?: string; newProject?: string; revision?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; members?: string[]; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number; done?: boolean }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
     notifications(args?: { read?: string[] | 'all' }): Promise<{ ok: boolean; error?: string; notifications?: AppNotification[]; unread?: number }>;
     adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;

@@ -66,8 +66,6 @@ label:has(> input[type=checkbox]), .props > label:has(> input[type=checkbox]), .
 .upload-form input[type=checkbox] { width: auto; }
 .grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
 .badge { padding: 1px 6px; border-radius: 8px; background: var(--ctl-h); font-size: 11px; }
-.pending-registrations .badge { background: #d71920; color: #fff; }
-.server-setup { width: 680px; }
 .server-setup > label { display: block; margin: 8px 0; }
 .server-setup > label input { display: block; width: 100%; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; }
@@ -87,7 +85,8 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 .bm, .comment { padding: 3px 0; }
 .wrap { flex-wrap: wrap; } .pad { padding: 8px; }
 .empty { margin: auto; text-align: center; }
-.status { padding: 3px 10px; background: var(--stat); color: var(--mut); border-top: 1px solid var(--line); font-size: 12px; }
+.status { display: flex; align-items: center; gap: 10px; padding: 3px 10px; background: var(--stat); color: var(--mut); border-top: 1px solid var(--line); font-size: 12px; }
+.status-link { padding: 0; border: 0; background: none; color: var(--acc); text-decoration: underline; cursor: pointer; font-size: inherit; }
 .auth { height: 100%; display: flex; align-items: center; justify-content: center; }
 .auth-card { width: 360px; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 24px; }
 .auth-card h1 { margin: 0; font-size: 20px; } .auth-card h2 { margin: 0 0 4px; font-size: 14px; color: var(--mut); font-weight: 500; }
@@ -103,11 +102,25 @@ button.link { background: none; border: 0; color: var(--acc); }
 :root[data-theme=light] .ok { color: #15803d; } :root[data-theme=light] .warn { color: #b45309; } :root[data-theme=light] .danger { color: #b91c1c; }
 .uploads { max-height: 160px; overflow: auto; margin: 6px 0; font-size: 12px; border: 1px solid var(--line); padding: 4px 8px; border-radius: 4px; } .usermgmt tr th[colspan] { background: var(--ctl); }
 .review-no{color:#e11d48}
+.comment-id { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.comment-id-badge { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #e11d48; color: #fff; font-size: 9px; font-weight: 700; }
+.review-complete { color: #15803d; font-size: 11px; }
 
 .upload-form { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
 .upload-form label { display: flex; flex-direction: column; gap: 3px; }
 .upload-form select, .upload-form input, .upload-form textarea { width: 100%; box-sizing: border-box; }
-.shared-groups .item { font-size: 12px; padding: 3px 6px; }
+.shared-groups .item { font-size: 11px; padding: 2px 4px; gap: 4px; }
+.shared-groups .shared-document { align-items: flex-start; }
+.shared-groups .shared-document .grow { min-width: 0; }
+.shared-document-heading { display: flex; align-items: center; gap: 4px; min-width: 0; width: 100%; }
+.shared-groups .shared-document-name { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.shared-groups .shared-document .muted.small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shared-document.review-complete { border-left: 3px solid #15803d; background: color-mix(in srgb, #15803d 8%, var(--panel)); }
+.shared-document.review-complete .shared-document-name { color: #15803d; font-weight: 700; }
+.shared-review-check { display: inline-flex; flex: 0 0 auto; flex-direction: row !important; align-items: center; gap: 5px !important; margin: 0; cursor: pointer; color: var(--mut); font-size: 11px; white-space: nowrap; }
+.shared-review-check input { flex: 0 0 auto; width: auto; margin: 0; accent-color: #15803d; }
+.shared-document.review-complete .shared-review-check { color: #15803d; font-weight: 600; }
+.shared-doc-row.active { background: var(--item-a); }
 .shared-groups .group-title { font-size: 12px; margin-top: 8px; }
 .shared-groups .small { font-size: 11px; }
 .group-toggle { display: block; width: 100%; text-align: left; }

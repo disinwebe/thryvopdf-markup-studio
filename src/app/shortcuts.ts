@@ -29,4 +29,4 @@ export function startPolling(fn: () => void, intervalMs: number, canRun: () => b
   return () => clearInterval(id);
 }
 
-export const SHARED_REFRESH_MS = 5 * 60 * 1000;
+export const SHARED_REFRESH_MS = 30 * 1000;

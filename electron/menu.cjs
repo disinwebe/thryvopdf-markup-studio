@@ -3,7 +3,7 @@ const actionIcons = {
   open: 'open', shared: 'open', save: 'save', saveAs: 'saveAs', csv: 'export',
   close: 'close', logout: 'key', quit: 'exit', undo: 'undo', redo: 'redo',
   select: 'select', pan: 'pan', delete: 'delete', users: 'users', password: 'license',
-  serverSetup: 'settings', theme: 'settings', toolDefaults: 'settings',
+  theme: 'settings', toolDefaults: 'settings',
   zoomIn: 'zoomIn', zoomOut: 'zoomOut', fitWidth: 'page', fitPage: 'page',
   organizePanel: 'page', toggleLeftPanel: 'page', toggleRightPanel: 'page',
   shortcuts: 'help', about: 'help', license: 'license',
@@ -43,7 +43,6 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
     { label: '&Option', submenu: [
       { ...item('&Users...', 'users', usable && admin), visible: admin },
       item('&Password...', 'password', usable && passwordAvailable),
-      item('S&erver setup...', 'serverSetup', usable),
       item('&Theme: toggle light / dark', 'theme', usable),
       item('Tool &defaults...', 'toolDefaults', doc && writable),
     ] },

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, net, Menu, nativeTheme, nativeImage, clipboard, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, Menu, nativeTheme, nativeImage, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('./client.cjs');
@@ -6,7 +6,6 @@ const { menuTemplate, applyNativeTheme } = require('./menu.cjs');
 const { createLicenseStore, MAX_LICENSE_BYTES } = require('./license.cjs');
 const { renamePdfFile, writeSavedFile } = require('./fileOps.cjs');
 const { requireAccess, sharedOperationRequiresLicense } = require('./access.cjs');
-const { createServerControl } = require('./server-control.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
 // Keep the pre-rename data folder so existing installs keep their settings and accounts.
@@ -92,7 +91,7 @@ function createWindow() {
   }
 }
 
-let auth, license, serverControl;
+let auth, license;
 const guard = (fn) => (...a) => {
   requireAccess(auth, license, true);
   return fn(...a);
@@ -152,6 +151,15 @@ ipcMain.handle('save-file', guard(async (e, { defaultName, data, filters, path: 
   return write(r.filePath);
 }));
 
+ipcMain.handle('open-saved-pdf', viewerAccess(async (_e, file) => {
+  if (typeof file !== 'string' || !allowed.has(file) || !/\.pdf$/i.test(file) || !fs.existsSync(file)) {
+    throw new Error('This PDF is not available to open from the current session.');
+  }
+  const error = await shell.openPath(file);
+  if (error) throw new Error('Could not open the saved PDF: ' + error);
+  return { ok: true };
+}));
+
 // Files chosen for shared upload; the renderer refers to them by path and main reads them, so whole projects never cross IPC.
 const MAX_PICK = 500;
 const MAX_FILE = 150 * 1024 * 1024;
@@ -209,18 +217,6 @@ ipcMain.handle('save-many', guard(async (e, { files }) => {
 
 app.whenReady().then(() => {
   const ud = app.getPath('userData');
-  serverControl = createServerControl({ configFile: path.join(ud, 'server-control.json'), defaultDir: path.join(ud, 'server-data') });
-  ipcMain.handle('server-control-status', () => serverControl.status());
-  ipcMain.handle('server-control-run', (_e, action, config) => serverControl.perform(action, config));
-  ipcMain.handle('server-control-folder', async (e) => {
-    const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), { properties: ['openDirectory', 'createDirectory'] });
-    return r.canceled ? null : r.filePaths[0] || null;
-  });
-  ipcMain.handle('server-control-copy', (_e, address) => {
-    if (!serverControl.status().addresses.includes(address)) throw new Error('Choose a current server address.');
-    clipboard.writeText(address);
-  });
-  ipcMain.handle('server-control-firewall-help', () => shell.openExternal('https://support.microsoft.com/windows/risks-of-allowing-apps-through-windows-firewall-654559af-3f54-3dcf-349f-71ccd90bcc5c'));
   license = createLicenseStore({ file: path.join(ud, 'device-license.json'), publicKeyFile: path.join(__dirname, '..', 'dist', 'license-public.pem') });
   auth = createClient({ configFile: path.join(ud, 'server.json'), localFile: path.join(ud, 'users.json'), fetch: net.fetch.bind(net) });
   ipcMain.handle('license-status', () => license.status());

@@ -47,14 +47,14 @@ async function graphToken(cfg, timeoutMs) {
   tokens.set(key, { token: j.access_token, expires: Date.now() + (Number(j.expires_in) || 3600) * 1000 });
   return j.access_token;
 }
-async function sendGraph(cfg, to, subject, text, timeoutMs) {
+async function sendGraph(cfg, to, subject, text, timeoutMs, cc = []) {
   const sender = (/<([^>]+)>/.exec(cfg.from) || [null, cfg.from])[1];
-  if (!cfg.tenantId || !cfg.clientId || !cfg.clientSecret || !EMAIL_RE.test(sender) || !EMAIL_RE.test(to)) throw new Error('Invalid Microsoft Graph settings, sender or recipient.');
+  if (!cfg.tenantId || !cfg.clientId || !cfg.clientSecret || !EMAIL_RE.test(sender) || !EMAIL_RE.test(to) || !cc.every((email) => EMAIL_RE.test(email))) throw new Error('Invalid Microsoft Graph settings, sender or recipient.');
   const token = await graphToken(cfg, timeoutMs);
   const res = await graphFetch('https://graph.microsoft.com/v1.0/users/' + encodeURIComponent(sender) + '/sendMail', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: { subject, body: { contentType: 'Text', content: text }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: false }),
+    body: JSON.stringify({ message: { subject, body: { contentType: 'Text', content: text }, toRecipients: [{ emailAddress: { address: to } }], ...(cc.length ? { ccRecipients: cc.map((address) => ({ emailAddress: { address } })) } : {}) }, saveToSentItems: false }),
   }, timeoutMs);
   if (res.status !== 202) {
     if (res.status === 401) tokens.clear();
@@ -64,11 +64,12 @@ async function sendGraph(cfg, to, subject, text, timeoutMs) {
 }
 
 // Minimal SMTP client (AUTH PLAIN/LOGIN, STARTTLS). Resolves on success, rejects on any failure.
-function sendMail(cfg, to, subject, text, timeoutMs = 20000) {
-  if (cfg.provider === 'graph') return sendGraph(cfg, to, subject, text, timeoutMs);
+function sendMail(cfg, to, subject, text, timeoutMs = 20000, cc = []) {
+  const ccList = [...new Set(cc)].filter((email) => email !== to);
+  if (cfg.provider === 'graph') return sendGraph(cfg, to, subject, text, timeoutMs, ccList);
   return new Promise((resolve, reject) => {
     const fromAddr = (/<([^>]+)>/.exec(cfg.from) || [null, cfg.from])[1];
-    if (!cfg.host || !EMAIL_RE.test(fromAddr) || !EMAIL_RE.test(to)) return reject(new Error('Invalid SMTP sender or recipient.'));
+    if (!cfg.host || !EMAIL_RE.test(fromAddr) || !EMAIL_RE.test(to) || !ccList.every((email) => EMAIL_RE.test(email))) return reject(new Error('Invalid SMTP sender or recipient.'));
     let sock;
     let buf = '';
     let waiter = null;
@@ -131,9 +132,10 @@ function sendMail(cfg, to, subject, text, timeoutMs = 20000) {
       }
       await cmd(`MAIL FROM:<${fromAddr}>`, [250]);
       await cmd(`RCPT TO:<${to}>`, [250, 251]);
+      for (const address of ccList) await cmd(`RCPT TO:<${address}>`, [250, 251]);
       await cmd('DATA', [354]);
       const body = text.replace(/\r?\n/g, '\r\n').replace(/^\./gm, '..');
-      const head = [`From: ${cfg.from}`, `To: ${to}`, `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`, `Date: ${new Date().toUTCString()}`, `Message-ID: <${crypto.randomBytes(12).toString('hex')}@thryvopdf>`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64'].join('\r\n');
+      const head = [`From: ${cfg.from}`, `To: ${to}`, ...(ccList.length ? [`Cc: ${ccList.join(', ')}`] : []), `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`, `Date: ${new Date().toUTCString()}`, `Message-ID: <${crypto.randomBytes(12).toString('hex')}@thryvopdf>`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64'].join('\r\n');
       const b64 = Buffer.from(body).toString('base64').replace(/(.{76})/g, '$1\r\n');
       await cmd(`${head}\r\n\r\n${b64}\r\n.`, [250]);
       await cmd('QUIT', [221]).catch(() => {});
@@ -174,6 +176,49 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
   const view = (n) => ({ id: n.id, type: n.type, docId: n.docId, docName: n.docName, by: n.by, message: n.message, created: n.created, read: !!n.read });
 
   return {
+    registered(user, admins) {
+      const created = new Date(now()).toISOString();
+      for (const admin of [...new Map(admins.map((a) => [a.email, a])).values()]) {
+        const items = inbox[admin.email] || (inbox[admin.email] = []);
+        items.unshift({
+          id: crypto.randomBytes(9).toString('base64url'),
+          type: 'registration',
+          message: `${user.name} (${user.email}) is awaiting administrator approval.`,
+          created,
+          read: false,
+        });
+        if (items.length > MAX_PER_USER) items.length = MAX_PER_USER;
+      }
+      if (admins.length) save();
+    },
+    reviewed(doc, by, recipients, done) {
+      const created = new Date(now()).toISOString();
+      const list = [...new Map(recipients.map((r) => [r.email, r])).values()].filter((r) => r.email !== by.email);
+      for (const recipient of list) {
+        const items = inbox[recipient.email] || (inbox[recipient.email] = []);
+        items.unshift({
+          id: crypto.randomBytes(9).toString('base64url'),
+          type: 'review',
+          docId: doc.id,
+          docName: doc.name,
+          by: by.name,
+          message: `${by.name} ${done ? 'marked the review done for' : 'reopened the review for'} "${doc.name}".`,
+          created,
+          read: false,
+        });
+        if (items.length > MAX_PER_USER) items.length = MAX_PER_USER;
+      }
+      if (list.length) save();
+      if (!done) return Promise.resolve();
+      const cfg = smtp();
+      const owner = { name: doc.ownerName || doc.owner, email: doc.owner };
+      if (!cfg.enabled || !EMAIL_RE.test(owner.email)) return Promise.resolve();
+      const cc = [...new Set(recipients.map((recipient) => recipient.email))]
+        .filter((email) => email !== owner.email && EMAIL_RE.test(email));
+      const text = `${by.name} marked their review as done for "${doc.name}".\n\nUploader: ${owner.name} (${owner.email})\nDocument: ${doc.name}\n\nThis is an automated message from your ThryvoPDF server.`;
+      return Promise.resolve().then(() => send(cfg, owner.email, `Review completed: ${doc.name}`.slice(0, 200), text, undefined, cc))
+        .catch((e) => log(`Review completion email to ${owner.email} failed: ${e.message}`));
+    },
     // Records an in-app alert and sends an email for each newly assigned user.
     assigned(doc, by, recipients, publicUrl) {
       const created = new Date(now()).toISOString();

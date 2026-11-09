@@ -3,7 +3,7 @@ import { Doc, TOOL_LABEL } from '../app/model';
 import { defaultSubject, measureLabel, DEFAULT_CAL } from '../core/measurement';
 import { markupCsv } from '../core/markupCsv';
 import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN } from '../core/commentSize';
-import { Actor, canDeleteComment, canDeleteMarkup, canEditComment } from '../core/comments';
+import { Actor, canDeleteComment, canDeleteMarkup, canEditComment, ownsComment, ownsMarkup } from '../core/comments';
 import { isReviewMarkup, numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 import { PdfComments } from './PdfComments';
@@ -43,7 +43,8 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
     [doc.markups, q, status, scope, doc.page],
   );
   const nums = numberMarkups(doc.markups);
-  const sel = doc.markups.find((m) => m.id === p.selectedId) ?? null;
+  const canSelect = (m: Markup) => !doc.shared || ownsMarkup(m, p.user);
+  const sel = doc.markups.find((m) => m.id === p.selectedId && canSelect(m)) ?? null;
 
   const exportCsv = () => {
     p.onExport(markupCsv(doc.markups, doc.path || doc.name));
@@ -71,7 +72,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
       <div className="list">
         {rows.length === 0 && <p className="muted">No markups.</p>}
         {rows.map((m) => (
-          <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} onClick={() => p.onSelect(m.id)}>
+          <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} aria-disabled={!canSelect(m)} onClick={() => { if (canSelect(m)) p.onSelect(m.id); }}>
             <span className="swatch" style={{ background: m.color }} />
             <div className="grow">
               {isReviewMarkup(m) && <b className="review-no">#{nums.get(m.id)}</b>} <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
@@ -104,7 +105,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
   const hasFill = ['rect', 'ellipse', 'cloud', 'text', 'callout', 'm-area'].includes(m.type);
   return (
     <div className="props">
-      <fieldset className="props-fields" disabled={readOnly}>
+      <fieldset className="props-fields" disabled={readOnly || (!!doc.shared && !ownsMarkup(m, user))}>
       <h4>
         {TOOL_LABEL[m.type]} properties
         <button className="danger" disabled={!canDeleteMarkup(m, user)} title={canDeleteMarkup(m, user) ? undefined : "Only the author can delete this markup"} onClick={() => onDelete(m.id)}>Delete</button>
@@ -178,7 +179,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       </div>
       {isReviewMarkup(m) && (
         <>
-      <div className="muted small" title="Internal annotation ID, saved as /NM in the PDF">Comment #{numberMarkups(doc.markups).get(m.id)} · internal ID: {m.id}</div>
+      <div className="comment-id" title="Internal annotation ID, saved as /NM in the PDF"><span className="comment-id-badge">#{numberMarkups(doc.markups).get(m.id)}</span><span className="muted small">Comment ID: {m.id}</span></div>
       <h4>Comments</h4>
       <label className="inline-check">
         <span>Show comment box on drawing</span>
@@ -211,6 +212,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
             <select
               aria-label={`Comment text size for ${c.author}`}
               value={c.fontSize ?? commentSize}
+              disabled={!!doc.shared && !ownsComment(c, user)}
               onChange={(e) => {
                 const fontSize = +e.target.value;
                 upd({ comments: m.comments.map((item) => item.id === c.id ? { ...item, fontSize: fontSize === commentSize ? undefined : fontSize } : item) });
@@ -222,7 +224,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           {editing?.id !== c.id && (
             <div className="row">
               {canEditComment(c, user) && <button onClick={() => setEditing({ id: c.id, text: c.text })}>Edit</button>}
-              {canDeleteComment(c, user) && <button className="danger" onClick={() => upd({ comments: m.comments.filter((x) => x.id !== c.id) })}>Delete</button>}
+              {canDeleteComment(c, user) && (!doc.shared || ownsComment(c, user)) && <button className="danger" onClick={() => upd({ comments: m.comments.filter((x) => x.id !== c.id) })}>Delete</button>}
             </div>
           )}
         </div>

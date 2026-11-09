@@ -21,18 +21,25 @@ describe('visible review comments', () => {
     const box = calloutLayout(markup)!;
     const runs = calloutTextRuns(box, 1);
     expect(runs.map((r) => r.text)).toEqual(['#1', 'Alice', 'First review', 'Bob (edited)', 'Second review']);
-    expect(runs[0].y).toBe(runs[1].y);
+    expect(runs[0].badge?.cx).toBeLessThan(box.x);
+    expect(runs[0].badge?.cy).toBeLessThan(box.y);
+    expect(runs[1].x).toBe(box.x + 7);
     expect(runs[1].y - runs[1].size).toBeGreaterThanOrEqual(box.y);
     expect(Math.max(...runs.map((r) => r.y))).toBeLessThan(box.y + box.h);
     const svg = renderToStaticMarkup(<svg><MarkupShape m={markup} cal={DEFAULT_CAL} tag={1} /></svg>);
     const ops = buildAppearance(markup, { x0: 0, y0: 0, w: 400, h: 300, rotation: 0 }, DEFAULT_CAL, 1).ops;
     const f = (n: number) => String(+n.toFixed(3));
     for (const run of runs) {
-      expect(svg).toContain(`x="${run.x}" y="${run.y}" font-size="${run.size}" font-family="Helvetica, Arial, sans-serif" font-weight="400"`);
+      expect(svg).toContain(`x="${run.x}" y="${run.y}" font-size="${run.size}" font-family="Helvetica, Arial, sans-serif" font-weight="${run.kind === 'number' ? 700 : 400}"`);
       expect(ops).toContain(`/F1 ${f(run.size)} Tf`);
       const escaped = run.text.replace(/([\\()])/g, '\\$1');
       expect(ops).toContain(`1 0 0 1 ${f(run.x)} ${f(300 - run.y)} Tm (${escaped}) Tj`);
     }
+    expect(svg).toContain('fill="#e11d48"');
+    expect(svg).toContain('fill="#fff">#1</text>');
+    expect(svg).toContain(`cx="${runs[0].badge?.cx}" cy="${runs[0].badge?.cy}"`);
+    expect(ops).toContain('0.882 0.114 0.282 rg');
+    expect(ops).toContain('1 1 1 rg');
   });
   it('exposes an independent size control per comment and the focused Add Comment editor', () => {
     const markup: Markup = { ...m, comments: [
@@ -58,10 +65,12 @@ describe('visible review comments', () => {
     expect(panel).toContain('value="7" selected');
     expect(panel).toContain('value="18" selected');
   });
-  it('renders a high contrast numbered tag, border and leader on screen', () => {
+  it('omits the corner ID tag while preserving the comment callout and leader', () => {
     const svg = renderToStaticMarkup(<svg><MarkupShape m={m} cal={DEFAULT_CAL} tag={1} /></svg>);
-    expect(svg).toContain('class="review-tag"');
+    expect(svg).not.toContain('review-tag');
     expect(svg).toContain('#1</text>');
+    expect(svg).toContain('fill="#e11d48"');
+    expect(svg).toContain('fill="#fff">#1</text>');
     expect(svg).toContain('class="callout-box"');
     expect(svg).toContain('stroke="#e11d48"');
     expect(svg).toContain('stroke-width="1.5"');

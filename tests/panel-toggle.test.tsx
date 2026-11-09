@@ -19,8 +19,8 @@ describe('independent viewer panel controls', () => {
 
   describe('floating viewer tools', () => {
     it('exposes Select and Pan with shortcuts and the active state', () => {
-      const select = renderToStaticMarkup(<FloatingTools tool="select" onTool={() => {}} />);
-      const pan = renderToStaticMarkup(<FloatingTools tool="hand" onTool={() => {}} />);
+      const select = renderToStaticMarkup(<FloatingTools tool="select" theme="light" onTool={() => {}} />);
+      const pan = renderToStaticMarkup(<FloatingTools tool="hand" theme="light" onTool={() => {}} />);
       expect(select).toMatch(/aria-label="Select" aria-pressed="true"/);
       expect(select).toMatch(/aria-label="Pan" aria-pressed="false"/);
       expect(pan).toMatch(/aria-label="Pan" aria-pressed="true"/);

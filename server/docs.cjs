@@ -55,11 +55,13 @@ const ownsComment = (c, u) => (c.authorEmail ? c.authorEmail === u.email : c.aut
 function commentError(prev, m, user) {
   const old = new Map(((prev && prev.comments) || []).map((c) => [c.id, c]));
   const incoming = new Set(m.comments.map((c) => c.id));
+  if (prev && (JSON.stringify(prev.callout) !== JSON.stringify(m.callout) || prev.calloutHidden !== m.calloutHidden)
+    && [...old.values()].some((c) => !ownsComment(c, user))) return 'Only the authors of comments in this callout can change its position or visibility.';
   for (const c of m.comments) {
     const o = old.get(c.id);
     if (o && (o.text !== c.text || o.fontSize !== c.fontSize) && !ownsComment(o, user)) return 'Only the author of a comment can edit it.';
   }
-  for (const o of old.values()) if (!incoming.has(o.id) && !ownsComment(o, user) && !isAdmin(user)) return 'Only the author of a comment (or an administrator) can delete it.';
+  for (const o of old.values()) if (!incoming.has(o.id) && !ownsComment(o, user)) return 'Only the author of a comment can delete it.';
   return null;
 }
 
@@ -80,7 +82,7 @@ const cleanRel = (r) =>
     .slice(0, 12)
     .join('/');
 
-function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000, maxUpload = 150 * 1024 * 1024, fs = defaultFs, onAssign = () => {} }) {
+function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000, maxUpload = 150 * 1024 * 1024, fs = defaultFs, onAssign = () => {}, onReview = () => {} }) {
   fs.mkdirSync(dir, { recursive: true });
   const docs = new Map();
   const journal = path.join(dir, '.group-rename-journal');
@@ -123,6 +125,9 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       docs.set(j.id, {
         id: j.id, name: j.name, owner: j.owner, ownerName: j.ownerName, created: j.created, size: j.size, project: j.project || '', description: j.description || '', rel: j.rel || '',
         members: Array.isArray(j.members) && j.members.every((m) => typeof m === 'string') ? j.members : [],
+        reviews: new Map((Array.isArray(j.reviews) ? j.reviews : []).filter((r) =>
+          r && typeof r.email === 'string' && Number.isInteger(r.doneVersion) && typeof r.updated === 'string',
+        ).map((r) => [r.email, { doneVersion: r.doneVersion, updated: r.updated }])),
         version: j.version || 0, markups: new Map((j.markups || []).map((m) => [m.id, m])),
         log: [], logStart: j.version || 0, presence: new Map(), presenceRev: 0, waiters: [],
       });
@@ -133,7 +138,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
 
   const persist = (d) => {
     const f = path.join(dir, d.id + '.json');
-    const body = { id: d.id, name: d.name, owner: d.owner, ownerName: d.ownerName, created: d.created, size: d.size, project: d.project, description: d.description, rel: d.rel, ...(d.members === null ? {} : { members: d.members }), version: d.version, markups: [...d.markups.values()] };
+    const body = { id: d.id, name: d.name, owner: d.owner, ownerName: d.ownerName, created: d.created, size: d.size, project: d.project, description: d.description, rel: d.rel, ...(d.members === null ? {} : { members: d.members }), version: d.version, markups: [...d.markups.values()], reviews: [...d.reviews].map(([email, review]) => ({ email, ...review })) };
     fs.writeFileSync(f + '.tmp', JSON.stringify(body));
     fs.renameSync(f + '.tmp', f);
   };
@@ -162,7 +167,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
   };
   const canAccess = (d, user) => d.owner === user.email || d.members.includes(user.email);
   const groupRevision = (group) => crypto.createHash('sha256').update(JSON.stringify(group.map((d) => d.id).sort())).digest('hex');
-  const info = (d, user, ownedProjects) => ({ id: d.id, name: d.name, owner: d.ownerName, ownerEmail: d.owner, size: d.size, created: d.created, project: d.project, description: d.description || '', rel: d.rel, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name), ...(d.owner === user.email ? { members: d.members } : {}), canRenameGroup: !!d.project && (isAdmin(user) || (ownedProjects ? ownedProjects.has(d.project) : [...docs.values()].some((other) => other.project === d.project && other.owner === user.email))) });
+  const info = (d, user, ownedProjects) => ({ id: d.id, name: d.name, owner: d.ownerName, ownerEmail: d.owner, size: d.size, created: d.created, project: d.project, description: d.description || '', rel: d.rel, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name), reviews: d.members.map((email) => ({ email, done: d.reviews.get(email)?.doneVersion === d.version, updated: d.reviews.get(email)?.updated || null })), ...(d.owner === user.email ? { members: d.members } : {}), canRenameGroup: !!d.project && (isAdmin(user) || (ownedProjects ? ownedProjects.has(d.project) : [...docs.values()].some((other) => other.project === d.project && other.owner === user.email))) });
   const get = (id) => docs.get(id) || null;
   const NOT_FOUND = [404, { ok: false, error: 'Shared document not found.' }];
   const FORBIDDEN = [403, { ok: false, error: 'You do not have access to this shared document.' }];
@@ -251,7 +256,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
     upload(user, name, bytes, meta = {}) {
       if (!Buffer.isBuffer(bytes) || bytes.length < 8 || !bytes.subarray(0, 1024).includes('%PDF-')) return [400, { ok: false, error: 'The file is not a PDF.' }];
       const id = crypto.randomBytes(12).toString('base64url');
-      const d = { id, name: cleanName(name), owner: user.email, ownerName: user.name, created: new Date(now()).toISOString(), size: bytes.length, project: cleanProject(meta.project), description: cleanDescription(meta.description), rel: cleanRel(meta.rel), members: meta.members || [], version: 0, markups: new Map(), log: [], logStart: 0, presence: new Map(), presenceRev: 0, waiters: [] };
+      const d = { id, name: cleanName(name), owner: user.email, ownerName: user.name, created: new Date(now()).toISOString(), size: bytes.length, project: cleanProject(meta.project), description: cleanDescription(meta.description), rel: cleanRel(meta.rel), members: meta.members || [], reviews: new Map(), version: 0, markups: new Map(), log: [], logStart: 0, presence: new Map(), presenceRev: 0, waiters: [] };
       fs.writeFileSync(path.join(dir, id + '.pdf'), bytes);
       persist(d);
       docs.set(id, d);
@@ -289,7 +294,10 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       const denied = new Set();
       let deniedMsg = '';
       for (const m of ups) {
-        const e = commentError(d.markups.get(m.id), m, user);
+        const prev = d.markups.get(m.id);
+        const e = prev && !ownsMarkup(prev, user) && JSON.stringify(prev) !== JSON.stringify(m)
+          ? 'Only the author of a markup can edit it.'
+          : commentError(prev, m, user);
         if (e) { denied.add(m.id); deniedMsg = deniedMsg || e; }
       }
       for (const x of dels) {
@@ -403,12 +411,25 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       if (d.owner !== user.email) return [403, { ok: false, error: 'Only the uploader can change document access.' }];
       const added = members.filter((m) => !d.members.includes(m));
       d.members = members;
+      for (const email of d.reviews.keys()) if (!members.includes(email)) d.reviews.delete(email);
       for (const email of d.presence.keys()) if (!canAccess(d, { email })) d.presence.delete(email);
       d.presenceRev++;
       persist(d);
       wake(d);
       onAssign(d, user, added);
       return [200, { ok: true, doc: info(d, user) }];
+    },
+    review(id, user, b) {
+      const d = get(id);
+      if (!d) return NOT_FOUND;
+      if (!canAccess(d, user)) return FORBIDDEN;
+      if (!d.members.includes(user.email)) return [403, { ok: false, error: 'Only assigned users can update review status.' }];
+      if (!b || typeof b.done !== 'boolean') return [400, { ok: false, error: 'Review status must be done or reopened.' }];
+      if (b.done) d.reviews.set(user.email, { doneVersion: d.version, updated: new Date(now()).toISOString() });
+      else d.reviews.delete(user.email);
+      persist(d);
+      onReview(d, user, b.done);
+      return [200, { ok: true, reviews: info(d, user).reviews }];
     },
   };
 }

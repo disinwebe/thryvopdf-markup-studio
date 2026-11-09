@@ -10,6 +10,7 @@ import { normalizePdfFilename } from '../app/filename';
 export function ProjectPanel(p: {
   docs: Doc[];
   activeId: string;
+  me: AuthUser;
   sharedRevision?: number;
   viewOnly?: boolean;
   onActivate(id: string): void;
@@ -36,6 +37,7 @@ export function ProjectPanel(p: {
   };
   const [shared, setShared] = useState<SharedListing[]>([]);
   const [sharedErr, setSharedErr] = useState('');
+  const [reviewBusy, setReviewBusy] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try { return loadCollapsedGroups(localStorage); } catch { return []; }
   });
@@ -112,7 +114,7 @@ export function ProjectPanel(p: {
       {p.onOpenShared && (
         <div className="shared-groups">
           <div className="row">
-            <b>Shared documents</b> <span className="muted small">(auto-refresh every 5 min)</span>
+            <b>Shared documents</b> <span className="muted small">(auto-refresh every 30 sec)</span>
             <span className="grow" />
             <button onClick={() => void loadShared()} title="Reload the shared list">Refresh</button>
           </div>
@@ -123,15 +125,47 @@ export function ProjectPanel(p: {
               <button className="group-title group-toggle" aria-expanded={!collapsed.includes(g.project)} onClick={() => toggleGroup(g.project)}>
                 <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted small">({g.docs.length})</span>
               </button>
-              {!collapsed.includes(g.project) && g.docs.map((d) => (
-                <div key={d.id} className="item" onClick={() => void p.onOpenShared!(d)} title={d.description || 'Open shared document'}>
-                  <div className="grow">
-                    <span>{d.rel ? d.rel + '/' : ''}{d.name}</span>
-                    {d.description && <div className="muted small">{d.description}</div>}
-                    <div className="muted small">{d.markups} markups{d.users.length ? ' \u00b7 working: ' + d.users.join(', ') : ''}</div>
+              {!collapsed.includes(g.project) && g.docs.map((d) => {
+                const review = d.reviews?.find((item) => item.email === p.me.email);
+                const isActive = p.docs.some((openDoc) => openDoc.id === p.activeId && openDoc.shared?.id === d.id);
+                const displayName = `${d.rel ? d.rel + '/' : ''}${d.name}`;
+                const nameStyle = { fontSize: `${Math.max(8, Math.min(12, 300 / Math.max(displayName.length, 1)))}px` };
+                return (
+                  <div key={d.id} className={'item shared-document' + (isActive ? ' active' : '') + (review?.done ? ' review-complete' : '')} onClick={() => void p.onOpenShared!(d)} title={d.description || 'Open shared document'}>
+                    <div className="grow">
+                      <div className="shared-document-heading">
+                        <span className="shared-document-name" style={nameStyle} title={displayName}>{displayName}</span>
+                        {review && <label className="shared-review-check" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={review.done}
+                            disabled={reviewBusy === d.id || p.readOnly}
+                            aria-label={`Mark ${d.name} review as done`}
+                            onChange={(event) => {
+                              event.stopPropagation();
+                              setReviewBusy(d.id);
+                              setSharedErr('');
+                              void window.api!.sharedDocs({ op: 'review', id: d.id, done: event.target.checked })
+                                .then(async (result) => {
+                                  if (!result.ok) {
+                                    setSharedErr(result.error || 'Could not update review status.');
+                                    return;
+                                  }
+                                  await loadShared();
+                                })
+                                .catch(() => setSharedErr('Could not update review status. Check your connection and refresh.'))
+                                .finally(() => setReviewBusy((current) => current === d.id ? null : current));
+                            }}
+                          />
+                          <span>{reviewBusy === d.id ? 'Saving…' : 'Review done'}</span>
+                        </label>}
+                      </div>
+                      {d.description && <div className="muted small">{d.description}</div>}
+                      <div className="muted small">{d.markups} markups{d.users.length ? ' \u00b7 working: ' + d.users.join(', ') : ''}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>

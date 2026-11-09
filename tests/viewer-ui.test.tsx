@@ -47,11 +47,10 @@ describe('read-only viewer UI', () => {
     expect(offline).toMatch(/<button disabled="" title="Shared documents require server mode"/);
   });
 
-  it('places pending registrations next to signed-in information in the toolbar', () => {
-    const html = renderToStaticMarkup(<App user={user} actions={{ ...actions, manageUsers: vi.fn(), pendingRegistrations: { status: 'ready', count: 2 } }} />);
-    expect(html).toMatch(/Signed in:[\s\S]*<\/span><aside class="pending-registrations"[\s\S]*<\/aside><button class="toolbar-logout"/);
+  it('does not show a separate pending-registration alert in the toolbar', () => {
+    const html = renderToStaticMarkup(<App user={user} actions={{ ...actions, manageUsers: vi.fn() }} />);
+    expect(html).not.toContain('pending-registrations');
     expect(html).toContain('>Logout</button>');
-    expect(html).toContain('class="badge">2');
   });
 
   it('does not show an account Logout button in the unlicensed guest viewer', () => {

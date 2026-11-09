@@ -67,7 +67,7 @@ describe('comment callout geometry', () => {
     expect(appearance.ops).toContain('/F1 7 Tf');
     expect(appearance.ops).toContain('/F1 18 Tf');
   });
-  it('persists resized and hidden callouts while retaining comments and the numbered tag', async () => {
+  it('persists resized and hidden callouts without drawing a second number at the markup corner', async () => {
     const item = m({ callout: { x: 150, y: 120 }, calloutSize: { width: 220, height: 110 }, calloutHidden: true });
     expect(calloutLayout(item)).toBeNull();
     expect(markupCsv([item], 'drawing.pdf')).toContain('Check the beam size here please');
@@ -80,9 +80,11 @@ describe('comment callout geometry', () => {
     const shown = { ...stored, calloutHidden: false };
     expect(calloutLayout(shown)).toMatchObject({ x: 150, y: 120, w: 220, h: 110 });
     const hiddenAppearance = buildAppearance(stored, { x0: 0, y0: 0, w: 600, h: 400, rotation: 0 }, undefined, 1);
-    expect(hiddenAppearance.ops).toContain('(#1) Tj');
+    expect(hiddenAppearance.ops).not.toContain('(#1) Tj');
     expect(hiddenAppearance.ops).not.toContain('Check the beam size here please');
-    expect(buildAppearance(shown, { x0: 0, y0: 0, w: 600, h: 400, rotation: 0 }, undefined, 1).ops).toContain('Check the beam size here please');
+    const shownAppearance = buildAppearance(shown, { x0: 0, y0: 0, w: 600, h: 400, rotation: 0 }, undefined, 1).ops;
+    expect(shownAppearance).toContain('Check the beam size here please');
+    expect(shownAppearance).toContain('(#1) Tj');
   });
 });
 

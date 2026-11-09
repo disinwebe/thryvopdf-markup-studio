@@ -98,14 +98,14 @@ describe('annotation IDs and comments in the PDF', () => {
     expect(thirdRefs.some((ref) => secondRefs.filter((x) => !originalRefs.includes(x)).includes(ref))).toBe(false);
   });
 
-  it('draws the visible number tag into the appearance stream and keeps ids distinct from numbers', async () => {
+  it('keeps the markup corner free of a number badge and ids distinct from numbers', async () => {
     const out = await saveWithState(await blank(), { markups: [mk('uuid-1', [])], calibrations: {}, sheets: {}, bookmarks: [] });
     const doc = await PDFDocument.load(out);
     const item = reviewItems(doc)[0];
     const ap = item.d.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N')) as unknown as { getContents(): Uint8Array };
     const ops = Buffer.from(ap.getContents()).toString('latin1');
-    expect(ops).toContain('(#1) Tj');
-    expect(ops).toContain('0.882 0.114 0.282 rg');
+    expect(ops).not.toContain('(#1) Tj');
+    expect(ops).not.toContain('0.882 0.114 0.282 rg');
     expect(str(item.d.get(PDFName.of('NM')))).toBe('uuid-1');
   });
 

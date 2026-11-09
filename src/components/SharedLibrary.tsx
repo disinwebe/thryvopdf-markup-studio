@@ -12,6 +12,7 @@ export interface SharedListing {
   created: string;
   version: number;
   markups: number;
+  reviews?: { email: string; done: boolean; updated: string | null }[];
   users: string[];
   project?: string;
   description?: string;
@@ -54,6 +55,7 @@ type Staged = { kind: 'current' } | { kind: 'files'; items: Pick[]; truncated: b
 export function SharedLibrary({
   me,
   activeName,
+  activeSharedId,
   onClose,
   onOpen,
   onUpload,
@@ -62,6 +64,7 @@ export function SharedLibrary({
 }: {
   me: AuthUser;
   activeName?: string;
+  activeSharedId?: string;
   onClose: () => void;
   onOpen: (d: SharedListing) => Promise<void>;
   onUpload: (project: string, description: string, members: string[]) => Promise<{ ok: boolean; message: string }>;
@@ -104,6 +107,16 @@ export function SharedLibrary({
   }, []);
   useEffect(() => {
     void load();
+  }, [load]);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      await load();
+      if (active) timer = setTimeout(() => { void refresh(); }, 30_000);
+    };
+    timer = setTimeout(() => { void refresh(); }, 30_000);
+    return () => { active = false; clearTimeout(timer); };
   }, [load]);
   useEffect(() => {
     if (readOnly) return;
@@ -276,13 +289,13 @@ export function SharedLibrary({
         )}
         <table>
           <thead>
-            <tr><th>Name</th><th>Uploaded by</th><th>Size</th><th>Markups</th><th>Working now</th><th /></tr>
+            <tr><th>Name</th><th>Uploaded by</th><th>Size</th><th>Markups</th><th>Review status</th><th>Working now</th><th /></tr>
           </thead>
           <tbody>
             {groupByProject(docs).map((g) => (
               <Fragment key={'g:' + g.project}>
                 <tr className="group-row">
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <div className="row">
                       <button aria-expanded={!collapsed.includes(g.project)} aria-label={`${collapsed.includes(g.project) ? 'Expand' : 'Collapse'} ${g.project || 'Ungrouped'}`} onClick={() => saveCollapsed(collapsed.includes(g.project) ? collapsed.filter((p) => p !== g.project) : [...collapsed, g.project])}>
                         <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted">({g.docs.length})</span>
@@ -303,7 +316,7 @@ export function SharedLibrary({
                   </td>
                 </tr>
                 {!collapsed.includes(g.project) && g.docs.map((d) => (
-                  <tr key={d.id}>
+                  <tr key={d.id} className={d.id === activeSharedId ? 'shared-doc-row active' : 'shared-doc-row'}>
                     <td>
                       {d.rel ? <span className="muted">{d.rel}/</span> : null}{d.name}
                       {d.description ? <div className="muted small">{d.description}</div> : null}
@@ -311,6 +324,34 @@ export function SharedLibrary({
                     <td>{d.owner}</td>
                     <td>{fmtSize(d.size)}</td>
                     <td>{d.markups}</td>
+                    <td>
+                      {d.reviews?.length ? d.reviews.map((review) => (
+                        <div key={review.email} className={review.done ? 'review-complete' : 'muted small'}>
+                          {review.email}: {review.done ? 'Done' : 'Needs review'}
+                          {review.done && review.updated && <span className="muted small"> · {new Date(review.updated).toLocaleString()}</span>}
+                        </div>
+                      )) : <span className="muted">No assigned reviewers</span>}
+                      {d.reviews?.some((review) => review.email === me.email) && (
+                        <label className="shared-review-check" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={!!d.reviews.find((review) => review.email === me.email)?.done}
+                            disabled={busy || readOnly}
+                            aria-label={`Mark ${d.name} review as done`}
+                            onChange={(event) => {
+                              event.stopPropagation();
+                              const done = event.target.checked;
+                              void run(async () => {
+                                const result = await window.api!.sharedDocs({ op: 'review', id: d.id, done });
+                                if (!result.ok) { setError(result.error || 'Could not update review status.'); return; }
+                                await load();
+                              });
+                            }}
+                          />
+                          <span>Review done</span>
+                        </label>
+                      )}
+                    </td>
                     <td>{d.users.join(', ') || '-'}</td>
                     <td>
                       <button className="primary" disabled={busy} onClick={() => run(() => onOpen(d))}>Open</button>

@@ -29,16 +29,16 @@ import { FolderIcon } from './components/FolderIcon';
 import { SaveIcon } from './components/SaveIcon';
 import { normalizePdfFilename } from './app/filename';
 import { isReviewMarkup } from './core/numbering';
-import { PendingRegistrationsNotice, type PendingRegistrationState } from './components/PendingRegistrations';
 import { NotificationBell, type NotificationsApi } from './components/Notifications';
 import { TabNameEditor } from './components/TabNameEditor';
 import { loadMarkupStyleDefaults, saveMarkupStyleDefaults } from './app/styleDefaults';
 import { KeyIcon } from './components/KeyIcon';
 import { CommentPopup } from './components/CommentPopup';
+import { SelectIcon } from './components/SelectIcon';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const TOOL_ICONS: Partial<Record<Tool, string>> = {
-  select: '➤', hand: '✋', line: '╱', highlight: '▰', text: 'T', cloud: '☁', rect: '□',
+  hand: '✋', line: '╱', highlight: '▰', text: 'T', cloud: '☁', rect: '□',
   ellipse: '○', arrow: '↗', polyline: '⌁', pen: '✎', stamp: '▣', note: '▤',
 };
 const TOOL_HINT: Partial<Record<Tool, string>> = {
@@ -53,7 +53,7 @@ type LeftTab = 'pages' | 'bookmarks' | 'project';
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; serverSetup?: () => void; pendingRegistrations?: PendingRegistrationState | null; notifications?: NotificationsApi | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
+export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; notifications?: NotificationsApi | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
   const readOnly = viewOnly;
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -79,6 +79,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfoStatus | null>(null);
   const [fit, setFit] = useState<{ mode: 'width' | 'page'; n: number }>({ mode: 'page', n: 0 });
   const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
+  const [savedPdfPath, setSavedPdfPath] = useState<string | null>(null);
   const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
   const [library, setLibrary] = useState(false);
   const [sharedRevision, setSharedRevision] = useState(0);
@@ -94,7 +95,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     await leaveAll();
     actions.logout();
   };
-  const say = useCallback((m: string) => setMsg(m), []);
+  const say = useCallback((m: string) => { setMsg(m); setSavedPdfPath(null); }, []);
 
 
   const updateDoc = useCallback((id: string, fn: (d: Doc) => Partial<Doc>) => {
@@ -181,6 +182,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const closeCommentPopup = () => {
     setCommentTarget(null);
+    setTool('select');
+    setPending(null);
     requestAnimationFrame(() => appRef.current?.focus({ preventScroll: true }));
   };
   const saveNewComment = (text: string) => {
@@ -212,7 +215,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       const path = await saveBytes(active.name, bytes, 'pdf', as ? undefined : active.path);
       if (!path) return;
       updateDoc(active.id, () => ({ bytes, path, name: baseName(path), dirty: false }));
-      say(`Saved ${baseName(path)} with ${active.markups.length} markup annotation(s)`);
+      setMsg(`Saved ${baseName(path)} with ${active.markups.length} markup annotation(s)`);
+      setSavedPdfPath(path);
     } catch (e) {
       const message = 'Save failed: ' + (e instanceof Error ? e.message : String(e));
       say(message);
@@ -464,7 +468,6 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'shared': if (actions.serverMode) setLibrary(true); break;
       case 'logout': void logout(); break;
       case 'users': actions.manageUsers?.(); break;
-      case 'serverSetup': actions.serverSetup?.(); break;
       case 'password': actions.changePassword(); break;
       case 'close': if (active) closeDoc(active.id); break;
       case 'undo': undo(); break;
@@ -573,7 +576,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const toolBtn = (t: Tool) => (
     <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
-      <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>{TOOL_LABEL[t]}
+      {t === 'select' ? <SelectIcon theme={theme} /> : <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>}{TOOL_LABEL[t]}
     </button>
   );
 
@@ -593,8 +596,10 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         <span className="grow" />
         {viewOnly && <><span className="muted">Unlicensed viewing — editing is disabled.</span><button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>License information…</button><button onClick={onImportLicense}>Import license…</button></>}
         <span className="who" title={user.email}>{viewOnly ? <><b>Guest viewer</b></> : <>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</>}</span>
-        <PendingRegistrationsNotice state={actions.pendingRegistrations ?? null} onManageUsers={() => actions.manageUsers?.()} />
-      <NotificationBell api={actions.notifications ?? null} onOpenShared={() => setLibrary(true)} />
+        <NotificationBell api={actions.notifications ?? null} onOpenShared={() => setLibrary(true)} onOpenNotification={(notification) => {
+          if (notification.type === 'registration') actions.manageUsers?.();
+          else setLibrary(true);
+        }} />
         {!viewOnly && <button className="toolbar-logout" onClick={() => void logout()} title="Logout"><KeyIcon />Logout</button>}
       </div>
       {readOnly && <div className="collab warn" role="status">Read-only viewer mode - a license is required to edit or save. <button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>Activate...</button></div>}
@@ -672,6 +677,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 <ProjectPanel
                   docs={docs}
                   activeId={active.id}
+                  me={user}
                   sharedRevision={sharedRevision}
                   viewOnly={viewOnly}
                   onActivate={setActiveId}
@@ -702,6 +708,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 tool={readOnly ? 'hand' : tool}
                 style={toolStyle}
                 author={author}
+                user={user}
                 selectedId={selectedId}
                 fit={fit}
                 onSelect={(id) => { setSelectedId(id); if (id) setRightTab((t) => (t === 'measure' || t === 'markups' ? t : 'markups')); }}
@@ -717,7 +724,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 onMessage={say}
               />
               <div className="viewer-controls" aria-label="Page and zoom controls">
-                <FloatingTools tool={tool} onTool={(t) => { setTool(t); setPending(null); }} />
+                <FloatingTools tool={tool} theme={theme} onTool={(t) => { setTool(t); setPending(null); }} />
                 <span className="sep" />
                 <button onClick={() => goto(active.page - 1)} title="Previous page" aria-label="Previous page">◀</button>
                 <input className="pg" type="number" aria-label="Page number" min={1} max={active.numPages} value={active.page + 1} onChange={(e) => goto((+e.target.value || 1) - 1)} />
@@ -819,8 +826,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           </>
         )}
       </div>
-      <div className="status">{msg}</div>
-      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} onChanged={() => setSharedRevision((n) => n + 1)} />}
+      <div className="status">{msg}{savedPdfPath && <button className="status-link" onClick={() => void window.api?.openSavedPdf(savedPdfPath).catch((error) => say('Could not open the saved PDF: ' + (error instanceof Error ? error.message : String(error))))}>Open saved PDF</button>}</div>
+      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} onChanged={() => setSharedRevision((n) => n + 1)} />}
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
       {defaultsOpen && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Tool defaults">

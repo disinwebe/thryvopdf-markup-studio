@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const { start } = require('../server/server.cjs');
 const { sendMail } = require('../server/notify.cjs');
 const PDF = Buffer.from('%PDF-1.4\n%%EOF\n');
-let dir: string, server: any, base: string, admin: string, ann: string, bob: string;
+let dir: string, server: any, base: string, admin: string, ann: string, bob: string, cara: string;
 const sent: any[] = [];
 
 async function call(method: string, path: string, token?: string, body?: any, raw?: Buffer) {
@@ -26,7 +26,7 @@ const upload = (token: string, members: string[]) =>
 beforeAll(async () => {
   dir = mkdtempSync(join(process.cwd(), '.notify-test-'));
   fs.writeFileSync(join(dir, 'notify.json'), JSON.stringify({ smtp: { enabled: true, host: 'smtp.test', port: 25, from: 'ThryvoPDF <noreply@example.com>' } }));
-  server = await start({ port: 0, host: '127.0.0.1', file: join(dir, 'users.json'), adminPassword: 'InitialAdmin1', sendMail: async (_c: unknown, to: string, subject: string, text: string) => { sent.push({ to, subject, text }); } });
+  server = await start({ port: 0, host: '127.0.0.1', file: join(dir, 'users.json'), adminPassword: 'InitialAdmin1', sendMail: async (_c: unknown, to: string, subject: string, text: string, _timeout: unknown, cc: string[] = []) => { sent.push({ to, subject, text, cc }); } });
   base = `http://127.0.0.1:${server.port}`;
   const login = await call('POST', '/api/login', undefined, { email: 'admin', password: 'InitialAdmin1' });
   await call('POST', '/api/change-password', login.token, { current: 'InitialAdmin1', password: 'NewAdminPass1' });
@@ -38,6 +38,7 @@ beforeAll(async () => {
   };
   ann = await add('ann@example.com', 'Ann');
   bob = await add('bob@example.com', 'Bob');
+  cara = await add('cara@example.com', 'Cara');
 });
 
 afterAll(async () => {
@@ -46,6 +47,11 @@ afterAll(async () => {
 });
 
 describe('assignment notifications', () => {
+  it('sends pending registration alerts through the admin inbox', async () => {
+    const inbox = await call('GET', '/api/notifications', admin);
+    expect(inbox.notifications.some((n: any) => n.type === 'registration' && n.message.includes('Cara'))).toBe(true);
+  });
+
   it('alerts and emails assigned users on upload, not the uploader', async () => {
     const r = await upload(ann, ['ann@example.com', 'bob@example.com']);
     expect(r.status).toBe(201);
@@ -72,6 +78,49 @@ describe('assignment notifications', () => {
     expect(read.unread).toBe(1);
     expect((await call('POST', '/api/notifications/read', bob, { all: true })).unread).toBe(0);
   });
+
+  it('tracks each assigned reviewer and reopens completion after markup changes', async () => {
+    const up = await upload(ann, ['bob@example.com', 'cara@example.com']);
+    const id = up.doc.id;
+    sent.length = 0;
+    expect((await call('GET', '/api/docs', bob)).docs.find((d: any) => d.id === id).reviews).toEqual([
+      { email: 'bob@example.com', done: false, updated: null },
+      { email: 'cara@example.com', done: false, updated: null },
+    ]);
+
+    const marked = await call('POST', `/api/docs/${id}/review`, bob, { done: true });
+    expect(marked.status).toBe(200);
+    await new Promise((res) => setTimeout(res, 25));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ to: 'ann@example.com', cc: ['bob@example.com', 'cara@example.com'] });
+    expect(sent[0].subject).toContain('Review completed');
+    expect(marked.reviews.find((r: any) => r.email === 'bob@example.com').done).toBe(true);
+    expect(marked.reviews.find((r: any) => r.email === 'cara@example.com').done).toBe(false);
+    const reviewAlert = await call('GET', '/api/notifications', cara);
+    expect(reviewAlert.notifications[0].type).toBe('review');
+
+    const markup = {
+      id: 'bob-markup',
+      page: 0,
+      type: 'text',
+      points: [{ x: 1, y: 1 }, { x: 20, y: 20 }],
+      color: '#ff0000',
+      width: 2,
+      opacity: 1,
+      status: 'None',
+      author: 'untrusted',
+      date: new Date().toISOString(),
+      comments: [],
+      text: 'Review note',
+    };
+    expect((await call('POST', `/api/docs/${id}/ops`, bob, { upserts: [markup], deletes: [] })).status).toBe(200);
+    expect((await call('GET', '/api/docs', bob)).docs.find((d: any) => d.id === id).reviews.find((r: any) => r.email === 'bob@example.com').done).toBe(false);
+    expect((await call('POST', `/api/docs/${id}/review`, ann, { done: true })).status).toBe(403);
+
+    await call('POST', `/api/docs/${id}/members`, ann, { members: ['cara@example.com'] });
+    await call('POST', `/api/docs/${id}/members`, ann, { members: ['bob@example.com', 'cara@example.com'] });
+    expect((await call('GET', '/api/docs', bob)).docs.find((d: any) => d.id === id).reviews.find((r: any) => r.email === 'bob@example.com').done).toBe(false);
+  });
 });
 
 describe('graph client', () => {
@@ -85,11 +134,12 @@ describe('graph client', () => {
     }) as any;
     try {
       const cfg = { provider: 'graph', tenantId: 'contoso.onmicrosoft.com', clientId: '11111111-1111-1111-1111-111111111111', clientSecret: 's', from: 'noreply@contoso.com' };
-      await sendMail(cfg, 'b@example.com', 'Hi', 'Body');
+      await sendMail(cfg, 'b@example.com', 'Hi', 'Body', 20000, ['c@example.com']);
       expect(calls[0].url).toContain('contoso.onmicrosoft.com/oauth2/v2.0/token');
       expect(calls[1].url).toContain('/users/noreply%40contoso.com/sendMail');
       expect(calls[1].init.headers.Authorization).toBe('Bearer tok');
       expect(JSON.parse(calls[1].init.body).message.toRecipients[0].emailAddress.address).toBe('b@example.com');
+      expect(JSON.parse(calls[1].init.body).message.ccRecipients).toEqual([{ emailAddress: { address: 'c@example.com' } }]);
     } finally { globalThis.fetch = real; }
   });
 });
@@ -114,9 +164,11 @@ describe('smtp client', () => {
     });
     await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
     const port = (srv.address() as any).port;
-    await sendMail({ host: '127.0.0.1', port, secure: false, user: 'u', password: 'p', from: 'a@example.com' }, 'b@example.com', 'Hi', 'Body');
+    await sendMail({ host: '127.0.0.1', port, secure: false, user: 'u', password: 'p', from: 'a@example.com' }, 'b@example.com', 'Hi', 'Body', 20000, ['c@example.com']);
     srv.close();
     expect(lines).toContain('MAIL FROM:<a@example.com>');
     expect(lines).toContain('RCPT TO:<b@example.com>');
+    expect(lines).toContain('RCPT TO:<c@example.com>');
+    expect(lines).toContain('Cc: c@example.com');
   });
 });
