@@ -20,11 +20,52 @@ function normalizeSmtp(c = {}) {
     user: clean(c.user, 255),
     password: typeof c.password === 'string' ? c.password.slice(0, 512) : '',
     from: clean(c.from, 255),
+    provider: c.provider === 'graph' ? 'graph' : 'smtp',
+    tenantId: clean(c.tenantId, 100),
+    clientId: clean(c.clientId, 100),
+    clientSecret: typeof c.clientSecret === 'string' ? c.clientSecret.trim().slice(0, 512) : '',
   };
+}
+
+// Microsoft Graph sender (OAuth client credentials). Works when basic SMTP sign-in is blocked.
+const tokens = new Map();
+async function graphFetch(url, init, timeoutMs) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try { return await fetch(url, { ...init, signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'Microsoft Graph timed out.' : 'Could not reach Microsoft (' + (e.cause?.code || e.message) + ').'); }
+  finally { clearTimeout(timer); }
+}
+async function graphToken(cfg, timeoutMs) {
+  const key = [cfg.tenantId, cfg.clientId, cfg.clientSecret].join('|');
+  const hit = tokens.get(key);
+  if (hit && hit.expires > Date.now() + 60000) return hit.token;
+  const body = new URLSearchParams({ client_id: cfg.clientId, client_secret: cfg.clientSecret, scope: 'https://graph.microsoft.com/.default', grant_type: 'client_credentials' });
+  const res = await graphFetch('https://login.microsoftonline.com/' + encodeURIComponent(cfg.tenantId) + '/oauth2/v2.0/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body }, timeoutMs);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.access_token) throw new Error('Microsoft sign-in failed: ' + clean(j.error_description || j.error || res.status, 300));
+  tokens.set(key, { token: j.access_token, expires: Date.now() + (Number(j.expires_in) || 3600) * 1000 });
+  return j.access_token;
+}
+async function sendGraph(cfg, to, subject, text, timeoutMs) {
+  const sender = (/<([^>]+)>/.exec(cfg.from) || [null, cfg.from])[1];
+  if (!cfg.tenantId || !cfg.clientId || !cfg.clientSecret || !EMAIL_RE.test(sender) || !EMAIL_RE.test(to)) throw new Error('Invalid Microsoft Graph settings, sender or recipient.');
+  const token = await graphToken(cfg, timeoutMs);
+  const res = await graphFetch('https://graph.microsoft.com/v1.0/users/' + encodeURIComponent(sender) + '/sendMail', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { subject, body: { contentType: 'Text', content: text }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: false }),
+  }, timeoutMs);
+  if (res.status !== 202) {
+    if (res.status === 401) tokens.clear();
+    const j = await res.json().catch(() => ({}));
+    throw new Error('Microsoft Graph error ' + res.status + ': ' + clean(j.error?.message || j.error?.code || '', 300));
+  }
 }
 
 // Minimal SMTP client (AUTH PLAIN/LOGIN, STARTTLS). Resolves on success, rejects on any failure.
 function sendMail(cfg, to, subject, text, timeoutMs = 20000) {
+  if (cfg.provider === 'graph') return sendGraph(cfg, to, subject, text, timeoutMs);
   return new Promise((resolve, reject) => {
     const fromAddr = (/<([^>]+)>/.exec(cfg.from) || [null, cfg.from])[1];
     if (!cfg.host || !EMAIL_RE.test(fromAddr) || !EMAIL_RE.test(to)) return reject(new Error('Invalid SMTP sender or recipient.'));

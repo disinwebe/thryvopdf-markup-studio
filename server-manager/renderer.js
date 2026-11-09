@@ -55,25 +55,28 @@ $('logs').addEventListener('click', () => handle(() => window.manager.logs()));
 $('firewall').addEventListener('click', () => handle(() => window.manager.firewall()));
 const PROVIDERS = {
   custom: { hint: 'Enter the host, port and credentials supplied by your mail administrator.' },
+  graph: { hint: 'Recommended for Microsoft 365. Works even when Security Defaults block SMTP. One-time setup in Entra (entra.microsoft.com): App registrations > New registration > copy the Directory (tenant) ID and Application (client) ID. Certificates & secrets > New client secret > copy the secret VALUE. API permissions > Add > Microsoft Graph > Application permissions > Mail.Send > Grant admin consent. The From address must be an existing Exchange Online mailbox, for example noreply@yourdomain.com.' },
   m365: { host: 'smtp.office365.com', port: 587, secure: false, hint: 'Use the mailbox sign-in as SMTP user and From address. An administrator must enable Authenticated SMTP (SMTP AUTH) for that mailbox in Microsoft 365, and Security Defaults/MFA may require an app password. OAuth sign-in is not supported.' },
   outlook: { host: 'smtp-mail.outlook.com', port: 587, secure: false, hint: 'Use your full Outlook.com address as SMTP user and From address. With two-step verification, create an app password in your Microsoft account security settings. Microsoft may block basic SMTP sign-in for some personal accounts.' },
   gmail: { host: 'smtp.gmail.com', port: 587, secure: false, hint: 'Use your full Gmail address as SMTP user and From address. Turn on 2-Step Verification, then create a 16-character App Password at myaccount.google.com/apppasswords and paste it as the password (your normal password will not work).' },
 };
-function providerOf(host) { return Object.keys(PROVIDERS).find((k) => PROVIDERS[k].host === host.trim().toLowerCase()) || 'custom'; }
+function providerOf(host, provider) { if (provider === 'graph') return 'graph'; return Object.keys(PROVIDERS).find((k) => PROVIDERS[k].host === host.trim().toLowerCase()) || 'custom'; }
 function applyProvider(key, fill) {
   const p = PROVIDERS[key];
   $('smtp-hint').textContent = p.hint;
-  const locked = key !== 'custom';
+  const locked = key !== 'custom' && key !== 'graph';
+  $('smtp-fields').hidden = key === 'graph';
+  $('graph-fields').hidden = key !== 'graph';
   if (fill && locked) { $('smtp-host').value = p.host; $('smtp-port').value = p.port; $('smtp-secure').checked = p.secure; }
   $('smtp-host').readOnly = locked; $('smtp-port').readOnly = locked; $('smtp-secure').disabled = locked;
 }
 $('smtp-provider').addEventListener('change', () => {
   const key = $('smtp-provider').value;
   applyProvider(key, true);
-  if (key !== 'custom') $('smtp-user').placeholder = 'you@example.com';
+  if (key !== 'custom' && key !== 'graph') $('smtp-user').placeholder = 'you@example.com';
 });
 $('smtp-user').addEventListener('blur', () => {
-  if (!$('smtp-from').value && $('smtp-provider').value !== 'custom') $('smtp-from').value = $('smtp-user').value.trim();
+  if (!$('smtp-from').value && !['custom', 'graph'].includes($('smtp-provider').value)) $('smtp-from').value = $('smtp-user').value.trim();
 });
 async function loadNotify() {
   const c = await window.manager.notifyGet();
@@ -81,7 +84,11 @@ async function loadNotify() {
   $('smtp-host').value = c.host;
   $('smtp-port').value = c.port;
   $('smtp-secure').checked = c.secure;
-  $('smtp-provider').value = providerOf(c.host);
+  $('smtp-provider').value = providerOf(c.host, c.provider);
+  $('graph-tenant').value = c.tenantId;
+  $('graph-client').value = c.clientId;
+  $('graph-secret').value = '';
+  $('graph-secret').placeholder = c.hasSecret ? 'Saved. Leave blank to keep it' : '';
   applyProvider($('smtp-provider').value, false);
   $('smtp-user').value = c.user;
   $('smtp-password').value = '';
@@ -90,7 +97,7 @@ async function loadNotify() {
 }
 $('smtp-save').addEventListener('click', () => handle(async () => {
   $('smtp-status').textContent = '';
-  await window.manager.notifySave({ enabled: $('smtp-enabled').checked, host: $('smtp-host').value, port: Number($('smtp-port').value), secure: $('smtp-secure').checked, user: $('smtp-user').value, password: $('smtp-password').value, from: $('smtp-from').value });
+  await window.manager.notifySave({ provider: $('smtp-provider').value === 'graph' ? 'graph' : 'smtp', tenantId: $('graph-tenant').value, clientId: $('graph-client').value, clientSecret: $('graph-secret').value, enabled: $('smtp-enabled').checked, host: $('smtp-host').value, port: Number($('smtp-port').value), secure: $('smtp-secure').checked, user: $('smtp-user').value, password: $('smtp-password').value, from: $('smtp-from').value });
   await loadNotify();
   $('smtp-status').textContent = 'Email settings saved.';
 }));

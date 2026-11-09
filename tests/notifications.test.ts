@@ -74,6 +74,26 @@ describe('assignment notifications', () => {
   });
 });
 
+describe('graph client', () => {
+  it('gets a token then posts sendMail', async () => {
+    const calls: any[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init: any) => {
+      calls.push({ url: String(url), init });
+      if (String(url).includes('/oauth2/v2.0/token')) return new Response(JSON.stringify({ access_token: 'tok', expires_in: 3600 }), { status: 200 });
+      return new Response(null, { status: 202 });
+    }) as any;
+    try {
+      const cfg = { provider: 'graph', tenantId: 'contoso.onmicrosoft.com', clientId: '11111111-1111-1111-1111-111111111111', clientSecret: 's', from: 'noreply@contoso.com' };
+      await sendMail(cfg, 'b@example.com', 'Hi', 'Body');
+      expect(calls[0].url).toContain('contoso.onmicrosoft.com/oauth2/v2.0/token');
+      expect(calls[1].url).toContain('/users/noreply%40contoso.com/sendMail');
+      expect(calls[1].init.headers.Authorization).toBe('Bearer tok');
+      expect(JSON.parse(calls[1].init.body).message.toRecipients[0].emailAddress.address).toBe('b@example.com');
+    } finally { globalThis.fetch = real; }
+  });
+});
+
 describe('smtp client', () => {
   it('speaks SMTP to a server', async () => {
     const lines: string[] = [];
