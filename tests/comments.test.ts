@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRef, PDFString } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFString } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { contentsOf, readState, saveWithState } from '../src/core/annotations';
 import { numberMarkups } from '../src/core/numbering';
@@ -54,6 +54,63 @@ describe('annotation IDs and comments in the PDF', () => {
     const stamp = mk('stamp-id', [c('legacy', 'old comment')], { type: 'stamp' });
     const markup = mk('markup-id', []);
     expect(numberMarkups([line, stamp, markup])).toEqual(new Map([['markup-id', 1]]));
+  });
+
+  it('saves measurements with calibrated labels but no review comments or popup annotations', async () => {
+    const measurements = [
+      mk('length', [], { type: 'm-length', points: [{ x: 10, y: 20 }, { x: 510, y: 20 }] }),
+      mk('area', [], { type: 'm-area', points: [{ x: 10, y: 30 }, { x: 20, y: 30 }, { x: 20, y: 40 }, { x: 10, y: 40 }] }),
+      mk('door-1', [], { type: 'm-count', subject: 'Door', points: [{ x: 30, y: 50 }] }),
+      mk('door-2', [], { type: 'm-count', subject: 'Door', points: [{ x: 40, y: 50 }] }),
+    ];
+    const calibration = { unit: 'mm' as const, unitsPerPoint: 2, calibrated: true };
+    const saved = await saveWithState(await blank(), {
+      markups: measurements,
+      calibrations: { 0: calibration },
+      sheets: {},
+      bookmarks: [],
+    });
+    const doc = await PDFDocument.load(saved);
+    const items = reviewItems(doc);
+    expect(items).toHaveLength(measurements.length);
+    for (const item of items) {
+      expect(item.d.has(PDFName.of('Contents'))).toBe(false);
+      expect(item.d.has(PDFName.of('Popup'))).toBe(false);
+    }
+    const appearanceText = (id: string) => {
+      const item = items.find((x) => str(x.d.get(PDFName.of('NM'))) === id)!;
+      const appearance = item.d.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N'));
+      return new TextDecoder().decode((appearance as PDFRawStream).contents);
+    };
+    expect(appearanceText('length')).toContain('(1000 mm) Tj');
+    expect(appearanceText('length')).toContain('/F2 11 Tf');
+    expect((appearanceText('length').match(/ c f/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    const length = items.find((x) => str(x.d.get(PDFName.of('NM'))) === 'length')!;
+    const lengthRect = length.d.lookup(PDFName.of('Rect'), PDFArray);
+    expect(lengthRect.lookup(2, PDFNumber).asNumber()).toBeGreaterThan(510);
+    expect(appearanceText('area')).toContain('(400.00 mm) Tj');
+    expect(appearanceText('area')).toContain('(2) Tj');
+    expect(appearanceText('area')).not.toContain('�');
+    const areaOps = appearanceText('area');
+    const position = (text: string) => {
+      const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const match = new RegExp(`1 0 0 1 (-?\\d+(?:\\.\\d+)?) (-?\\d+(?:\\.\\d+)?) Tm \\(${escaped}\\) Tj`).exec(areaOps);
+      if (!match) throw new Error(`Missing positioned text: ${text}`);
+      return { x: Number(match[1]), y: Number(match[2]) };
+    };
+    const basePosition = position('400.00 mm');
+    const superscriptPosition = position('2');
+    expect(superscriptPosition.x).toBeGreaterThan(basePosition.x + 30);
+    expect(superscriptPosition.y).toBeGreaterThan(basePosition.y + 2);
+    const area = items.find((x) => str(x.d.get(PDFName.of('NM'))) === 'area')!;
+    const areaRect = area.d.lookup(PDFName.of('Rect'), PDFArray);
+    expect(areaRect.lookup(2, PDFNumber).asNumber()).toBeGreaterThan(40);
+    expect(appearanceText('door-1')).toContain('/F2 10 Tf 1 1 1 rg');
+    expect(appearanceText('door-1')).toContain('(1) Tj');
+    expect(appearanceText('door-2')).toContain('(2) Tj');
+    const restored = await readState(doc);
+    expect(restored.calibrations[0]).toEqual(calibration);
+    expect(restored.markups.map((m) => m.type)).toEqual(measurements.map((m) => m.type));
   });
 
   it('persists a plain line as page drawing content, not as a review annotation', async () => {

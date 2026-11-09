@@ -37,9 +37,11 @@ import { CommentPopup } from './components/CommentPopup';
 import { SelectIcon } from './components/SelectIcon';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
 const TOOL_ICONS: Partial<Record<Tool, string>> = {
   hand: '✋', line: '╱', highlight: '▰', text: 'T', cloud: '☁', rect: '□',
   ellipse: '○', arrow: '↗', polyline: '⌁', pen: '✎', stamp: '▣', note: '▤',
+  'm-length': '↔', 'm-polylength': '⌁', 'm-area': '▱', 'm-perimeter': '□', 'm-angle': '∠', 'm-count': '#',
 };
 const TOOL_HINT: Partial<Record<Tool, string>> = {
   select: 'Select (V)',
@@ -174,7 +176,6 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       setTool('select');
       setRightTab('markups');
     }
-    if (isMeasure(m.type)) setRightTab('measure');
   };
 
   const updateMarkup = (id: string, patch: Partial<Markup>, key?: string) =>
@@ -460,6 +461,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     }
     if (library || actions.uiBlocked || commentTarget || defaultsOpen || licenseInfo) return;
     if (readOnly && ['save', 'saveAs', 'csv', 'undo', 'redo', 'delete', 'toolDefaults', 'measurePanel', 'organizePanel', 'sheetsPanel'].includes(action)) return;
+    if (readOnly && action.startsWith('measure')) return;
     switch (action) {
       case 'open': void open(); break;
       case 'save': void save(false); break;
@@ -480,6 +482,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'toggleRightPanel': setRightPanelVisible((visible) => !visible); break;
       case 'toolDefaults': setDefaultsOpen(true); break;
       case 'measurePanel': setRightTab('measure'); break;
+      case 'measureLength': setTool('m-length'); setPending(null); setRightTab('markups'); break;
+      case 'measurePolylength': setTool('m-polylength'); setPending(null); setRightTab('markups'); break;
+      case 'measureArea': setTool('m-area'); setPending(null); setRightTab('markups'); break;
+      case 'measurePerimeter': setTool('m-perimeter'); setPending(null); setRightTab('markups'); break;
+      case 'measureAngle': setTool('m-angle'); setPending(null); setRightTab('markups'); break;
+      case 'measureCount': setTool('m-count'); setPending(null); setRightTab('markups'); break;
       case 'organizePanel': setRightTab('organize'); break;
       case 'sheetsPanel': setRightTab('sheets'); break;
       case 'searchPanel': setRightTab('search'); break;
@@ -605,12 +613,24 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       {readOnly && <div className="collab warn" role="status">Read-only viewer mode - a license is required to edit or save. <button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>Activate...</button></div>}
 
       {view === 'viewer' && (
-        <div className="bar tools">
-          {(['select', 'hand'] as Tool[]).map(toolBtn)}
-          <span className="sep" />
-          <span className="lbl">Markup</span>
-          {MARKUP_TOOLS.map(toolBtn)}
-        </div>
+        <>
+          <div className="bar tools">
+            {(['select', 'hand'] as Tool[]).map(toolBtn)}
+            <span className="sep" />
+            <span className="lbl">Markup</span>
+            {MARKUP_TOOLS.map(toolBtn)}
+          </div>
+          <div className="bar tools measurement-tools">
+            <span className="measurement-toolbar-prefix" aria-hidden="true">
+              <button tabIndex={-1}><SelectIcon theme={theme} />Select</button>
+              <button tabIndex={-1}><span className="tool-icon" aria-hidden="true">✋</span>Pan</button>
+              <span className="sep" />
+            </span>
+            <span className="lbl">Measure</span>
+            {MEASURE_TOOLS.map(toolBtn)}
+            <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')} disabled={!active || readOnly}>Measurements...</button>
+          </div>
+        </>
       )}
 
       <div className="tabs">
@@ -769,7 +789,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   <div className="row between"><b>{rightTab === 'measure' ? 'Measurements' : rightTab === 'organize' ? 'Organize pages' : rightTab === 'sheets' ? 'Sheet index' : 'Search documents'}</b><button onClick={() => setRightTab('markups')}>Close</button></div>
               {rightTab === 'measure' && (
                 <>
-                <div className="row pad">{(['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'] as Tool[]).map((t) => (
+                <div className="row pad">{MEASURE_TOOLS.map((t) => (
                   <button key={t} onClick={() => { setTool(t); setRightTab('markups'); }}>{TOOL_LABEL[t]}</button>
                 ))}</div>
                 <MeasurePanel

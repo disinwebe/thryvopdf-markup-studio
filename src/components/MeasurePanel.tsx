@@ -96,7 +96,7 @@ export function MeasurePanel(p: MeasurePanelProps) {
         </select>
         <button onClick={() => p.onExport(takeoffCsv(doc.markups, (pg) => doc.calibrations[pg] ?? DEFAULT_CAL, outUnit))}>Export CSV</button>
       </h4>
-      <table className="grid">
+      <table className="takeoff-table">
         <thead>
           <tr>
             <th>Subject</th>

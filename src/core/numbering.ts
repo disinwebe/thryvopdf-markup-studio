@@ -1,6 +1,6 @@
-import { Markup, Pt } from './types';
+import { isMeasure, Markup, Pt } from './types';
 
-export const isReviewMarkup = (m: Pick<Markup, 'type'>): boolean => m.type !== 'line' && m.type !== 'stamp';
+export const isReviewMarkup = (m: Pick<Markup, 'type'>): boolean => m.type !== 'line' && m.type !== 'stamp' && !isMeasure(m.type);
 
 /** Visible, sequential review numbers: by page, then creation date, then id. Renumbers automatically when markups change. */
 export function numberMarkups(markups: Pick<Markup, 'id' | 'page' | 'date' | 'type'>[]): Map<string, number> {

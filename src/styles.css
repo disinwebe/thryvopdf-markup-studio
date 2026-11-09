@@ -37,6 +37,7 @@ input.pg { width: 56px; }
 .viewer-controls button { padding: 2px 5px; }
 .viewer-controls input.pg { width: 43px; padding: 2px; }
 .tool-icon { display: inline-block; min-width: 1.15em; margin-right: 4px; font-size: 14px; text-align: center; }
+.measurement-toolbar-prefix { display: inline-flex; align-items: center; gap: 4px; visibility: hidden; pointer-events: none; }
 .folder-icon { width: 16px; height: 16px; vertical-align: -3px; margin-right: 5px; }
 .toolbar-svg { width: 1.2em; height: 1.2em; vertical-align: -0.2em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
 .tool-dialog { width: min(600px, 95vw); }
@@ -74,6 +75,7 @@ label:has(> input[type=checkbox]), .props > label:has(> input[type=checkbox]), .
 .org-row { display: flex; align-items: center; gap: 6px; padding: 4px; border: 1px solid var(--line); border-radius: 4px; margin: 2px 0; }
 .mini button { padding: 0 6px; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.takeoff-table { width: 100%; table-layout: auto; }
 th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: left; }
 .compare { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .compare-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); }

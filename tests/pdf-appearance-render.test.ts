@@ -6,6 +6,7 @@ import { AnnotationMode, getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 import { readState, saveWithState } from '../src/core/annotations';
 import { CALLOUT_PAD, calloutLayout, calloutTextRuns } from '../src/core/callout';
+import { isReviewMarkup } from '../src/core/numbering';
 import type { Markup, MarkupType } from '../src/core/types';
 
 const review: Markup = {
@@ -76,6 +77,45 @@ describe('saved PDF annotation appearances', () => {
       const authorX = box.x + CALLOUT_PAD;
       const authorY = box.y + CALLOUT_PAD + box.fs * 0.2;
       expect(pixels(ctx, authorX, authorY, 24, 14, rose)).toBeGreaterThan(0);
+    } finally {
+      await pdf.destroy();
+    }
+  });
+  it('renders measurement labels with visible superscripts and count digits', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([460, 360]);
+    const measurements: Markup[] = [
+      {
+        ...review, id: 'area-label', type: 'm-area', color: '#008f83', fill: '#008f83',
+        points: [{ x: 80, y: 80 }, { x: 300, y: 90 }, { x: 260, y: 230 }, { x: 70, y: 200 }],
+        comments: [], callout: undefined,
+      },
+      {
+        ...review, id: 'count-label', type: 'm-count', color: '#008f83', points: [{ x: 350, y: 80 }],
+        subject: 'Door', comments: [], callout: undefined,
+      },
+    ];
+    const saved = await saveWithState(await source.save(), {
+      markups: measurements,
+      calibrations: { 0: { unit: 'mm', unitsPerPoint: 2, calibrated: true } },
+      sheets: {},
+      bookmarks: [],
+    });
+    const pdf = await getDocument({ data: saved, standardFontDataUrl }).promise;
+    try {
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 1 });
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const ctx = canvas.getContext('2d');
+      await page.render({
+        canvasContext: ctx as unknown as CanvasRenderingContext2D,
+        viewport,
+        annotationMode: AnnotationMode.ENABLE,
+      }).promise;
+      const contrastsWithArea = (r: number, g: number, b: number) =>
+        Math.abs(r - 128) + Math.abs(g - 199) + Math.abs(b - 193) > 30;
+      expect(pixels(ctx, 130, 135, 100, 25, contrastsWithArea), 'filled area label').toBeGreaterThan(20);
+      expect(pixels(ctx, 347, 75, 7, 9, contrastsWithArea), 'count digit inside its marker').toBeGreaterThan(3);
     } finally {
       await pdf.destroy();
     }
@@ -178,7 +218,7 @@ describe('saved PDF annotation appearances', () => {
         'm-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count',
       ];
       for (const rotation of [0, 90, 180, 270]) {
-        it(`renders all review types and an unnumbered image stamp after save and reopen (${rotation} degrees)`, async () => {
+        it(`renders review callouts and independent measurements after save and reopen (${rotation} degrees)`, async () => {
           const source = await PDFDocument.create();
           const image = createCanvas(8, 8);
           const imageCtx = image.getContext('2d');
@@ -188,6 +228,9 @@ describe('saved PDF annotation appearances', () => {
           const imageStamp: Markup = { ...stamp, page: types.length, opacity: 1, stampImage };
           const markups = types.map((type, page): Markup => ({
             ...review, type, page, id: `review-${type}`, color: '#202020',
+            comments: isReviewMarkup({ type }) ? review.comments : [],
+            callout: isReviewMarkup({ type }) ? review.callout : undefined,
+            subject: type === 'm-count' ? 'Door' : undefined,
             points: type === 'note' || type === 'm-count'
               ? [{ x: 40, y: 40 }]
               : type === 'callout' || type === 'm-angle' || type === 'm-area' || type === 'm-perimeter'
@@ -211,15 +254,21 @@ describe('saved PDF annotation appearances', () => {
               const ctx = canvas.getContext('2d');
               await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, viewport, annotationMode: AnnotationMode.ENABLE }).promise;
               const red = (r: number, g: number, b: number) => r > 170 && g < 130 && b < 140;
-              const box = calloutLayout(markup)!;
-              expect(pixels(ctx, 32, 32, 16, 16, red), `${markup.type} markup-corner ID`).toBeLessThan(45);
-              expect(pixels(ctx, box.x, box.y - 1, box.w, 3, red), `${markup.type} top`).toBeGreaterThan(box.w * 0.8);
-              expect(pixels(ctx, box.x, Math.round(box.y + box.h) - 1, box.w, 3, red), `${markup.type} bottom`).toBeGreaterThan(box.w * 0.8);
-              expect(pixels(ctx, box.x - 1, box.y, 3, Math.floor(box.h), red), `${markup.type} left`).toBeGreaterThan(box.h * 0.8);
-              expect(pixels(ctx, box.x + box.w - 1, box.y, 3, Math.floor(box.h), red), `${markup.type} right`).toBeGreaterThan(box.h * 0.8);
-              const middleX = Math.round((box.anchor.x + box.edge.x) / 2);
-              const middleY = Math.round((box.anchor.y + box.edge.y) / 2);
-              expect(pixels(ctx, middleX - 3, middleY - 3, 7, 7, red), `${markup.type} leader`).toBeGreaterThan(3);
+              const box = calloutLayout(markup);
+              if (isReviewMarkup(markup)) {
+                expect(box).not.toBeNull();
+                expect(pixels(ctx, 32, 32, 16, 16, red), `${markup.type} markup-corner ID`).toBeLessThan(45);
+                expect(pixels(ctx, box!.x, box!.y - 1, box!.w, 3, red), `${markup.type} top`).toBeGreaterThan(box!.w * 0.8);
+                expect(pixels(ctx, box!.x, Math.round(box!.y + box!.h) - 1, box!.w, 3, red), `${markup.type} bottom`).toBeGreaterThan(box!.w * 0.8);
+                expect(pixels(ctx, box!.x - 1, box!.y, 3, Math.floor(box!.h), red), `${markup.type} left`).toBeGreaterThan(box!.h * 0.8);
+                expect(pixels(ctx, box!.x + box!.w - 1, box!.y, 3, Math.floor(box!.h), red), `${markup.type} right`).toBeGreaterThan(box!.h * 0.8);
+                const middleX = Math.round((box!.anchor.x + box!.edge.x) / 2);
+                const middleY = Math.round((box!.anchor.y + box!.edge.y) / 2);
+                expect(pixels(ctx, middleX - 3, middleY - 3, 7, 7, red), `${markup.type} leader`).toBeGreaterThan(3);
+              } else {
+                expect(box).toBeNull();
+                expect(pixels(ctx, 0, 0, viewport.width, viewport.height, red), `${markup.type} has no review callout`).toBe(0);
+              }
             }
             const page = await pdf.getPage(types.length + 1);
             const viewport = page.getViewport({ scale: 1 });

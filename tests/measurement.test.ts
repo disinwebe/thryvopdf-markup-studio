@@ -3,6 +3,7 @@ import {
   angleDeg,
   calibrateFromDistance,
   calibrateFromScale,
+  countNumbers,
   convertArea,
   convertLength,
   csvEscape,
@@ -122,5 +123,18 @@ describe('takeoff', () => {
     const csv = takeoffCsv(items, () => cal);
     expect(csv).toContain('Subject,Type,Items,Total,Unit');
     expect(csv).toContain('Wall,length,2,15,ft');
+  });
+
+  it('numbers count measurements per subject for consistent viewer and PDF labels', () => {
+    const counts = [
+      mk('m-count', [[1, 1]], { id: 'door-1', subject: 'Door' }),
+      mk('m-count', [[2, 2]], { id: 'window-1', subject: 'Window' }),
+      mk('m-count', [[3, 3]], { id: 'door-2', subject: 'Door' }),
+    ];
+    expect([...countNumbers(counts)]).toEqual([
+      ['door-1', 1],
+      ['window-1', 1],
+      ['door-2', 2],
+    ]);
   });
 });

@@ -13,9 +13,11 @@ describe('new markup comment popup', () => {
     expect(html).toContain('disabled="">Add comment');
     expect(html).toContain('>Cancel</button>');
   });
-  it('keeps plain line and stamp out of comment numbering and popup eligibility', () => {
+  it('keeps plain lines, stamps, and measurements out of comment numbering and popup eligibility', () => {
     expect(isReviewMarkup({ type: 'line' })).toBe(false);
     expect(isReviewMarkup({ type: 'stamp' })).toBe(false);
+    for (const type of ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'] as const)
+      expect(isReviewMarkup({ type })).toBe(false);
     expect(isReviewMarkup({ type: 'cloud' })).toBe(true);
   });
   it('mirrors only the save-as floppy icon', () => {

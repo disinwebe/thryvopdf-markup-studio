@@ -1,6 +1,10 @@
 # ThryvoPDF Markup Studio User Manual
 
-This manual explains how to install and activate ThryvoPDF Markup Studio, work with drawing PDFs, and collaborate through a shared server. Menu names may vary slightly between app versions.
+**A practical guide to viewing, marking up, measuring, and reviewing PDF drawings**
+
+Version 1.0 · Updated November 2026
+
+This manual follows the current ThryvoPDF Markup Studio 1.0 desktop build. It explains how to install and activate the app, work with drawing PDFs, and collaborate through a shared server.
 
 ## Contents
 
@@ -9,7 +13,7 @@ This manual explains how to install and activate ThryvoPDF Markup Studio, work w
 - [Understand the workspace](#3-understand-the-workspace)
 - [Open and read PDFs](#4-open-and-read-pdfs)
 - [Add and edit markups](#5-add-and-edit-markups)
-- [Measure drawings](#6-measure-drawings-when-the-measurements-panel-is-available)
+- [Measure drawings](#6-measure-drawings)
 - [Compare drawing revisions](#7-compare-drawing-revisions)
 - [Organize pages, bookmarks, and sheet metadata](#8-organize-pages-bookmarks-and-sheet-metadata)
 - [Search text in open PDFs](#9-search-text-in-open-pdfs)
@@ -72,15 +76,18 @@ The main workspace has:
 
 - **Top toolbar:** Open and save PDFs, undo/redo, switch Viewer or Compare, open shared documents, check notifications, and sign out.
 - **Tabs:** Each open PDF has a tab. A dot indicates unsaved changes. Double-click a local PDF tab name to rename it; shared-document names cannot be renamed here.
-- **Viewer toolbar:** Select and Pan tools plus markup tools.
+- **Markup toolbar:** Select and Pan tools plus markup tools.
+- **Measure toolbar:** A separate row directly below Markup. Choose Length, PolyLength, Area, Perimeter, Angle, or Count here. Choosing a measurement tool does not open the Measurements window.
 - **Left panel:** Project, Pages, and Bookmarks tabs.
-- **Right panel:** Markups and comment properties. Page organization opens from **View > Organize pages...**.
+- **Right panel:** Markups and comment properties. The **Measurements...** button opens calibration and takeoff controls when you want them.
 - **Floating controls:** Select/Pan, page navigation, zoom, Fit Width, and Fit Page at the bottom of the viewer.
 - **Status bar:** Save and operation messages. After saving a local PDF, choose **Open saved PDF** in the status bar to open the saved file.
 
 The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**, show or hide the left and right panels.
 
-**Current-build note:** Measurement, sheet-index, and PDF-text-search panels are implemented but do not currently have a visible menu or toolbar command to open them in this desktop build. The workflows below describe those panels for builds where they are exposed; if you cannot open a panel, it is not a user setting you can enable.
+![Main workspace showing document controls, drawing canvas, project/pages navigation, and the Markups panel](user-manual-assets/workspace.png)
+
+*Figure 1. Main workspace: document navigation at left, the drawing canvas in the center, and markup properties at right.*
 
 ## 4. Open and read PDFs
 
@@ -137,6 +144,10 @@ For shared documents, you can select and edit only your own markups and comments
 
 The red numbered comment ID appears beside the comment box and in the Markups panel. It is not drawn at the corner of the markup. Stamps and drawing-only Line markups are not assigned review numbers.
 
+![Selected review markup with its comment callout and editing properties](user-manual-assets/markups-and-comments.png)
+
+*Figure 2. Select a markup to see its properties and associated comments.*
+
 ### Custom stamps
 
 1. Choose **Stamp**.
@@ -146,13 +157,17 @@ The red numbered comment ID appears beside the comment box and in the Markups pa
 
 Supported stamp sources include common image formats and PDF files up to 20 MB. Imported PDF pages and animated images become still images.
 
-## 6. Measure drawings (when the Measurements panel is available)
+## 6. Measure drawings
 
 Calibrate each page before relying on measurement values. Uncalibrated values represent paper size, not real-world dimensions.
 
+Measurement tools are available in the **Measure** toolbar directly below **Markup**, and from **View > Measurements**. You can start a measurement from the toolbar without opening the Measurements window. The separate **Measurements...** toolbar button or **View > Open measurements panel...** opens calibration and takeoff controls.
+
+Measurements are drawing checks, not review comments: placing one does not open a comment dialog, and measurements are excluded from the markup-comment CSV. The calibration and appearance are saved with the PDF so the displayed and reopened saved measurements use the same value and unit formatting.
+
 ### Calibrate from a known distance
 
-1. Open the **Measurements** panel.
+1. Open the **Measurements...** panel from the toolbar, or choose **View > Open measurements panel...**.
 2. Choose **Calibrate (pick 2 points)**.
 3. Click and drag between two points on a dimension whose real-world length you know.
 4. Enter the known distance and unit (ft, in, m, or mm), then choose **Apply**.
@@ -169,10 +184,26 @@ Calibrate each page before relying on measurement values. Uncalibrated values re
 1. In Measurements, enter a **New measurement subject**, such as `Exterior wall` or `Doors`.
 2. Choose a measurement tool: Length, PolyLength, Area, Perimeter, Angle, or Count.
 3. Draw the measurement on the page. Multi-point tools are finished with **Enter**, double-click, or right-click; Angle finishes after its third point.
-4. Review totals in the **Takeoff** table and choose its output unit.
-5. Choose **Export CSV** to save the takeoff.
+4. The measurement appears on the drawing. The Measurements panel stays closed unless you open it; the tool remains active for another measurement.
+5. Open **Measurements...** to review entries and totals in the **Takeoff** table, choose an output unit, or export the takeoff.
+6. Choose **Export CSV** to save the takeoff. The date column uses local time in `M/D/YYYY HH:mm` format.
 
-Page calibration is local to the document on this PC and is not synchronized to other collaborators on a shared document. Coordinate measurement assumptions with your team before sharing quantities.
+The Takeoff table is separate from the Markups panel. Measurement entries are not comments and are not included in markup-comment CSV exports. Page calibration is saved in the PDF, but is not synchronized to other collaborators on a shared document. Coordinate measurement assumptions with your team before sharing quantities.
+
+### Read the measurement labels
+
+- **Length** shows the calibrated distance between the two picked points.
+- **PolyLength** totals the connected segments you draw.
+- **Area** reports the enclosed area, using a squared unit (for example, `mm²`).
+- **Perimeter** reports the total boundary length of a closed shape.
+- **Angle** reports the angle formed by three points.
+- **Count** places a numbered marker. The Takeoff table groups counts by subject.
+
+In the example, labels are shown directly on the drawing. Counts are numbered in the drawing and summarized by subject in Takeoff. Always confirm the active page's calibration and unit before using quantities.
+
+![Drawing with length, polyline, area, angle, and count examples](user-manual-assets/measurements.png)
+
+*Figure 3. Example measurement overlay. The displayed values are illustrative; calibrate your own drawing before measuring.*
 
 ## 7. Compare drawing revisions
 
@@ -221,7 +252,7 @@ If no page is selected, applicable actions can apply to all pages. The app preve
 
 ## 9. Search text in open PDFs
 
-1. Open the **Search documents** panel, if it is exposed in your build.
+1. Open the **Search documents** panel from **View**, if available in your build.
 2. Enter the text to find and choose **Search** or press **Enter**.
 3. Leave **All open documents** checked to search every open PDF; uncheck it to search only the active PDF.
 4. Select a result to navigate to its page.
@@ -231,6 +262,10 @@ Search works on PDFs with a text layer. Scanned pages without OCR text cannot be
 ## 10. Shared documents and review assignments
 
 Shared documents are available when the app is connected in server mode. A signed-in, licensed user can upload, collaborate on, and update their assigned review status. In unlicensed viewer mode, shared content is read-only.
+
+![Shared Documents list with project groups, reviewers, and review status](user-manual-assets/shared-documents.png)
+
+*Figure 4. Shared-document groups and reviewer status are visible in the library.*
 
 ### Find and open shared PDFs
 

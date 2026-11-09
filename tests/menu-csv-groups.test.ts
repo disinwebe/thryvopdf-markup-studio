@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 import { markupCsv, formatMarkupDate } from '../src/core/markupCsv';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../src/app/groupCollapse';
+import { formatTakeoffDate, takeoffCsv } from '../src/core/measurement';
 import type { Markup } from '../src/core/types';
 
 const require = createRequire(import.meta.url);
@@ -12,14 +13,27 @@ describe('markup CSV', () => {
     const date = new Date(2026, 10, 6, 13, 34).toISOString();
     const m = { id: 'm', type: 'rect', page: 0, date, status: 'None', author: 'Anne', comments: [{ author: 'Anne', text: 'a, b' }] } as Markup;
     const line = { ...m, id: 'line', type: 'line' } as Markup;
-    const csv = markupCsv([m, line], 'C:\\drawings\\test.pdf');
+    const measurement = { ...m, id: 'measure', type: 'm-length', subject: 'Wall' } as Markup;
+    const csv = markupCsv([m, line, measurement], 'C:\\drawings\\test.pdf');
     expect(csv).toContain('Comment ID,Page,Type,Filename,Author,Date,Comments,Status\r\n');
     expect(csv).toContain('1,1,Rectangle,test.pdf,Anne,2026-11-06 1:34 PM,"a, b",None');
     expect(csv).toContain(',1,Line,test.pdf');
+    expect(csv).not.toContain('Length');
+    expect(csv).not.toContain('measure');
     expect(csv.split('\r\n')[0]).not.toMatch(/Text|Subject/);
     expect(formatMarkupDate(new Date(2026, 0, 1, 0, 5).toISOString())).toBe('2026-01-01 12:05 AM');
     expect(formatMarkupDate('invalid')).toBe('invalid');
     expect(markupCsv([{ ...m, calloutHidden: true }], 'test.pdf')).toContain('"a, b",None');
+  });
+
+  it('formats takeoff CSV dates as local M/D/YYYY HH:mm', () => {
+    const date = new Date(2026, 10, 9, 20, 38).toISOString();
+    expect(formatTakeoffDate(date)).toBe('11/9/2026 20:38');
+    const measurement = {
+      id: 'length', type: 'm-length', page: 0, points: [{ x: 0, y: 0 }, { x: 10, y: 0 }],
+      color: '#000000', width: 2, opacity: 1, status: 'None', author: 'Anne', date, comments: [],
+    } as Markup;
+    expect(takeoffCsv([measurement], () => ({ unit: 'ft', unitsPerPoint: 1, calibrated: true }))).toContain(`Anne,${formatTakeoffDate(date)}`);
   });
 });
 
@@ -76,7 +90,10 @@ describe('native menu wiring', () => {
       expect(send).toHaveBeenCalledWith(action);
     }
     const view = menu[3].submenu;
-    expect(view.some((entry: { label?: string }) => /measurement|sheet index|search documents/i.test((entry.label || '').replace(/&/g, '')))).toBe(false);
+    const measurements = view.find((entry: { label?: string }) => entry.label === '&Measurements').submenu;
+    expect(measurements.find((entry: { label?: string }) => entry.label === '&Open measurements panel...').enabled).toBe(true);
+    measurements.find((entry: { label?: string }) => entry.label === '&Area').click();
+    expect(send).toHaveBeenCalledWith('measureArea');
     for (const action of ['toggleLeftPanel', 'toggleRightPanel']) {
       view.find((entry: { click?: () => void; label?: string }) => entry.label?.toLowerCase().includes(action === 'toggleLeftPanel' ? 'left panel' : 'right panel')).click();
       expect(send).toHaveBeenCalledWith(action);
@@ -100,6 +117,7 @@ describe('native menu wiring', () => {
     expect(loggedOut[2].submenu[0].visible).toBe(false);
     const compare = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: false, admin: false }, send, 'win32');
     expect(compare[3].submenu[0].enabled).toBe(false);
+    expect(compare[3].submenu.find((entry: { label?: string }) => entry.label === '&Measurements').enabled).toBe(false);
     expect(compare[2].submenu[0].visible).toBe(false);
   });
 

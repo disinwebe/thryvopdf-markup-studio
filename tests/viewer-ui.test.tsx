@@ -9,13 +9,15 @@ const user: AuthUser = { name: 'Reader', email: 'reader@example.test', disciplin
 const actions = { serverMode: true, logout: vi.fn(), changePassword: vi.fn() };
 
 describe('read-only viewer UI', () => {
-  it('shows a viewer notice and the two welcome actions without Measurements', () => {
+  it('shows a viewer notice and measurement tools disabled without a license', () => {
     const html = renderToStaticMarkup(<App user={user} actions={actions} viewOnly licenseStatus={{ ok: false }} onImportLicense={vi.fn()} />);
     expect(html).toContain('Read-only viewer mode');
     expect(html).toContain('Open PDF');
     expect(html).toContain('Open Shared...');
     expect(html).not.toContain('Open Shared Documents</button>');
-    expect(html).not.toContain('Measurements');
+    expect(html).toContain('class="bar tools measurement-tools"');
+    expect(html).toContain('title="Length" class="" disabled=""');
+    expect(html).toContain('Measurements...</button>');
     expect(html).toMatch(/<button disabled=""[^>]*><svg[^>]*>[\s\S]*?<\/svg>Save<\/button>/);
   });
 
