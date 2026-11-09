@@ -2,6 +2,8 @@
 
 A Windows desktop app for construction/drawing PDFs: markups, measurements, revision compare and drawing-set organization. Built with Electron, React, TypeScript, Vite, PDF.js (rendering) and pdf-lib (editing).
 
+**User guide:** [Full step-by-step user manual](docs/USER-MANUAL.md)
+
 ## Features
 
 - **Viewing**: multiple PDFs in tabs, zoom (buttons, Ctrl+wheel), pan (Pan tool, middle mouse, or hold Space), fit width/page, thumbnails, page navigation (PageUp/PageDown), drag and drop to open.
