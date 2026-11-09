@@ -57,7 +57,6 @@ describe('comment callouts: authorization and sync', () => {
   beforeAll(async () => {
     id = (await call('POST', '/api/docs?member=bob%40example.com&member=admin&name=c.pdf', ann, undefined, PDF)).doc.id;
     await ops(ann, { upserts: [mk('m1', { callout: { x: 100, y: 50 }, comments: [cm('c1', 'Ann says')] })] });
-    await ops(bob, { upserts: [mk('m1', { callout: { x: 100, y: 50 }, comments: [cm('c1', 'Ann says'), cm('c2', 'Bob says')] })] });
   });
 
   describe('shared custom stamps', () => {
@@ -74,12 +73,14 @@ describe('comment callouts: authorization and sync', () => {
 
   it('stamps comment author and email from the session, not the client', async () => {
     const m = (await state(bob)).find((x: any) => x.id === 'm1');
-    expect(m.comments.map((c: any) => [c.author, c.authorEmail])).toEqual([['Ann Lee', 'ann@example.com'], ['Bob Ray', 'bob@example.com']]);
+    expect(m.comments.map((c: any) => [c.author, c.authorEmail])).toEqual([['Ann Lee', 'ann@example.com']]);
   });
 
-  it('persists and syncs the moved callout box position', async () => {
+  it('allows only the markup author to move and sync the callout box position', async () => {
     const m = (await state(ann)).find((x: any) => x.id === 'm1');
-    const r = await ops(bob, { upserts: [{ ...m, callout: { x: 222, y: 33 } }] });
+    const denied = await ops(bob, { upserts: [{ ...m, callout: { x: 222, y: 33 } }] });
+    expect(denied.code).toBe(403);
+    const r = await ops(ann, { upserts: [{ ...m, callout: { x: 222, y: 33 } }] });
     expect(r.code).toBe(200);
     expect((await state(ann)).find((x: any) => x.id === 'm1').callout).toEqual({ x: 222, y: 33 });
     expect((await call('POST', '/api/docs/' + id + '/ops', ann, { upserts: [mk('m1', { callout: { x: 'a', y: 1 } })] })).code).toBe(400);
@@ -109,14 +110,15 @@ describe('comment callouts: authorization and sync', () => {
     const r = await ops(bob, { upserts: [{ ...m, comments: m.comments.filter((c: any) => c.id !== 'c1') }] });
     expect(r.code).toBe(403);
     expect((await ops(bob, { deletes: ['m1'] })).code).toBe(403);
-    expect((await state(ann)).find((x: any) => x.id === 'm1').comments).toHaveLength(2);
+    expect((await ops(admin, { upserts: [{ ...m, comments: m.comments.filter((c: any) => c.id !== 'c1') }] })).code).toBe(403);
+    expect((await state(ann)).find((x: any) => x.id === 'm1').comments).toHaveLength(1);
   });
 
-  it('lets an author delete their own comment; only the markup author may delete the markup (admin cannot)', async () => {
-    let m = (await state(bob)).find((x: any) => x.id === 'm1');
-    expect((await ops(bob, { upserts: [{ ...m, comments: m.comments.filter((c: any) => c.id !== 'c2') }] })).code).toBe(200);
-    m = (await state(ann)).find((x: any) => x.id === 'm1');
-    expect(m.comments.map((c: any) => c.id)).toEqual(['c1']);
+  it('lets the markup author delete their own comment; only they may delete the markup', async () => {
+    let m = (await state(ann)).find((x: any) => x.id === 'm1');
+    expect((await ops(ann, { upserts: [{ ...m, comments: [] }] })).code).toBe(200);
+    m = (await state(bob)).find((x: any) => x.id === 'm1');
+    expect(m.comments).toEqual([]);
     expect((await ops(bob, { deletes: ['m1'] })).code).toBe(403);
     const denied = await ops(admin, { deletes: ['m1'] });
     expect(denied.code).toBe(403);

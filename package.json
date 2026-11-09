@@ -20,7 +20,7 @@
     "appId": "com.planmarkupstudio.app",
     "productName": "ThryvoPDF Markup Studio",
     "publish": null,
-    "files": ["dist/**", "electron/**", "server/*.cjs", "assets/icon.*", "assets/menu/*.png", "package.json"],
+    "files": ["dist/**", "electron/**", "assets/icon.*", "assets/menu/*.png", "package.json"],
     "directories": { "output": "release" },
     "win": { "target": ["nsis"], "icon": "assets/icon.ico" },
     "nsis": { "installerIcon": "assets/icon.ico", "uninstallerIcon": "assets/icon.ico", "oneClick": false, "allowToChangeInstallationDirectory": true }

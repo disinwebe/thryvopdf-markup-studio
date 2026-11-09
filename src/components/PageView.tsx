@@ -7,6 +7,7 @@ import { pageSize, renderToCanvas } from '../pdf/pdfjs';
 import { MarkupShape } from './MarkupShape';
 import { numberMarkups } from '../core/numbering';
 import { CALLOUT_MAX, CALLOUT_MIN_H, CALLOUT_MIN_W, calloutLayout, hitCallout, moveCallout } from '../core/callout';
+import { ownsComment, ownsMarkup, type Actor } from '../core/comments';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
@@ -26,6 +27,7 @@ export interface PageViewProps {
   tool: Tool;
   style: Style;
   author: string;
+  user: Actor;
   selectedId: string | null;
   fit: { mode: 'width' | 'page'; n: number };
   onSelect(id: string | null): void;
@@ -201,7 +203,8 @@ export function PageView(p: PageViewProps) {
     return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
   };
 
-  const selected = doc.markups.find((m) => m.id === p.selectedId && m.page === doc.page) ?? null;
+  const selected = doc.markups.find((m) => m.id === p.selectedId && m.page === doc.page && (!doc.shared || ownsMarkup(m, p.user))) ?? null;
+  const canMoveCallout = (m: Markup) => !doc.shared || (ownsMarkup(m, p.user) && m.comments.every((comment) => ownsComment(comment, p.user)));
 
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const sc = scroller.current!;
@@ -216,9 +219,14 @@ export function PageView(p: PageViewProps) {
     e.currentTarget.setPointerCapture(e.pointerId);
 
     if (tool === 'select') {
+      const calloutHit = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, pt));
+      if (doc.shared && calloutHit && !ownsMarkup(calloutHit, p.user)) {
+        p.onSelect(null);
+        return;
+      }
       if (selected) {
         const box = calloutLayout(selected);
-        if (box && dist({ x: box.x + box.w, y: box.y + box.h }, pt) * zoom <= 10) {
+        if (canMoveCallout(selected) && box && dist({ x: box.x + box.w, y: box.y + box.h }, pt) * zoom <= 10) {
           drag.current = { kind: 'callout-resize', start: pt, orig: selected, width: box.w, height: box.h, began: false };
           return;
         }
@@ -228,14 +236,16 @@ export function PageView(p: PageViewProps) {
           return;
         }
       }
-      const box = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, pt));
-      if (box) {
-        p.onSelect(box.id);
-        const l = calloutLayout(box)!;
-        drag.current = { kind: 'callout', start: pt, orig: box, from: { x: l.x, y: l.y }, began: false };
+      if (calloutHit && (!doc.shared || ownsMarkup(calloutHit, p.user))) {
+        p.onSelect(calloutHit.id);
+        if (canMoveCallout(calloutHit)) {
+          const l = calloutLayout(calloutHit)!;
+          drag.current = { kind: 'callout', start: pt, orig: calloutHit, from: { x: l.x, y: l.y }, began: false };
+        }
         return;
       }
-      const hit = pickTop(doc.markups, doc.page, pt, 6 / zoom);
+      const candidates = doc.shared ? doc.markups.filter((m) => ownsMarkup(m, p.user)) : doc.markups;
+      const hit = pickTop(candidates, doc.page, pt, 6 / zoom);
       if (hit) {
         p.onSelect(hit.id);
         drag.current = { kind: 'move', start: pt, orig: hit, began: false };
@@ -395,7 +405,7 @@ export function PageView(p: PageViewProps) {
     tool === 'hand' ? 'grab' : tool === 'select' ? 'default' : 'crosshair';
   const hs = selected && tool === 'select' ? handlesOf(selected) : [];
   const hsz = 5 / zoom;
-  const selectedCallout = selected && tool === 'select' ? calloutLayout(selected) : null;
+  const selectedCallout = selected && tool === 'select' && canMoveCallout(selected) ? calloutLayout(selected) : null;
 
   return (
     <div className="scroller" ref={scroller}>

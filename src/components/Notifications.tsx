@@ -40,11 +40,16 @@ export function useNotifications(user: AuthUser | null, serverMode: boolean) {
 
 export type NotificationsApi = NonNullable<ReturnType<typeof useNotifications>>;
 
-export function NotificationBell({ api, onOpenShared }: { api: NotificationsApi | null; onOpenShared?: () => void }) {
+export function NotificationBell({ api, onOpenShared, onOpenNotification }: { api: NotificationsApi | null; onOpenShared?: () => void; onOpenNotification?: (notification: AppNotification) => void }) {
   const [open, setOpen] = useState(false);
   if (!api) return null;
   const { state, markRead } = api;
   const latest = state.notifications.find((n) => !n.read);
+  const openNotification = (notification: AppNotification) => {
+    void markRead([notification.id]);
+    if (onOpenNotification) onOpenNotification(notification);
+    else if (notification.type === 'assignment') onOpenShared?.();
+  };
   return (
     <aside className="notifications" aria-live="polite">
       <button type="button" className="bell" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={`${state.unread} unread notifications`}>
@@ -53,7 +58,7 @@ export function NotificationBell({ api, onOpenShared }: { api: NotificationsApi 
       {!open && latest && (
         <div className="toast" role="status">
           <span>{latest.message}</span>
-          <button type="button" onClick={() => { void markRead([latest.id]); onOpenShared?.(); }}>Open</button>
+          <button type="button" onClick={() => openNotification(latest)}>Open</button>
           <button type="button" onClick={() => void markRead([latest.id])} aria-label="Dismiss">×</button>
         </div>
       )}
@@ -70,6 +75,7 @@ export function NotificationBell({ api, onOpenShared }: { api: NotificationsApi 
               <li key={n.id} className={n.read ? '' : 'unread'}>
                 <span>{n.message}</span>
                 <time dateTime={n.created}>{new Date(n.created).toLocaleString()}</time>
+                <button type="button" onClick={() => openNotification(n)}>Open</button>
                 {!n.read && <button type="button" onClick={() => void markRead([n.id])}>Mark read</button>}
               </li>
             ))}

@@ -35,6 +35,7 @@ export interface CalloutTextRun {
   y: number;
   size: number;
   kind: 'number' | 'author' | 'body';
+  badge?: { cx: number; cy: number; r: number };
 }
 
 /** Baselines and sizes are shared by the SVG viewer and the PDF appearance. */
@@ -44,8 +45,11 @@ export function calloutTextRuns(co: CalloutLayout, tag?: number): CalloutTextRun
   const labelY = co.y + CALLOUT_PAD + Math.max(co.fs, co.rows[0]?.headFs ?? 0);
   if (tag) {
     const label = `#${tag}`;
-    runs.push({ text: label, x, y: labelY, size: co.fs, kind: 'number' });
-    if (co.rows[0]?.head) runs.push({ text: co.rows[0].head, x: x + approxTextWidth(label, co.fs) + 6, y: labelY, size: co.rows[0].headFs, kind: 'author' });
+    const r = Math.max(co.fs * 0.7, (approxTextWidth(label, co.fs) + 2) / 2);
+    const badge = { cx: co.x - r, cy: co.y - r, r };
+    const labelBaseline = badge.cy + co.fs * 0.35;
+    runs.push({ text: label, x: badge.cx - approxTextWidth(label, co.fs) / 2, y: labelBaseline, size: co.fs, kind: 'number', badge });
+    if (co.rows[0]?.head) runs.push({ text: co.rows[0].head, x, y: labelY, size: co.rows[0].headFs, kind: 'author' });
   }
   let y = labelY - (co.rows[0]?.fs ?? co.fs);
   co.rows.forEach((row, i) => {

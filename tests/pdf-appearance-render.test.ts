@@ -73,7 +73,7 @@ describe('saved PDF annotation appearances', () => {
       }).promise;
       const box = calloutLayout(review)!;
       const rose = (r: number, g: number, b: number) => r > 100 && g < 100 && b < 130;
-      const authorX = box.x + CALLOUT_PAD + 12;
+      const authorX = box.x + CALLOUT_PAD;
       const authorY = box.y + CALLOUT_PAD + box.fs * 0.2;
       expect(pixels(ctx, authorX, authorY, 24, 14, rose)).toBeGreaterThan(0);
     } finally {
@@ -82,7 +82,7 @@ describe('saved PDF annotation appearances', () => {
   });
 
   for (const rotation of [0, 90, 180, 270]) {
-    it(`renders the tag, leader and bordered box at their page coordinates after reopening (${rotation} degrees)`, async () => {
+    it(`renders the comment ID, leader and bordered box without an extra markup-corner ID after reopening (${rotation} degrees)`, async () => {
       const source = await PDFDocument.create();
       const sourcePage = source.addPage([460, 360]);
       sourcePage.setCropBox(20, 30, 400, 300);
@@ -100,11 +100,8 @@ describe('saved PDF annotation appearances', () => {
           annotationMode: AnnotationMode.ENABLE,
         }).promise;
         const red = (r: number, g: number, b: number) => r > 170 && g < 130 && b < 140;
-        const light = (r: number, g: number, b: number) => r > 190 && g > 80 && b > 90;
         const box = calloutLayout(review)!;
-        expect(pixels(ctx, 32, 32, 16, 16, red)).toBeGreaterThan(50);
-        // The highlight's Multiply blend must not hide the white number inside the red tag.
-        expect(pixels(ctx, 36, 36, 8, 8, light)).toBeGreaterThan(15);
+        expect(pixels(ctx, 32, 32, 16, 16, red)).toBe(0);
         expect(pixels(ctx, box.x, box.y - 1, box.w, 3, red)).toBeGreaterThan(box.w * 0.8);
         expect(pixels(ctx, box.x, Math.round(box.y + box.h) - 1, box.w, 3, red)).toBeGreaterThan(box.w * 0.8);
         expect(pixels(ctx, box.x - 1, box.y, 3, Math.floor(box.h), red)).toBeGreaterThan(box.h * 0.8);
@@ -165,7 +162,7 @@ describe('saved PDF annotation appearances', () => {
           for (const markup of markups) {
             const { x, y } = markup.points[0];
             const box = calloutLayout(markup)!;
-            expect(pixels(ctx, x - 8, y - 8, 16, 16, red), `${markup.type} tag`).toBeGreaterThan(45);
+            expect(pixels(ctx, x - 8, y - 8, 16, 16, red), `${markup.type} markup-corner ID`).toBeLessThan(45);
             expect(pixels(ctx, box.x, box.y - 1, box.w, 3, red), `${markup.type} border`).toBeGreaterThan(box.w * 0.8);
           }
           const blue = (r: number, g: number, b: number) => r < 40 && g > 40 && g < 130 && b > 150;
@@ -214,10 +211,8 @@ describe('saved PDF annotation appearances', () => {
               const ctx = canvas.getContext('2d');
               await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, viewport, annotationMode: AnnotationMode.ENABLE }).promise;
               const red = (r: number, g: number, b: number) => r > 170 && g < 130 && b < 140;
-              const light = (r: number, g: number, b: number) => r > 190 && g > 80 && b > 90;
               const box = calloutLayout(markup)!;
-              expect(pixels(ctx, 32, 32, 16, 16, red), `${markup.type} tag`).toBeGreaterThan(45);
-              expect(pixels(ctx, 36, 36, 8, 8, light), `${markup.type} tag text`).toBeGreaterThan(8);
+              expect(pixels(ctx, 32, 32, 16, 16, red), `${markup.type} markup-corner ID`).toBeLessThan(45);
               expect(pixels(ctx, box.x, box.y - 1, box.w, 3, red), `${markup.type} top`).toBeGreaterThan(box.w * 0.8);
               expect(pixels(ctx, box.x, Math.round(box.y + box.h) - 1, box.w, 3, red), `${markup.type} bottom`).toBeGreaterThan(box.w * 0.8);
               expect(pixels(ctx, box.x - 1, box.y, 3, Math.floor(box.h), red), `${markup.type} left`).toBeGreaterThan(box.h * 0.8);

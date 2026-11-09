@@ -24,7 +24,7 @@ import {
 } from './geometry';
 import { DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
-import { TAG_R, isReviewMarkup, numberMarkups, tagAnchor } from './numbering';
+import { isReviewMarkup, numberMarkups } from './numbering';
 import { calloutLayout, calloutTextRuns } from './callout';
 
 export interface PageGeom {
@@ -322,23 +322,6 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
   const pad = m.width / 2 + 12;
   const bb = bbox(viewPts.map(cv));
   let rect = { x: bb.x - pad, y: bb.y - pad, w: bb.w + pad * 2, h: bb.h + pad * 2 };
-  if (tag && isReviewMarkup(m)) {
-    // Visible review number, drawn at full opacity regardless of the markup's own opacity.
-    const a = tagAnchor(m);
-    const c = cv(a);
-    const k = TAG_R * 0.5523;
-    const r = TAG_R;
-    const circle = `${f(c.x + r)} ${f(c.y)} m ${f(c.x + r)} ${f(c.y + k)} ${f(c.x + k)} ${f(c.y + r)} ${f(c.x)} ${f(c.y + r)} c ${f(c.x - k)} ${f(c.y + r)} ${f(c.x - r)} ${f(c.y + k)} ${f(c.x - r)} ${f(c.y)} c ${f(c.x - r)} ${f(c.y - k)} ${f(c.x - k)} ${f(c.y - r)} ${f(c.x)} ${f(c.y - r)} c ${f(c.x + k)} ${f(c.y - r)} ${f(c.x + r)} ${f(c.y - k)} ${f(c.x + r)} ${f(c.y)} c h`;
-    const label = `#${tag}`;
-    const size = label.length > 3 ? 6 : 8;
-    const w = label.length * size * 0.556;
-    ops += `\nq /GS1 gs 0.882 0.114 0.282 rg 1 1 1 RG 1 w ${circle} B\nBT /F1 ${size} Tf 1 1 1 rg ${tm({ x: a.x - w / 2, y: a.y + size * 0.35 })} (${label}) Tj ET Q`;
-    const x0 = Math.min(rect.x, c.x - r - 1);
-    const y0 = Math.min(rect.y, c.y - r - 1);
-    const x1 = Math.max(rect.x + rect.w, c.x + r + 1);
-    const y1 = Math.max(rect.y + rect.h, c.y + r + 1);
-    rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  }
   const co = calloutLayout(m);
   if (co) {
     // Comment box with a leader line to the annotation's end point, drawn as part of the same annotation.
@@ -350,11 +333,21 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     ];
     const corners = viewCorners.map(cv);
     const txt = calloutTextRuns(co, tag).map((run) => {
-      const color = run.kind === 'number' ? '0.882 0.114 0.282' : run.kind === 'author' ? '0.62 0.07 0.21' : '0.13 0.13 0.13';
+      const color = run.kind === 'number' ? '1 1 1' : run.kind === 'author' ? '0.62 0.07 0.21' : '0.13 0.13 0.13';
       return `BT /F1 ${f(run.size)} Tf ${color} rg ${tm(run)} (${latin1(run.text)}) Tj ET\n`;
     }).join('');
+    const badge = calloutTextRuns(co, tag).find((run) => run.badge)?.badge;
+    let badgeOps = '';
+    if (badge) {
+      const centre = cv({ x: badge.cx, y: badge.cy });
+      const r = badge.r;
+      const k = r * 0.5523;
+      const circle = `${f(centre.x + r)} ${f(centre.y)} m ${f(centre.x + r)} ${f(centre.y + k)} ${f(centre.x + k)} ${f(centre.y + r)} ${f(centre.x)} ${f(centre.y + r)} c ${f(centre.x - k)} ${f(centre.y + r)} ${f(centre.x - r)} ${f(centre.y + k)} ${f(centre.x - r)} ${f(centre.y)} c ${f(centre.x - r)} ${f(centre.y - k)} ${f(centre.x - k)} ${f(centre.y - r)} ${f(centre.x)} ${f(centre.y - r)} c ${f(centre.x + k)} ${f(centre.y - r)} ${f(centre.x + r)} ${f(centre.y - k)} ${f(centre.x + r)} ${f(centre.y)} c h`;
+      badgeOps = `0.882 0.114 0.282 rg ${circle} f\n`;
+      corners.push({ x: centre.x - r, y: centre.y - r }, { x: centre.x + r, y: centre.y + r });
+    }
     ops += `\nq /GS1 gs 0.882 0.114 0.282 RG 1.5 w ${f(E.x)} ${f(E.y)} m ${f(A.x)} ${f(A.y)} l S `;
-    ops += `1 1 1 rg ${path(viewCorners, true)} B\n${txt}Q`;
+    ops += `1 1 1 rg ${path(viewCorners, true)} B\n${badgeOps}${txt}Q`;
     const xs = [...corners.map((c) => c.x), A.x];
     const ys = [...corners.map((c) => c.y), A.y];
     const x0 = Math.min(rect.x, ...xs) - 2;

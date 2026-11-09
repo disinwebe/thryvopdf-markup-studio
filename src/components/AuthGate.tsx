@@ -1,12 +1,10 @@
 import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react';
 import { DISCIPLINE_LIST } from '../core/types';
 import { ChangePassword, UserManagement } from './AccountPanels';
-import { usePendingRegistrations, type PendingRegistrationState } from './PendingRegistrations';
 import { useNotifications, type NotificationsApi } from './Notifications';
-import { ServerSetup } from './ServerSetup';
 
 type View = 'setup' | 'register' | 'login' | 'awaiting';
-type Actions = { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; serverSetup?: () => void; pendingRegistrations?: PendingRegistrationState | null; notifications?: NotificationsApi | null };
+type Actions = { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; notifications?: NotificationsApi | null };
 
 export default function AuthGate({ children }: { children: (user: AuthUser, actions: Actions) => ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -15,10 +13,9 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [busy, setBusy] = useState(false);
-  const [panel, setPanel] = useState<'password' | 'users' | 'server' | null>(null);
+  const [panel, setPanel] = useState<'password' | 'users' | null>(null);
   const [url, setUrl] = useState('');
   const [f, setF] = useState({ name: '', email: '', discipline: DISCIPLINE_LIST[0], password: '', confirm: '' });
-  const pendingRegistrations = usePendingRegistrations(user, st?.mode === 'server');
   const notifications = useNotifications(user, st?.mode === 'server');
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
 
@@ -102,11 +99,11 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
       </div>
     );
   if (user) {
-    const actions: Actions = { serverMode: st?.mode === 'server', uiBlocked: !!panel, logout, changePassword: () => setPanel('password'), manageUsers: user.role === 'admin' ? () => setPanel('users') : undefined, serverSetup: () => setPanel('server'), pendingRegistrations, notifications };
+    const actions: Actions = { serverMode: st?.mode === 'server', uiBlocked: !!panel, logout, changePassword: () => setPanel('password'), manageUsers: user.role === 'admin' ? () => setPanel('users') : undefined, notifications };
     return (
       <>
         {children(user, actions)}
-        {panel === 'server' ? <ServerSetup onClose={() => setPanel(null)} /> : panel && (
+        {panel && (
           <div className="modal">
             {panel === 'password' ? <ChangePassword onDone={(u) => { setUser(u); setPanel(null); }} onCancel={() => setPanel(null)} /> : <UserManagement me={user} onClose={() => setPanel(null)} />}
           </div>
@@ -115,8 +112,6 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
     );
   }
   if (!view || !st) return null;
-  if (panel === 'server') return <ServerSetup onClose={() => setPanel(null)} onUseLocal={(address) => { setUrl(address); setPanel(null); setView('setup'); }} />;
-
   if (view === 'awaiting')
     return (
       <div className="auth">
@@ -147,7 +142,6 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
           </div>
           {st.configured && st.mode === 'server' && <button type="button" className="link" onClick={() => { setError(''); refresh(); }}>Retry current server ({st.serverUrl})</button>}
           <button type="button" className="link" disabled={busy} onClick={useLocal}>Use local accounts on this PC only</button>
-          <button type="button" disabled={busy} onClick={() => setPanel('server')}>Set up this PC as a server...</button>
           <p className="muted small">Accounts on the server are shared by every PC that connects to it.</p>
         </form>
       </div>
@@ -195,7 +189,6 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
         <button type="button" className="link" onClick={() => { setView(reg ? 'login' : 'register'); setError(''); }}>
           {reg ? 'Already have an account? Sign in' : 'Register another user'}
         </button>
-        <button type="button" onClick={() => setPanel('server')}>Set up this PC as a server...</button>
         <p className="muted small">
           {st.mode === 'local' ? 'Local accounts on this computer.' : `Server: ${st.serverUrl}`}{' '}
           <button type="button" className="link" onClick={() => { setView('setup'); setError(''); }}>Change</button>

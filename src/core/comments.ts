@@ -8,6 +8,7 @@ export interface Actor {
 
 /** Mirrors the server rule: ownership by e-mail when the comment is stamped, by name otherwise. */
 export const ownsComment = (c: Comment, u: Actor): boolean => (c.authorEmail ? c.authorEmail === u.email : c.author === u.name);
+export const ownsMarkup = (m: Markup, u: Actor): boolean => (m.authorEmail ? m.authorEmail === u.email : m.author === u.name);
 
 /** Only the author edits a comment (administrators cannot rewrite someone else's words). */
 export const canEditComment = ownsComment;
@@ -17,4 +18,4 @@ export const canDeleteComment = (c: Comment, u: Actor): boolean => ownsComment(c
 
 /** A markup can be removed only if every comment on it may be deleted by the user. */
 /** Only the author of a markup can delete it (administrators do not bypass this). */
-export const canDeleteMarkup = (m: Markup, u: Actor): boolean => (m.authorEmail ? m.authorEmail === u.email : m.author === u.name);
+export const canDeleteMarkup = ownsMarkup;

@@ -134,6 +134,7 @@ function createApp(opts = {}) {
       setPassword(user, password);
       users.push(user);
       save();
+      notifier.registered(user, users.filter((u) => u.role === 'admin' && u.status === 'active'));
       return [201, { ok: true, pending: true, message: STATUS_MSG.pending }];
     },
 
@@ -239,7 +240,11 @@ function createApp(opts = {}) {
     const recipients = emails.map(find).filter((u) => u && u.status === 'active').map((u) => ({ name: u.name, email: u.email }));
     if (recipients.length) notifier.assigned(doc, { name: by.name, email: by.email }, recipients).catch(() => {});
   };
-  const docs = createDocs({ onAssign, dir: opts.docsDir || path.join(path.dirname(file), 'docs'), now, pollMs: opts.pollMs, presenceTtlMs: opts.presenceTtlMs, maxUpload: opts.maxUpload, fs: opts.docsFs });
+  const onReview = (doc, by, done) => {
+    const recipients = doc.members.map(find).filter((u) => u && u.status === 'active').map((u) => ({ name: u.name, email: u.email }));
+    return notifier.reviewed(doc, { name: by.name, email: by.email }, recipients, done);
+  };
+  const docs = createDocs({ onAssign, onReview, dir: opts.docsDir || path.join(path.dirname(file), 'docs'), now, pollMs: opts.pollMs, presenceTtlMs: opts.presenceTtlMs, maxUpload: opts.maxUpload, fs: opts.docsFs });
   const ready = (fn) =>
     authed((s, b, ip, req, url, m) => {
       if (s.user.status !== 'active') return [403, { ok: false, error: 'Account not active.' }];
@@ -269,6 +274,7 @@ function createApp(opts = {}) {
     ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1], u))],
     ['GET', /^\/api\/docs\/([\w-]+)\/state$/, ready((u, b, req, url, m) => docs.state(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/ops$/, ready((u, b, req, url, m) => docs.ops(m[1], u, b))],
+    ['POST', /^\/api\/docs\/([\w-]+)\/review$/, ready((u, b, req, url, m) => docs.review(m[1], u, b))],
     ['GET', /^\/api\/docs\/([\w-]+)\/events$/, ready((u, b, req, url, m) => docs.events(m[1], u, Number(url.searchParams.get('since')), Number(url.searchParams.get('pr') || 0)))],
     ['POST', /^\/api\/docs\/([\w-]+)\/leave$/, ready((u, b, req, url, m) => docs.leave(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/meta$/, ready((u, b, req, url, m) => docs.meta(m[1], u, b))],

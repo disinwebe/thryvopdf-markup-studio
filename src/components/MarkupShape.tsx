@@ -1,7 +1,6 @@
 import { arrowHead, boxCenter, boxOf, cloudPoints, rectPoly, wrapText, approxTextWidth } from '../core/geometry';
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
-import { TAG_R, isReviewMarkup, tagAnchor } from '../core/numbering';
 import { calloutLayout, calloutTextRuns } from '../core/callout';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
@@ -184,7 +183,6 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       break;
     }
   }
-  const a = tag && isReviewMarkup(m) ? tagAnchor(m) : null;
   const co = calloutLayout(m);
   return (
     <g>
@@ -195,15 +193,12 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
           <circle cx={co.anchor.x} cy={co.anchor.y} r={2.5} fill="#e11d48" />
           <rect x={co.x} y={co.y} width={co.w} height={co.h} fill="#fff" stroke="#e11d48" strokeWidth={1.5} />
           {calloutTextRuns(co, tag).map((run, i) => (
-            <text key={i} x={run.x} y={run.y} fontSize={run.size} fontFamily="Helvetica, Arial, sans-serif" fontWeight={400}
-              fill={run.kind === 'number' ? '#e11d48' : run.kind === 'author' ? '#9e1236' : '#212121'}>{run.text}</text>
+            <g key={i}>
+              {run.badge && <circle cx={run.badge.cx} cy={run.badge.cy} r={run.badge.r} fill="#e11d48" />}
+              <text x={run.x} y={run.y} fontSize={run.size} fontFamily="Helvetica, Arial, sans-serif" fontWeight={run.kind === 'number' ? 700 : 400}
+                fill={run.kind === 'number' ? '#fff' : run.kind === 'author' ? '#9e1236' : '#212121'}>{run.text}</text>
+            </g>
           ))}
-        </g>
-      )}
-      {a && tag && (
-        <g className="review-tag">
-          <circle cx={a.x} cy={a.y} r={TAG_R} fill="#e11d48" stroke="#fff" strokeWidth={1} />
-          <text x={a.x} y={a.y + (tag > 99 ? 6 : 8) * 0.35} fontSize={tag > 99 ? 6 : 8} fontFamily="Helvetica, Arial, sans-serif" fontWeight={400} fill="#fff" textAnchor="middle">#{tag}</text>
         </g>
       )}
     </g>

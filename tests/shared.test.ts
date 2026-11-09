@@ -190,13 +190,14 @@ describe('shared documents', () => {
     let m = st.markups.find((x: any) => x.id === 'au1');
     expect(m.author).toBe('Bob Ray');
     expect(m.comments[0].author).toBe('Bob Ray');
-    // another user editing keeps the original author and cannot rewrite existing comment authors
+    // Another user cannot edit this markup or rewrite its comment authors.
     const edit = { ...m, author: 'Ann Lee', color: '#00ff00', comments: [{ ...m.comments[0], author: 'Ann Lee' }, { id: 'c2', author: 'Zed', date: 'x', text: 'yo' }] };
-    await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [edit] });
+    const denied = await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [edit] });
+    expect(denied.code).toBe(403);
     st = await call('GET', `/api/docs/${id}/state`, bob);
     m = st.markups.find((x: any) => x.id === 'au1');
-    expect([m.author, m.color]).toEqual(['Bob Ray', '#00ff00']);
-    expect(m.comments.map((c: any) => c.author)).toEqual(['Bob Ray', 'Ann Lee']);
+    expect([m.author, m.color]).toEqual(['Bob Ray', '#ff0000']);
+    expect(m.comments.map((c: any) => c.author)).toEqual(['Bob Ray']);
     await call('POST', `/api/docs/${id}/ops`, bob, { deletes: ['au1'] });
   });
 
@@ -241,16 +242,17 @@ describe('shared documents', () => {
     expect((await call('GET', '/api/health')).docs).toBe(true);
   });
 
-  it('keeps annotation and comment ids stable through sync and restart-style reads', async () => {
+  it("rejects a collaborator changing another author's markup or comments", async () => {
     const up = await call('POST', '/api/docs?member=bob%40example.com&name=ids.pdf', ann, undefined, PDF);
     const base = mk('stable-1', { comments: [{ id: 'cm1', author: 'x', date: 'd', text: 'one' }] });
     await call('POST', `/api/docs/${up.doc.id}/ops`, ann, { upserts: [base] });
     const seen = (await call('GET', `/api/docs/${up.doc.id}/state`, bob)).markups[0];
-    await call('POST', `/api/docs/${up.doc.id}/ops`, bob, { upserts: [{ ...seen, comments: [...seen.comments, { id: 'cm2', author: 'y', date: 'd', text: 'two' }] }] });
+    const changed = await call('POST', `/api/docs/${up.doc.id}/ops`, bob, { upserts: [{ ...seen, comments: [...seen.comments, { id: 'cm2', author: 'y', date: 'd', text: 'two' }] }] });
+    expect(changed.code).toBe(403);
     const m = (await call('GET', `/api/docs/${up.doc.id}/state`, ann)).markups;
     expect(m).toHaveLength(1);
     expect(m[0].id).toBe('stable-1');
-    expect(m[0].comments.map((c: any) => [c.id, c.author])).toEqual([['cm1', 'Ann Lee'], ['cm2', 'Bob Ray']]);
+    expect(m[0].comments.map((c: any) => [c.id, c.author])).toEqual([['cm1', 'Ann Lee']]);
     await call('DELETE', `/api/docs/${up.doc.id}`, ann);
   });
 
