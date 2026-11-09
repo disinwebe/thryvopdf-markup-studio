@@ -9,6 +9,16 @@ const { SERVICE, validate, serviceArgs, parseImage, addresses } = require('./con
 const { sendMail, normalizeSmtp } = require('../server/notify.cjs');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const NEEDS_AUTH = ['smtp.office365.com', 'smtp-mail.outlook.com', 'smtp.gmail.com'];
+function needAuth(c) {
+  if (NEEDS_AUTH.includes(c.host.toLowerCase()) && (!c.user || !c.password)) throw new Error('This provider requires signing in: enter the SMTP user (full mailbox address) and its password or app password, then save.');
+}
+function friendly(err) {
+  const m = err.message || String(err);
+  if (/5\.7\.57|530 /.test(m)) return m + ' Hint: the server did not accept the sign-in. Check the SMTP user and password, and that Authenticated SMTP is enabled for this mailbox.';
+  if (/535|5\.7\.139|5\.7\.3|534/.test(m)) return m + ' Hint: sign-in was rejected. Use an app password (Gmail/Outlook with 2-step verification), or ask a Microsoft 365 administrator to enable SMTP AUTH and allow basic authentication for this mailbox.';
+  return m;
+}
 function readNotify(dir) {
   try { return normalizeSmtp(JSON.parse(fs.readFileSync(path.join(dir, 'notify.json'), 'utf8')).smtp); } catch { return normalizeSmtp(); }
 }
@@ -107,6 +117,7 @@ app.whenReady().then(() => {
     const prev = readNotify(s.config.dataDir);
     const next = normalizeSmtp({ ...input, password: typeof input?.password === 'string' && input.password ? input.password : prev.password });
     if (next.enabled && (!next.host || !EMAIL_RE.test((/<([^>]+)>/.exec(next.from) || [null, next.from])[1]))) throw new Error('Enter an SMTP host and a valid From address (for example ThryvoPDF <noreply@example.com>).');
+    if (next.enabled) needAuth(next);
     try {
       fs.mkdirSync(s.config.dataDir, { recursive: true });
       const file = path.join(s.config.dataDir, 'notify.json');
@@ -122,8 +133,9 @@ app.whenReady().then(() => {
     const s = await status();
     const c = readNotify(s.config.dataDir);
     if (!c.host) throw new Error('Save SMTP settings first.');
+    needAuth(c);
     try { await sendMail(c, to.trim(), 'ThryvoPDF test email', 'Email notifications from your ThryvoPDF server are working.'); }
-    catch (err) { throw new Error('Test email failed: ' + err.message); }
+    catch (err) { throw new Error('Test email failed: ' + friendly(err)); }
   });
   ipcMain.handle('manager:copy', (e, value) => { own(e); if (typeof value !== 'string' || !/^http:\/\/[0-9.]+:\d+$/.test(value)) throw new Error('Invalid address.'); clipboard.writeText(value); });
 });

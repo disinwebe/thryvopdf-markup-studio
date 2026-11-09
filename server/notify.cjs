@@ -80,7 +80,13 @@ function sendMail(cfg, to, subject, text, timeoutMs = 20000) {
       }
       if (cfg.user) {
         const auth = Buffer.from(`\0${cfg.user}\0${cfg.password}`).toString('base64');
-        await cmd('AUTH PLAIN ' + auth, [235]);
+        const methods = /AUTH[ =](.*)/i.exec(ehlo.text)?.[1] || 'PLAIN';
+        if (/PLAIN/i.test(methods) || !/LOGIN/i.test(methods)) await cmd('AUTH PLAIN ' + auth, [235]);
+        else {
+          await cmd('AUTH LOGIN', [334]);
+          await cmd(Buffer.from(cfg.user).toString('base64'), [334]);
+          await cmd(Buffer.from(cfg.password).toString('base64'), [235]);
+        }
       }
       await cmd(`MAIL FROM:<${fromAddr}>`, [250]);
       await cmd(`RCPT TO:<${to}>`, [250, 251]);
