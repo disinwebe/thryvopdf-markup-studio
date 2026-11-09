@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Doc, Style, Tool, makeMarkup } from '../app/model';
 import { applyHandle, boxOf, dist, handlesOf, pickTop, simplify, translate, HandleKey } from '../core/geometry';
-import { DEFAULT_CAL } from '../core/measurement';
+import { countNumbers, DEFAULT_CAL } from '../core/measurement';
 import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas } from '../pdf/pdfjs';
 import { MarkupShape } from './MarkupShape';
@@ -373,18 +373,7 @@ export function PageView(p: PageViewProps) {
     if (d && MULTI.includes(tool) && d.length >= 2) finish(d.slice(0, -1));
   };
 
-  const countNos = useMemo(() => {
-    const map = new Map<string, number>();
-    const per = new Map<string, number>();
-    for (const m of doc.markups)
-      if (m.type === 'm-count') {
-        const k = m.subject || 'Count';
-        const n = (per.get(k) ?? 0) + 1;
-        per.set(k, n);
-        map.set(m.id, n);
-      }
-    return map;
-  }, [doc.markups]);
+  const countNos = useMemo(() => countNumbers(doc.markups), [doc.markups]);
 
   const tags = useMemo(() => numberMarkups(doc.markups), [doc.markups]);
   const cal = doc.calibrations[doc.page] ?? DEFAULT_CAL;

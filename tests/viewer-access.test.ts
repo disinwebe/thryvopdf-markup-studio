@@ -26,5 +26,8 @@ describe('unlicensed viewer access', () => {
     const find = (label: string) => menu.flatMap((m: { submenu: { label?: string; enabled?: boolean }[] }) => m.submenu).find((item: { label?: string }) => item.label === label);
     for (const label of ['&Open PDF...', 'Open S&hared...', 'Toggle &left panel', 'Toggle &right panel']) expect(find(label)?.enabled).toBe(true);
     for (const label of ['&Save', 'Save &As...', '&Undo markup (Ctrl+Z)', '&Delete selected markup', 'Or&ganize pages...']) expect(find(label)?.enabled).toBe(false);
+    const measurements = menu[3].submenu.find((item: { label?: string }) => item.label === '&Measurements');
+    expect(measurements.enabled).toBe(false);
+    expect(measurements.submenu.find((item: { label?: string }) => item.label === '&Area').enabled).toBe(false);
   });
 });

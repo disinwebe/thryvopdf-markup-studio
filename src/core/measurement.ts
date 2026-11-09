@@ -59,6 +59,19 @@ export interface Measurement {
   perimeter?: number;
 }
 
+export function countNumbers(markups: Pick<Markup, 'id' | 'type' | 'subject'>[]): Map<string, number> {
+  const map = new Map<string, number>();
+  const counts = new Map<string, number>();
+  for (const m of markups) {
+    if (m.type !== 'm-count') continue;
+    const subject = m.subject || 'Count';
+    const count = (counts.get(subject) ?? 0) + 1;
+    counts.set(subject, count);
+    map.set(m.id, count);
+  }
+  return map;
+}
+
 export function measure(m: Markup, cal: Calibration = DEFAULT_CAL): Measurement | null {
   const k = cal.unitsPerPoint;
   switch (m.type) {
@@ -170,6 +183,13 @@ export function csvEscape(v: unknown): string {
 
 export const toCsv = (rows: unknown[][]) => rows.map((r) => r.map(csvEscape).join(',')).join('\r\n') + '\r\n';
 
+export function formatTakeoffDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function takeoffCsv(markups: Markup[], cals: (page: number) => Calibration, outUnit: Unit = 'ft'): string {
   const rows: unknown[][] = [['Takeoff summary'], ['Subject', 'Type', 'Items', 'Total', 'Unit']];
   for (const r of takeoffSummary(markups, cals, outUnit))
@@ -186,7 +206,7 @@ export function takeoffCsv(markups: Markup[], cals: (page: number) => Calibratio
       r.unit,
       r.perimeter !== undefined ? +r.perimeter.toFixed(3) : '',
       m.author,
-      m.date,
+      formatTakeoffDate(m.date),
     ]);
   }
   return toCsv(rows);

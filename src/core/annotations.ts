@@ -22,7 +22,7 @@ import {
   rectPoly,
   wrapText,
 } from './geometry';
-import { DEFAULT_CAL, measureLabel } from './measurement';
+import { countNumbers, DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
 import { isReviewMarkup, numberMarkups } from './numbering';
 import { calloutLayout, calloutTextRuns } from './callout';
@@ -135,7 +135,14 @@ const SUBTYPE: Record<string, string> = {
 };
 
 /** Build the appearance-stream operators and annotation-specific keys for a markup. */
-export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAULT_CAL, tag?: number): Built {
+export function buildAppearance(
+  m: Markup,
+  g: PageGeom,
+  cal: Calibration = DEFAULT_CAL,
+  tag?: number,
+  countNo?: number,
+  textWidth: (text: string, size: number) => number = approxTextWidth,
+): Built {
   const cv = (p: Pt) => viewToPdf(p, g);
   const col = hex(m.color);
   const stroke = `${f(m.width)} w ${col.join(' ')} RG 1 J 1 j`;
@@ -144,6 +151,18 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     const q = pts.map(cv);
     return q.map((p, i) => `${f(p.x)} ${f(p.y)} ${i ? 'l' : 'm'}`).join(' ') + (close ? ' h' : '');
   };
+  const circlePath = (point: Pt, radius: number) => {
+    const c = 0.5523 * radius;
+    const P = (x: number, y: number) => cv({ x, y });
+    const q0 = P(point.x + radius, point.y), q1 = P(point.x + radius, point.y + c), q2 = P(point.x + c, point.y + radius), q3 = P(point.x, point.y + radius);
+    const q4 = P(point.x - c, point.y + radius), q5 = P(point.x - radius, point.y + c), q6 = P(point.x - radius, point.y);
+    const q7 = P(point.x - radius, point.y - c), q8 = P(point.x - c, point.y - radius), q9 = P(point.x, point.y - radius);
+    const q10 = P(point.x + c, point.y - radius), q11 = P(point.x + radius, point.y - c);
+    return `${f(q0.x)} ${f(q0.y)} m ${f(q1.x)} ${f(q1.y)} ${f(q2.x)} ${f(q2.y)} ${f(q3.x)} ${f(q3.y)} c ` +
+      `${f(q4.x)} ${f(q4.y)} ${f(q5.x)} ${f(q5.y)} ${f(q6.x)} ${f(q6.y)} c ` +
+      `${f(q7.x)} ${f(q7.y)} ${f(q8.x)} ${f(q8.y)} ${f(q9.x)} ${f(q9.y)} c ` +
+      `${f(q10.x)} ${f(q10.y)} ${f(q11.x)} ${f(q11.y)} ${f(q0.x)} ${f(q0.y)} c f`;
+  };
   const textAngle = (g.rotation * Math.PI) / 180;
   const tm = (p: Pt) => {
     const q = cv(p);
@@ -151,21 +170,56 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
       s = Math.sin(textAngle);
     return `${f(c)} ${f(s)} ${f(-s)} ${f(c)} ${f(q.x)} ${f(q.y)} Tm`;
   };
-  const textLines = (lines: string[], origin: Pt, size: number, color: number[]) =>
+  const textLines = (lines: string[], origin: Pt, size: number, color: number[], font = 'F1', mode = 0) =>
     lines
       .map(
         (ln, i) =>
-          `BT /F1 ${size} Tf ${color.join(' ')} rg ${tm({ x: origin.x, y: origin.y + size * (i + 1) * 1.15 - size * 0.2 })} (${latin1(ln)}) Tj ET`,
+          `BT /${font} ${size} Tf ${color.join(' ')} rg ${mode} Tr ${tm({ x: origin.x, y: origin.y + size * (i + 1) * 1.15 - size * 0.2 })} (${latin1(ln)}) Tj ET`,
       )
       .join('\n');
 
   let ops = '';
-  let viewPts: Pt[] = m.points;
+  let viewPts: Pt[] = [...m.points];
   const extra: Record<string, unknown> = {};
   let blend: string | undefined;
-  const label = (anchor: Pt) => {
+  const labelAt = (text: string, x: number, y: number, size = 11) => {
+    if (!text) return '';
+    const square = text.indexOf('²');
+    const base = square < 0 ? text : text.slice(0, square);
+    const raised = square < 0 ? '' : '2' + text.slice(square + 1);
+    const drawLabel = (label: string, labelX: number, baseline: number, labelSize: number) => {
+      const origin = { x: labelX, y: baseline - labelSize * 0.95 };
+      const matrix = tm({ x: origin.x, y: origin.y + labelSize * 0.95 });
+      const areaLabel = m.type === 'm-area';
+      const fill = areaLabel ? '1 1 1' : col.join(' ');
+      const outline = areaLabel ? col.join(' ') : '1 1 1';
+      return `\nq ${outline} RG 1 w BT /F2 ${labelSize} Tf ${outline} rg 1 Tr ${matrix} (${latin1(label)}) Tj ET ` +
+        `BT /F2 ${labelSize} Tf ${fill} rg 0 Tr ${matrix} (${latin1(label)}) Tj ET Q`;
+    };
+    const raisedSize = size * 0.7;
+    const superscriptGap = 0.35;
+    const raisedX = x + textWidth(base, size) + superscriptGap;
+    const raisedY = y - size * 0.35;
+    return drawLabel(base, x, y, size) +
+      (raised ? drawLabel(raised, raisedX, raisedY, raisedSize) : '');
+  };
+  const labelWidth = (text: string, size: number) => {
+    const square = text.indexOf('²');
+    return square < 0
+      ? textWidth(text, size)
+      : textWidth(text.slice(0, square), size) + textWidth('2' + text.slice(square + 1), size * 0.7) + 1;
+  };
+  const label = (anchor: Pt, dx = 4, dy = -6) => {
     const t = measureLabel(m, cal);
-    return t ? '\n' + textLines([t], { x: anchor.x + 4, y: anchor.y - 14 }, 10, col) : '';
+    return labelAt(t, anchor.x + dx, anchor.y + dy);
+  };
+  const includeLabel = (text: string, x: number, baseline: number, size = 11) => {
+    if (!text) return;
+    const width = labelWidth(text, size);
+    viewPts.push(
+      { x: x - 3, y: baseline - size - 4 },
+      { x: x + width + 3, y: baseline + 5 },
+    );
   };
 
   switch (m.type) {
@@ -215,16 +269,28 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
         ops += ` ${col.join(' ')} rg ${path(head, true)} f`;
         extra.LE = ['None', 'OpenArrow'];
       }
-      if (m.type === 'm-length') ops += label({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      if (m.type === 'm-length') {
+        ops += ` ${col.join(' ')} rg ${circlePath(a, 2.5)} ${circlePath(b, 2.5)}`;
+        viewPts = [a, b];
+        const anchor = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const text = measureLabel(m, cal);
+        includeLabel(text, anchor.x + 4, anchor.y - 6);
+        ops += label(anchor);
+      }
       extra.L = [...[a, b].map(cv)].flatMap((p) => [f(p.x), f(p.y)]);
-      viewPts = [a, b];
       break;
     }
     case 'polyline':
     case 'm-polylength':
     case 'm-angle': {
       ops = `${stroke} ${path(m.points)} S`;
-      if (m.type !== 'polyline') ops += label(m.points[Math.floor(m.points.length / 2)] ?? m.points[0]);
+      if (m.type !== 'polyline') {
+        const anchor = m.points[Math.floor(m.points.length / 2)] ?? m.points[0];
+        const dx = m.type === 'm-angle' ? 6 : 4;
+        const text = measureLabel(m, cal);
+        includeLabel(text, anchor.x + dx, anchor.y - 6);
+        ops += label(anchor, dx, -6);
+      }
       extra.Vertices = m.points.map(cv).flatMap((p) => [f(p.x), f(p.y)]);
       break;
     }
@@ -237,14 +303,20 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
     case 'm-perimeter': {
       const fc = m.type === 'm-area' ? fillC ?? col : null;
       ops = `${stroke} ${fc ? fc.join(' ') + ' rg' : ''} ${path(m.points, true)} ${fc ? 'B' : 'S'}`;
-      const bb = bbox(m.points);
-      ops += label({ x: bb.x + bb.w / 2 - 20, y: bb.y + bb.h / 2 });
+      const centre = {
+        x: m.points.reduce((sum, p) => sum + p.x, 0) / m.points.length,
+        y: m.points.reduce((sum, p) => sum + p.y, 0) / m.points.length,
+      };
+      const text = measureLabel(m, cal);
+      const x = centre.x - labelWidth(text, 11) / 2;
+      includeLabel(text, x, centre.y);
+      ops += labelAt(text, x, centre.y);
       extra.Vertices = m.points.map(cv).flatMap((p) => [f(p.x), f(p.y)]);
       break;
     }
     case 'm-count': {
       const p = m.points[0];
-      const r = 6,
+      const r = 7,
         k = 0.5523 * r;
       const P = (x: number, y: number) => {
         const q = cv({ x, y });
@@ -254,10 +326,29 @@ export function buildAppearance(m: Markup, g: PageGeom, cal: Calibration = DEFAU
         `${col.join(' ')} rg ${P(p.x + r, p.y)} m ${P(p.x + r, p.y + k)} ${P(p.x + k, p.y + r)} ${P(p.x, p.y + r)} c ` +
         `${P(p.x - k, p.y + r)} ${P(p.x - r, p.y + k)} ${P(p.x - r, p.y)} c ${P(p.x - r, p.y - k)} ${P(p.x - k, p.y - r)} ${P(p.x, p.y - r)} c ` +
         `${P(p.x + k, p.y - r)} ${P(p.x + r, p.y - k)} ${P(p.x + r, p.y)} c f`;
+      ops += ` 1 1 1 RG 1 w ${circlePath(p, r)} S`;
+      if (countNo !== undefined) {
+        const count = String(countNo);
+        const countSize = count.length > 2 ? 6 : count.length > 1 ? 8 : 10;
+        const countWidth = textWidth(count, countSize);
+        const countX = p.x - countWidth / 2;
+        const countY = p.y + countSize * 0.37;
+        ops += ` BT /F2 ${countSize} Tf 1 1 1 rg 0 Tr ${tm({ x: countX, y: countY })} (${latin1(count)}) Tj ET`;
+      }
       viewPts = [
         { x: p.x - r, y: p.y - r },
         { x: p.x + r, y: p.y + r },
       ];
+      if (countNo !== undefined) {
+        const count = String(countNo);
+        const countSize = count.length > 2 ? 6 : count.length > 1 ? 8 : 10;
+        const countX = p.x - textWidth(count, countSize) / 2;
+        const countY = p.y + countSize * 0.37;
+        viewPts.push(
+          { x: countX - 1, y: countY - countSize - 1 },
+          { x: countX + textWidth(count, countSize) + 1, y: countY + 1 },
+        );
+      }
       break;
     }
     case 'text':
@@ -389,6 +480,7 @@ export async function writeAnnotations(
 ): Promise<void> {
   const ctx = doc.context;
   const font = await doc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
   const pages = doc.getPages();
   for (const page of pages) {
     removeOwnAnnots(page);
@@ -396,6 +488,7 @@ export async function writeAnnotations(
     setPageData(page, { lines: [] });
   }
   const numbers = numberMarkups(markups);
+  const countNos = countNumbers(markups);
   const byPage = new Map<number, Markup[]>();
   for (const m of markups) byPage.set(m.page, [...(byPage.get(m.page) ?? []), m]);
   for (const [idx, list] of byPage) {
@@ -407,15 +500,23 @@ export async function writeAnnotations(
     writeLineContent(page, g, lines);
     for (const m of list) {
       if (m.type === 'line') continue;
-      const b = buildAppearance(m, g, calibrations[idx] ?? DEFAULT_CAL, numbers.get(m.id));
-      const gs = ctx.obj({ Type: 'ExtGState', CA: m.opacity, ca: m.opacity, ...(b.blend ? { BM: b.blend } : {}) });
+      const b = buildAppearance(
+        m,
+        g,
+        calibrations[idx] ?? DEFAULT_CAL,
+        numbers.get(m.id),
+        countNos.get(m.id),
+        (text, size) => boldFont.widthOfTextAtSize(text, size),
+      );
+      const opacity = m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity;
+      const gs = ctx.obj({ Type: 'ExtGState', CA: opacity, ca: opacity, ...(b.blend ? { BM: b.blend } : {}) });
       const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1, BM: 'Normal' });
       const stampImage = m.type === 'stamp' && m.stampImage ? await doc.embedPng(m.stampImage.data) : undefined;
       const ap = ctx.stream('/GS0 gs\n' + b.ops, {
         Type: 'XObject',
         Subtype: 'Form',
         BBox: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
-        Resources: ctx.obj({ Font: { F1: font.ref }, ExtGState: { GS0: gs, GS1: gs1 }, ...(stampImage ? { XObject: { StampImage: stampImage.ref } } : {}) }),
+        Resources: ctx.obj({ Font: { F1: font.ref, F2: boldFont.ref }, ExtGState: { GS0: gs, GS1: gs1 }, ...(stampImage ? { XObject: { StampImage: stampImage.ref } } : {}) }),
       });
       const apRef = ctx.register(ap);
       const dict: Record<string, unknown> = {

@@ -6,11 +6,25 @@ import { calloutLayout, calloutTextRuns } from '../core/callout';
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
 const d = (p: Pt[], close = false) => 'M' + p.map((q) => `${q.x} ${q.y}`).join(' L') + (close ? ' Z' : '');
 
-function Label({ text, x, y, color }: { text: string; x: number; y: number; color: string }) {
+function Label({ text, x, y, color, area = false }: { text: string; x: number; y: number; color: string; area?: boolean }) {
   if (!text) return null;
+  const square = text.indexOf('²');
+  const base = square < 0 ? text : text.slice(0, square);
+  const raised = square < 0 ? '' : '2' + text.slice(square + 1);
   return (
-    <text x={x} y={y} fontSize={11} fontWeight={600} fill={color} stroke="#fff" strokeWidth={3} paintOrder="stroke" strokeLinejoin="round">
-      {text}
+    <text
+      x={x}
+      y={y}
+      fontSize={11}
+      fontWeight={600}
+      fill={area ? '#fff' : color}
+      stroke={area ? color : '#fff'}
+      strokeWidth={1}
+      paintOrder="stroke"
+      strokeLinejoin="round"
+    >
+      {base}
+      {raised && <tspan baselineShift="super" fontSize="70%">{raised}</tspan>}
     </text>
   );
 }
@@ -105,7 +119,7 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       body = (
         <>
           <path {...common} fill={m.type === 'm-area' ? m.fill ?? m.color : 'none'} fillOpacity={m.type === 'm-area' ? 1 : 0} d={d(m.points, true)} />
-          <Label text={label} x={xs - approxTextWidth(label, 11) / 2} y={ys} color={m.color} />
+          <Label text={label} x={xs - approxTextWidth(label, 11) / 2} y={ys} color={m.color} area={m.type === 'm-area'} />
         </>
       );
       break;
@@ -115,7 +129,7 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       body = (
         <>
           <circle cx={p.x} cy={p.y} r={7} fill={m.color} stroke="#fff" strokeWidth={1} />
-          <text x={p.x} y={p.y + 3.5} fontSize={9} fontWeight={700} textAnchor="middle" fill="#fff">
+          <text x={p.x} y={p.y + 3.7} fontSize={10} fontWeight={700} textAnchor="middle" fill="#fff">
             {countNo ?? ''}
           </text>
         </>
