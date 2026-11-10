@@ -16,6 +16,8 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
   const [panel, setPanel] = useState<'password' | 'users' | null>(null);
   const [url, setUrl] = useState('');
   const [f, setF] = useState({ name: '', email: '', discipline: DISCIPLINE_LIST[0], password: '', confirm: '' });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const notifications = useNotifications(user, st?.mode === 'server');
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
 
@@ -176,12 +178,18 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
         )}
         <label>
           Password{reg ? ' (min. 8 characters)' : ''}
-          <input type="password" value={f.password} onChange={set('password')} autoComplete={reg ? 'new-password' : 'current-password'} />
+          <input type={showPassword ? 'text' : 'password'} value={f.password} onChange={set('password')} autoComplete={reg ? 'new-password' : 'current-password'} />
+          <button type="button" className="link" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)}>
+            {showPassword ? 'Hide password' : 'Show password'}
+          </button>
         </label>
         {reg && (
           <label>
             Confirm password
-            <input type="password" value={f.confirm} onChange={set('confirm')} autoComplete="new-password" />
+            <input type={showConfirmPassword ? 'text' : 'password'} value={f.confirm} onChange={set('confirm')} autoComplete="new-password" />
+            <button type="button" className="link" aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'} aria-pressed={showConfirmPassword} onClick={() => setShowConfirmPassword((visible) => !visible)}>
+              {showConfirmPassword ? 'Hide password' : 'Show password'}
+            </button>
           </label>
         )}
         {error && <div className="danger" role="alert">{error}</div>}

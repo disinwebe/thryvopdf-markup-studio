@@ -132,6 +132,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
 
     async notifications(a = {}) {
       if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Not signed in.' };
+      if (a.clear) return call(cfg.serverUrl, 'POST', '/api/notifications/read', { clear: true }, session.token);
       if (a.read) return call(cfg.serverUrl, 'POST', '/api/notifications/read', a.read === 'all' ? { all: true } : { ids: a.read }, session.token);
       return call(cfg.serverUrl, 'GET', '/api/notifications', null, session.token);
     },

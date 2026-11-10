@@ -257,8 +257,11 @@ function createApp(opts = {}) {
   const invalidMembers = [400, { ok: false, error: 'Select valid active users for document access.' }];
   handlers['GET /api/notifications'] = authed((s) => [200, { ok: true, ...notifier.list(s.user.email) }]);
   handlers['POST /api/notifications/read'] = authed((s, b) => {
-    const ids = b.all === true ? 'all' : Array.isArray(b.ids) ? b.ids.filter((i) => typeof i === 'string').slice(0, 500) : [];
-    notifier.markRead(s.user.email, ids);
+    if (b.clear === true) notifier.clear(s.user.email);
+    else {
+      const ids = b.all === true ? 'all' : Array.isArray(b.ids) ? b.ids.filter((i) => typeof i === 'string').slice(0, 500) : [];
+      notifier.markRead(s.user.email, ids);
+    }
     return [200, { ok: true, ...notifier.list(s.user.email) }];
   });
   const docRoutes = [

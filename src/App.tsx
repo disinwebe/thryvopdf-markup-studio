@@ -8,7 +8,7 @@ import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
-import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, downloadName, pickFiles, saveBytes, stateOf, toolStyle as resolveToolStyle } from './app/model';
+import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, downloadName, pickFiles, saveBytes, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
 import { PageView } from './components/PageView';
 import { BookmarksPanel, Thumbnails } from './components/Thumbnails';
 import { MarkupsPanel } from './components/MarkupsPanel';
@@ -75,7 +75,15 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [styles, setStyles] = useState<Record<string, Style>>({});
   const [styleDefaults, setStyleDefaults] = useState(loadMarkupStyleDefaults);
   const [subject, setSubject] = useState('');
+  const lastMeasurementTool = useRef<Tool | null>(null);
   const author = user.name;
+  const chooseTool = (next: Tool) => {
+    if (MEASURE_TOOLS.includes(next)) {
+      if (shouldResetMeasurementSubject(lastMeasurementTool.current, next)) setSubject('');
+      lastMeasurementTool.current = next;
+    }
+    setTool(next);
+  };
   const [theme, setTheme] = useTheme();
   const [commentSize, setCommentSizeState] = useState(getCommentSize);
   const changeCommentSize = (n: number) => {
@@ -761,7 +769,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       pasteSelection();
     } else if (next) {
       e.preventDefault();
-      setTool(next);
+      chooseTool(next);
       setPending(null);
     } else if (history) {
       e.preventDefault();
@@ -823,12 +831,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'toggleRightPanel': setRightPanelVisible((visible) => !visible); break;
       case 'toolDefaults': setDefaultsOpen(true); break;
       case 'measurePanel': setRightTab('measure'); break;
-      case 'measureLength': setTool('m-length'); setPending(null); setRightTab('markups'); break;
-      case 'measurePolylength': setTool('m-polylength'); setPending(null); setRightTab('markups'); break;
-      case 'measureArea': setTool('m-area'); setPending(null); setRightTab('markups'); break;
-      case 'measurePerimeter': setTool('m-perimeter'); setPending(null); setRightTab('markups'); break;
-      case 'measureAngle': setTool('m-angle'); setPending(null); setRightTab('markups'); break;
-      case 'measureCount': setTool('m-count'); setPending(null); setRightTab('markups'); break;
+      case 'measureLength': chooseTool('m-length'); setPending(null); setRightTab('markups'); break;
+      case 'measurePolylength': chooseTool('m-polylength'); setPending(null); setRightTab('markups'); break;
+      case 'measureArea': chooseTool('m-area'); setPending(null); setRightTab('markups'); break;
+      case 'measurePerimeter': chooseTool('m-perimeter'); setPending(null); setRightTab('markups'); break;
+      case 'measureAngle': chooseTool('m-angle'); setPending(null); setRightTab('markups'); break;
+      case 'measureCount': chooseTool('m-count'); setPending(null); setRightTab('markups'); break;
       case 'organizePanel': setRightTab('organize'); break;
       case 'sheetsPanel': setRightTab('sheets'); break;
       case 'searchPanel': setRightTab('search'); break;
@@ -930,7 +938,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const flattenableCount = active?.markups.filter((markup) => canDeleteMarkup(markup, user)).length ?? 0;
 
   const toolBtn = (t: Tool) => (
-    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); if (t === 'stamp') setDefaultsOpen(true); if (t === 'cloud') say('Click to add cloud vertices. Press Enter, double-click, or right-click to finish.'); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
+    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { chooseTool(t); setPending(null); if (t === 'stamp') setDefaultsOpen(true); if (t === 'cloud') say('Click to add cloud vertices. Press Enter, double-click, or right-click to finish.'); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
       {t === 'select' ? <SelectIcon theme={theme} /> : <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>}{TOOL_LABEL[t]}
     </button>
   );
@@ -1133,7 +1141,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 onMessage={say}
               />
               <div className="viewer-controls" aria-label="Page and zoom controls">
-                <FloatingTools tool={tool} theme={theme} onTool={(t) => { setTool(t); setPending(null); }} />
+                <FloatingTools tool={tool} theme={theme} onTool={(t) => { chooseTool(t); setPending(null); }} />
                 <span className="sep" />
                 <button onClick={() => goto(active.page - 1)} title="Previous page" aria-label="Previous page">◀</button>
                 <input className="pg" type="number" aria-label="Page number" min={1} max={active.numPages} value={active.page + 1} onChange={(e) => goto((+e.target.value || 1) - 1)} />
@@ -1179,7 +1187,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
               {rightTab === 'measure' && (
                 <>
                 <div className="row pad">{MEASURE_TOOLS.map((t) => (
-                  <button key={t} onClick={() => { setTool(t); setRightTab('markups'); }}>{TOOL_LABEL[t]}</button>
+                  <button key={t} onClick={() => { chooseTool(t); setRightTab('markups'); }}>{TOOL_LABEL[t]}</button>
                 ))}</div>
                 <MeasurePanel
                   doc={active}

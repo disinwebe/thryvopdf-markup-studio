@@ -128,6 +128,37 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           <input type="range" min={4} max={80} step={1} value={m.cloudArc ?? 14} onChange={(e) => upd({ cloudArc: +e.target.value }, 'cloud-arc')} />
         </label>
       )}
+      {m.type === 'm-length' && (
+        <>
+          <label>
+            Endpoint arrowheads
+            <select
+              aria-label="Measurement endpoint arrowheads"
+              value={m.measurementArrowheads ?? 'none'}
+              onChange={(e) => upd({ measurementArrowheads: e.target.value as NonNullable<Markup['measurementArrowheads']> }, 'measurement-arrowheads')}
+            >
+              <option value="none">None</option>
+              <option value="start">Start</option>
+              <option value="end">End</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+          {m.measurementArrowheads && m.measurementArrowheads !== 'none' && (
+            <label>
+              Arrow size ({m.measurementArrowSize ?? 8} pt)
+              <input
+                aria-label="Measurement arrow size"
+                type="range"
+                min={3}
+                max={24}
+                step={1}
+                value={m.measurementArrowSize ?? 8}
+                onChange={(e) => upd({ measurementArrowSize: +e.target.value }, 'measurement-arrow-size')}
+              />
+            </label>
+          )}
+        </>
+      )}
       <label>
         Opacity
         <input type="range" min={0.1} max={1} step={0.05} value={m.opacity} onChange={(e) => upd({ opacity: +e.target.value }, 'opacity')} />

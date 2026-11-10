@@ -84,6 +84,10 @@ export async function createDoc(name: string, bytes: Uint8Array, path?: string, 
 
 export type Tool = 'select' | 'hand' | 'calibrate' | MarkupType;
 
+export function shouldResetMeasurementSubject(previous: Tool | null, next: Tool): boolean {
+  return !!previous && previous !== next && previous.startsWith('m-') && next.startsWith('m-');
+}
+
 export interface Style {
   color: string;
   width: number;

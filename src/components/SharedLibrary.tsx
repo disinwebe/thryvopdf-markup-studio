@@ -24,18 +24,47 @@ export interface SharedListing {
 
 type ShareUser = { name: string; email: string; discipline: string };
 
+export function reviewerDisplayName(reviewEmail: string, users: ShareUser[]): string {
+  return users.find((user) => user.email.toLowerCase() === reviewEmail.toLowerCase())?.name || reviewEmail;
+}
+
+export function filterShareUsers(users: ShareUser[], ownerEmail: string, discipline: string, query: string): ShareUser[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  return users.filter((user) =>
+    user.email !== ownerEmail &&
+    (!discipline || user.discipline === discipline) &&
+    (!normalizedQuery || `${user.name} ${user.email}`.toLowerCase().includes(normalizedQuery)),
+  );
+}
+
 export function UserSelection({ users, ownerEmail, members, onChange }: { users: ShareUser[]; ownerEmail: string; members: string[]; onChange: (members: string[]) => void }) {
+  const [discipline, setDiscipline] = useState('');
+  const [query, setQuery] = useState('');
   const choices = users.filter((u) => u.email !== ownerEmail);
-  const allSelected = choices.length > 0 && choices.every((u) => members.includes(u.email));
+  const disciplines = [...new Set(choices.map((u) => u.discipline).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const visibleUsers = filterShareUsers(users, ownerEmail, discipline, query);
+  const allVisibleSelected = visibleUsers.length > 0 && visibleUsers.every((u) => members.includes(u.email));
   return (
     <>
-      <label><input type="checkbox" checked={allSelected} disabled={!choices.length} onChange={(e) => {
-        const emails = new Set(choices.map((u) => u.email));
+      <label>
+        Search users by name or email
+        <input aria-label="Search users by name or email" type="search" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </label>
+      <label>
+        Filter by discipline
+        <select aria-label="Filter users by discipline" value={discipline} onChange={(e) => setDiscipline(e.target.value)}>
+          <option value="">All disciplines</option>
+          {disciplines.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </label>
+      <label><input type="checkbox" checked={allVisibleSelected} disabled={!visibleUsers.length} onChange={(e) => {
+        const emails = new Set(visibleUsers.map((u) => u.email));
         onChange(e.target.checked ? [...new Set([...members, ...emails])] : members.filter((email) => !emails.has(email)));
-      }} /> Select all allowed users</label>
-      {choices.map((u) => (
+      }} /> Select all matching users</label>
+      {visibleUsers.map((u) => (
         <label key={u.email}><input type="checkbox" checked={members.includes(u.email)} onChange={(e) => onChange(e.target.checked ? [...new Set([...members, u.email])] : members.filter((email) => email !== u.email))} /> {u.name} ({u.email})</label>
       ))}
+      {!visibleUsers.length && <p className="muted">No users match these filters.</p>}
     </>
   );
 }
@@ -120,7 +149,6 @@ export function SharedLibrary({
     return () => { active = false; clearTimeout(timer); };
   }, [load]);
   useEffect(() => {
-    if (readOnly) return;
     let active = true;
     void window.api!.sharedDocs({ op: 'users' }).then((r) => {
       if (!active) return;
@@ -128,7 +156,7 @@ export function SharedLibrary({
       else setError(r.error || 'Could not load users for sharing.');
     }).catch(() => { if (active) setError('Could not load users for sharing.'); });
     return () => { active = false; };
-  }, [readOnly]);
+  }, []);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -338,7 +366,7 @@ export function SharedLibrary({
                     <td>
                       {d.reviews?.length ? d.reviews.map((review) => (
                         <div key={review.email} className={review.done ? 'review-complete' : 'muted small'}>
-                          {review.email}: {review.done ? 'Done' : 'Needs review'}
+                          {reviewerDisplayName(review.email, users)}: {review.done ? 'Done' : 'Needs review'}
                           {review.done && review.updated && <span className="muted small"> · {new Date(review.updated).toLocaleString()}</span>}
                         </div>
                       )) : <span className="muted">No assigned reviewers</span>}
