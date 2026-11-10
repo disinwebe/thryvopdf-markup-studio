@@ -17,7 +17,7 @@ function normalizeUrl(u) {
   }
 }
 
-function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
+function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNotifications }) {
   let cfg = { mode: null, serverUrl: '' };
   try {
     cfg = { ...cfg, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) };
@@ -26,6 +26,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
   }
   const local = createAuth(localFile);
   let session = null; // { user, token, expiresAt }
+  let notificationStream = null;
 
   const saveCfg = () => {
     fs.mkdirSync(path.dirname(configFile), { recursive: true });
@@ -52,15 +53,94 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     }
   }
 
+  const stopNotificationStream = () => {
+    notificationStream?.abort();
+    notificationStream = null;
+  };
+  const startNotificationStream = () => {
+    stopNotificationStream();
+    if (cfg.mode !== 'server' || !session || typeof onNotifications !== 'function') return;
+    const activeSession = session;
+    const controller = new AbortController();
+    notificationStream = controller;
+    const wait = (ms) => new Promise((resolve) => {
+      if (controller.signal.aborted) return resolve();
+      const timer = setTimeout(done, ms);
+      function done() {
+        clearTimeout(timer);
+        controller.signal.removeEventListener('abort', done);
+        resolve();
+      }
+      controller.signal.addEventListener('abort', done, { once: true });
+    });
+    const connect = async () => {
+      let retryMs = 1000;
+      while (!controller.signal.aborted && session === activeSession && Date.now() < activeSession.expiresAt) {
+        try {
+          const response = await f(cfg.serverUrl + '/api/notifications/stream', {
+            method: 'GET',
+            headers: { Accept: 'text/event-stream', Authorization: 'Bearer ' + activeSession.token },
+            signal: controller.signal,
+          });
+          if (!response.ok || !response.body) throw new Error(`Notification stream returned HTTP ${response.status}.`);
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (!controller.signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary;
+            while ((boundary = /\r?\n\r?\n/.exec(buffer)) !== null) {
+              const frame = buffer.slice(0, boundary.index).replace(/\r/g, '');
+              buffer = buffer.slice(boundary.index + boundary[0].length);
+              let event = 'message';
+              const data = [];
+              for (const line of frame.split('\n')) {
+                if (line.startsWith('event:')) event = line.slice(6).trim();
+                else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+              }
+              if (event === 'auth') {
+                session = null;
+                stopNotificationStream();
+                return;
+              }
+              if (event === 'notifications' && data.length) {
+                const snapshot = JSON.parse(data.join('\n'));
+                if (Array.isArray(snapshot.notifications) && typeof snapshot.unread === 'number') onNotifications(snapshot);
+              }
+            }
+          }
+          retryMs = 1000;
+        } catch {
+          if (controller.signal.aborted || session !== activeSession) return;
+        }
+        if (session !== activeSession || controller.signal.aborted) return;
+        if (Date.now() >= activeSession.expiresAt) {
+          session = null;
+          return;
+        }
+        await wait(retryMs);
+        retryMs = Math.min(retryMs * 2, 30_000);
+      }
+      if (notificationStream === controller) notificationStream = null;
+    };
+    void connect();
+  };
+
   const current = () => {
     if (cfg.mode === 'local') return local.current();
-    if (session && session.expiresAt <= Date.now()) session = null;
+    if (session && session.expiresAt <= Date.now()) {
+      session = null;
+      stopNotificationStream();
+    }
     return session && !session.user.mustChange ? session.user : null;
   };
 
   const adopt = (r) => {
     if (r.ok && r.token) {
       session = { user: r.user, token: r.token, expiresAt: r.expiresAt };
+      startNotificationStream();
       return { ok: true, user: r.user };
     }
     if (r.ok && r.pending) return { ok: true, pending: true, message: r.message };
@@ -88,6 +168,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
     },
 
     async configure({ mode, serverUrl }) {
+      stopNotificationStream();
       if (mode === 'local') {
         cfg = { mode: 'local', serverUrl: cfg.serverUrl };
       } else {
@@ -132,7 +213,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
 
     async notifications(a = {}) {
       if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Not signed in.' };
-      if (a.clear) return call(cfg.serverUrl, 'POST', '/api/notifications/read', { clear: true }, session.token);
+      if (a.clear) return call(cfg.serverUrl, 'POST', '/api/notifications/clear', null, session.token);
       if (a.read) return call(cfg.serverUrl, 'POST', '/api/notifications/read', a.read === 'all' ? { all: true } : { ids: a.read }, session.token);
       return call(cfg.serverUrl, 'GET', '/api/notifications', null, session.token);
     },
@@ -185,6 +266,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch }) {
       if (cfg.mode === 'local') return local.logout();
       const s = session;
       session = null;
+      stopNotificationStream();
       if (s) await call(cfg.serverUrl, 'POST', '/api/logout', null, s.token);
       return { ok: true };
     },

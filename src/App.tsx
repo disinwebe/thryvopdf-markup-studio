@@ -127,6 +127,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<HTMLDivElement>(null);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
+  const pendingMarkupSelection = useRef<{ docId: string; markupId: string } | null>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
 
@@ -140,6 +141,23 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   useEffect(() => {
     updateSelection([], []);
   }, [activeId, active?.page]);
+  useEffect(() => {
+    const pending = pendingMarkupSelection.current;
+    if (!pending) return;
+    if (!active || active.id !== pending.docId) {
+      pendingMarkupSelection.current = null;
+      return;
+    }
+    const markup = active.markups.find((item) => item.id === pending.markupId);
+    if (!markup) {
+      pendingMarkupSelection.current = null;
+      return;
+    }
+    if (markup.page === active.page) {
+      pendingMarkupSelection.current = null;
+      updateSelection([markup.id], []);
+    }
+  }, [active?.id, active?.page]);
   const selectedSignature = signatures.find((signature) => signature.id === signatureId) ?? null;
   const contentTool: PageContentTool | null = contentMode === 'text'
     ? { kind: 'text', size: contentSize, color: contentColor }
@@ -1170,9 +1188,14 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   onSelect={(id) => {
                     const m = active.markups.find((x) => x.id === id);
                     if (m) {
-                      updateSelection([id], []);
                       setTool('select');
-                      goto(m.page);
+                      if (m.page === active.page) {
+                        pendingMarkupSelection.current = null;
+                        updateSelection([id], []);
+                      } else {
+                        pendingMarkupSelection.current = { docId: active.id, markupId: id };
+                        goto(m.page);
+                      }
                     }
                   }}
                   onUpdate={updateMarkup}

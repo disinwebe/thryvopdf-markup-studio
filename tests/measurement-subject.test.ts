@@ -19,7 +19,7 @@ describe('measurement subject defaults', () => {
 });
 
 describe('registration disciplines', () => {
-  it.each(['Instrumentation', 'Process', 'Piping'])('includes %s', (discipline) => {
+  it.each(['Instrumentation', 'Process', 'Piping', 'Communications'])('includes %s', (discipline) => {
     expect(DISCIPLINE_LIST).toContain(discipline);
   });
 });

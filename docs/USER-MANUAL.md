@@ -131,7 +131,7 @@ There is no standalone Callout drawing tool. Comment boxes are attached to revie
 4. To delete a selected markup, press **Delete** or use **Edit > Delete selected markup**. Deleting a markup also deletes its comments.
 5. Use **Ctrl+Z** to undo or **Ctrl+Y** / **Ctrl+Shift+Z** to redo.
 
-For shared documents, you can select and edit only your own markups and comments. The server checks this permission as well as the app. A markup can be deleted only by its author; only a comment's author can edit or delete that comment.
+For shared documents, you can select markups by any author from the Markups list to locate them on the drawing. You can edit only your own markups and comments. The server checks this permission as well as the app. A markup can be deleted only by its author; only a comment's author can edit or delete that comment.
 
 ### Review markups, statuses, and comments
 
@@ -140,7 +140,7 @@ For shared documents, you can select and edit only your own markups and comments
 3. Choose a status filter or **All pages / This page** to narrow the list.
 4. Select a markup in the list to select it on the drawing and show its properties.
 5. Change its status, color, width, opacity, fill, or text in the properties panel when you have permission.
-6. Add a comment in the comment input and press **Enter**. A comment's author and timestamp are shown in the panel.
+6. Add a comment in the comment box and press **Enter**. Use **Shift+Enter** for a new line; drag the box corner to resize it. A comment's author and timestamp are shown in the panel.
 7. To change the comment-box display, use **Show comment box on drawing**. Hiding the box does not delete comments.
 8. Use **Comment text size** to adjust comment text size. The setting is remembered on this PC and used for the drawing and saved PDF.
 9. Choose **CSV** in the Markups panel to export the current document's markup list.
@@ -328,7 +328,7 @@ The administrator can delete a document or group only where they have the requir
 3. Your status is separate from other reviewers' statuses. A document's group count becomes Done only after every assigned reviewer has completed their review.
 4. If markup content changes after completion, the server reopens reviews for the updated markup revision.
 
-Newly assigned reviewers receive an in-app alert and, if the administrator has configured email, an assignment email. The uploader receives an email when a reviewer marks a review done, with assigned users copied, if email is configured. Reopening a review sends an in-app alert to other assigned reviewers; completion and reopening status is also visible in the document list.
+Newly assigned reviewers receive an in-app alert and, if the administrator has configured email, an assignment email. When a reviewer marks a review done or reopens it, the uploader and other assigned reviewers receive an in-app alert. The uploader also receives an email for either status change, with the assigned reviewers copied, if email is configured. Completion and reopening status is visible in the document list.
 
 ### Work in a shared PDF
 
@@ -336,7 +336,7 @@ Newly assigned reviewers receive an in-app alert and, if the administrator has c
 2. Add and edit markups using the same viewer tools as a local PDF.
 3. Changes sync automatically. The shared-document banner shows who is working in the document and whether your connection is live.
 4. If offline or your session expires, the banner displays a warning. Keep the document open and restore the connection so pending changes can sync.
-5. You can move, resize, edit, or delete only markups and comments you authored. The server enforces these restrictions.
+5. You can select any markup to locate it on the drawing, but you can move, resize, edit, or delete only markups and comments you authored. The server enforces these restrictions.
 
 Shared documents sync markups and comments, not page calibration, bookmarks, or page organization. Page reorder, rotate, and insert are unavailable on shared tabs. If two people edit the same markup at the same time, the last change accepted by the server wins.
 
@@ -346,11 +346,13 @@ In server mode, choose **Notifications** in the top-right area:
 
 - The unread count appears on the button.
 - Assignment, review, and pending-registration alerts appear in the inbox. Newly assigned reviewers are notified in-app; they also receive an email when the administrator has enabled and configured assignment email.
+- Notifications are pushed to signed-in users as soon as the server records them. The app also refreshes periodically as a fallback.
 - Choose **Open** on an alert to go to Shared Documents or, for a registration alert, user management.
 - Choose **Mark read** on an alert or **Mark all read** in the inbox.
+- Choose **Clear all notifications** to remove all current inbox entries. This is separate from **Mark all read**.
 - The inbox refreshes automatically about every 30 seconds.
 
-Assignment alerts always appear in-app. Email is optional and is configured by the server administrator. Email delivery problems do not prevent document uploads or review-status changes.
+Assignment and review alerts always appear in-app. Email is optional and is configured by the server administrator. Email delivery problems do not prevent document uploads or review-status changes. Clearing notifications requires the current ThryvoPDF Server Manager on the shared server.
 
 ## 12. Administrator: users and server setup
 

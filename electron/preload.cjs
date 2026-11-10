@@ -28,6 +28,11 @@ contextBridge.exposeInMainWorld('api', {
   sharedDocs: (args) => ipcRenderer.invoke('shared-docs', args),
   changePassword: (args) => ipcRenderer.invoke('auth-change-password', args),
   notifications: (args) => ipcRenderer.invoke('auth-notifications', args),
+  onNotifications: (callback) => {
+    const listener = (_event, snapshot) => callback(snapshot);
+    ipcRenderer.on('notifications-update', listener);
+    return () => ipcRenderer.removeListener('notifications-update', listener);
+  },
   adminList: () => ipcRenderer.invoke('auth-admin-list'),
   adminAction: (args) => ipcRenderer.invoke('auth-admin-action', args),
   testServer: (url) => ipcRenderer.invoke('auth-test', url),

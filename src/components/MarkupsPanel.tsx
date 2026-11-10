@@ -43,8 +43,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
     [doc.markups, q, status, scope, doc.page],
   );
   const nums = numberMarkups(doc.markups);
-  const canSelect = (m: Markup) => !doc.shared || ownsMarkup(m, p.user);
-  const sel = doc.markups.find((m) => m.id === p.selectedId && canSelect(m)) ?? null;
+  const sel = doc.markups.find((m) => m.id === p.selectedId) ?? null;
 
   const exportCsv = () => {
     p.onExport(markupCsv(doc.markups, doc.path || doc.name));
@@ -72,7 +71,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
       <div className="list">
         {rows.length === 0 && <p className="muted">No markups.</p>}
         {rows.map((m) => (
-          <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} aria-disabled={!canSelect(m)} onClick={() => { if (canSelect(m)) p.onSelect(m.id); }}>
+          <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} onClick={() => p.onSelect(m.id)}>
             <span className="swatch" style={{ background: m.color }} />
             <div className="grow">
               {isReviewMarkup(m) && <b className="review-no">#{nums.get(m.id)}</b>} <b>{TOOL_LABEL[m.type]}</b> <span className="muted">p{m.page + 1}</span>
@@ -93,7 +92,7 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
 function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onCommentSize, readOnly = false, focusCommentId, onCommentFocused }: { m: Markup; doc: Doc } & MarkupsPanelProps) {
   const [comment, setComment] = useState('');
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
-  const commentInput = useRef<HTMLInputElement>(null);
+  const commentInput = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (focusCommentId === m.id) {
       commentInput.current?.focus();
@@ -275,15 +274,17 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         </div>
       ))}
       <div className="row">
-        <input
+        <textarea
           className="comment-input"
           ref={commentInput}
+          rows={2}
           value={comment}
           aria-label="Add Comment"
           placeholder="Add a comment / reply"
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && comment.trim()) {
+            if (e.key === 'Enter' && !e.shiftKey && comment.trim()) {
+              e.preventDefault();
               upd({ comments: [...m.comments, { id: uid(), author, authorEmail: user.email, date: new Date().toISOString(), text: comment.trim() }] });
               setComment('');
             }

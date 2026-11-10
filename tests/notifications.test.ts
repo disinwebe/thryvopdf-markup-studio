@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const fs = require('node:fs');
 const { start } = require('../server/server.cjs');
 const { sendMail } = require('../server/notify.cjs');
+const { createClient } = require('../electron/client.cjs');
 const PDF = Buffer.from('%PDF-1.4\n%%EOF\n');
 let dir: string, server: any, base: string, admin: string, ann: string, bob: string, cara: string;
 const sent: any[] = [];
@@ -20,8 +21,8 @@ async function call(method: string, path: string, token?: string, body?: any, ra
   });
   return { status: res.status, ...(await res.json()) };
 }
-const upload = (token: string, members: string[]) =>
-  call('POST', `/api/docs?name=plan.pdf${members.map((m) => '&member=' + encodeURIComponent(m)).join('')}`, token, undefined, PDF);
+const upload = (token: string, members: string[], name = 'plan.pdf') =>
+  call('POST', `/api/docs?name=${encodeURIComponent(name)}${members.map((m) => '&member=' + encodeURIComponent(m)).join('')}`, token, undefined, PDF);
 
 beforeAll(async () => {
   dir = mkdtempSync(join(process.cwd(), '.notify-test-'));
@@ -82,14 +83,43 @@ describe('assignment notifications', () => {
   it('clears only the signed-in user notification inbox', async () => {
     const up = await upload(ann, ['bob@example.com']);
     await new Promise((res) => setTimeout(res, 25));
+    expect((await call('POST', '/api/notifications/clear')).status).toBe(401);
     const before = await call('GET', '/api/notifications', bob);
     expect(before.notifications.length).toBeGreaterThan(0);
 
-    const cleared = await call('POST', '/api/notifications/read', bob, { clear: true });
+    await call('POST', '/api/notifications/read', bob, { all: true });
+    const cleared = await call('POST', '/api/notifications/clear', bob);
     expect(cleared).toMatchObject({ status: 200, notifications: [], unread: 0 });
     expect((await call('GET', '/api/notifications', bob)).notifications).toEqual([]);
     expect((await call('GET', '/api/notifications', admin)).notifications.length).toBeGreaterThan(0);
     expect((await call('GET', '/api/docs', ann)).docs.some((d: any) => d.id === up.doc.id)).toBe(true);
+  });
+
+  it('pushes new notifications to an authenticated client immediately', async () => {
+    let resolveInitial: (() => void) | undefined;
+    let resolveAssignment: (() => void) | undefined;
+    const initial = new Promise<void>((resolve) => { resolveInitial = resolve; });
+    const received = new Promise<void>((resolve) => { resolveAssignment = resolve; });
+    const client = createClient({
+      configFile: join(dir, 'live-client.json'),
+      localFile: join(dir, 'live-local.json'),
+      onNotifications: (snapshot: any) => {
+        resolveInitial?.();
+        if (snapshot.notifications.some((n: any) => n.type === 'assignment' && n.docName === 'live-update.pdf')) resolveAssignment?.();
+      },
+    });
+    try {
+      expect((await client.configure({ mode: 'server', serverUrl: base })).ok).toBe(true);
+      expect((await client.login({ email: 'bob@example.com', password: 'password1' })).ok).toBe(true);
+      await initial;
+      const up = await upload(ann, ['bob@example.com'], 'live-update.pdf');
+      expect(up.status).toBe(201);
+      await received;
+      const noAuth = await fetch(`${base}/api/notifications/stream`);
+      expect(noAuth.status).toBe(401);
+    } finally {
+      await client.logout();
+    }
   });
 
   it('tracks each assigned reviewer and reopens completion after markup changes', async () => {
@@ -111,6 +141,25 @@ describe('assignment notifications', () => {
     expect(marked.reviews.find((r: any) => r.email === 'cara@example.com').done).toBe(false);
     const reviewAlert = await call('GET', '/api/notifications', cara);
     expect(reviewAlert.notifications[0].type).toBe('review');
+    const ownerAlert = await call('GET', '/api/notifications', ann);
+    expect(ownerAlert.notifications[0]).toMatchObject({
+      type: 'review',
+      by: 'Bob',
+      message: 'Bob marked the review done for "plan.pdf".',
+    });
+
+    const reopened = await call('POST', `/api/docs/${id}/review`, bob, { done: false });
+    expect(reopened.status).toBe(200);
+    await new Promise((res) => setTimeout(res, 25));
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toMatchObject({ to: 'ann@example.com', cc: ['bob@example.com', 'cara@example.com'] });
+    expect(sent[1].subject).toContain('Review reopened');
+    expect(sent[1].text).toContain('Bob reopened their review for "plan.pdf".');
+    expect((await call('GET', '/api/notifications', ann)).notifications[0]).toMatchObject({
+      type: 'review',
+      by: 'Bob',
+      message: 'Bob reopened the review for "plan.pdf".',
+    });
 
     const markup = {
       id: 'bob-markup',

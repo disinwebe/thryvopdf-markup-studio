@@ -218,7 +218,16 @@ ipcMain.handle('save-many', guard(async (e, { files }) => {
 app.whenReady().then(() => {
   const ud = app.getPath('userData');
   license = createLicenseStore({ file: path.join(ud, 'device-license.json'), publicKeyFile: path.join(__dirname, '..', 'dist', 'license-public.pem') });
-  auth = createClient({ configFile: path.join(ud, 'server.json'), localFile: path.join(ud, 'users.json'), fetch: net.fetch.bind(net) });
+  auth = createClient({
+    configFile: path.join(ud, 'server.json'),
+    localFile: path.join(ud, 'users.json'),
+    fetch: net.fetch.bind(net),
+    onNotifications: (snapshot) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('notifications-update', snapshot);
+      }
+    },
+  });
   ipcMain.handle('license-status', () => license.status());
   ipcMain.handle('license-import', async (e) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
