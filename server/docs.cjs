@@ -21,6 +21,8 @@ function validMarkup(m) {
   for (const p of m.points) if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return 'Invalid point.';
   if (typeof m.color !== 'string' || m.color.length > 40) return 'Invalid color.';
   if (!Number.isFinite(m.width) || !Number.isFinite(m.opacity)) return 'Invalid width or opacity.';
+  if (m.cloudArc !== undefined && (m.type !== 'cloud' || !Number.isFinite(m.cloudArc) || m.cloudArc < 4 || m.cloudArc > 80)) return 'Invalid cloud arc diameter.';
+  if (m.stampLockAspectRatio !== undefined && (m.type !== 'stamp' || typeof m.stampLockAspectRatio !== 'boolean')) return 'Invalid stamp aspect ratio setting.';
   if (typeof m.author !== 'string' || typeof m.date !== 'string' || typeof m.status !== 'string') return 'Missing author, date or status.';
   if (!Array.isArray(m.comments)) return 'Invalid comments.';
   if (m.type === 'line' && m.comments.length) return 'Plain line drawings cannot have comments.';

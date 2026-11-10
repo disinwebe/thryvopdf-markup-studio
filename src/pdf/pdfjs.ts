@@ -18,6 +18,11 @@ export async function loadPdf(bytes: Uint8Array): Promise<PDFDocumentProxy> {
   return pdfjs.getDocument({ data: displayBytes.slice() }).promise;
 }
 
+/** Loads saved markup appearances without stripping app annotations, for raster-only views such as Compare. */
+export async function loadPdfForCompare(bytes: Uint8Array): Promise<PDFDocumentProxy> {
+  return pdfjs.getDocument({ data: bytes.slice() }).promise;
+}
+
 export interface PdfComment {
   id: string;
   subtype: string;

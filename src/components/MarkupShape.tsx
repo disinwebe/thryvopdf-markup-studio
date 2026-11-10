@@ -1,4 +1,4 @@
-import { arrowHead, boxCenter, boxOf, cloudPoints, rectPoly, wrapText, approxTextWidth } from '../core/geometry';
+import { arrowHead, boxCenter, boxOf, cloudPointsFromPath, rectPoly, wrapText, approxTextWidth } from '../core/geometry';
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
 import { calloutLayout, calloutTextRuns } from '../core/callout';
@@ -52,7 +52,7 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       break;
     }
     case 'cloud': {
-      const p = cloudPoints(boxOf(m));
+      const p = cloudPointsFromPath(m.points, m.cloudArc);
       body = <path {...common} fill={m.fill ?? 'none'} d={d(p, true)} />;
       break;
     }

@@ -18,7 +18,7 @@ import {
   bbox,
   boxCenter,
   boxOf,
-  cloudPoints,
+  cloudPointsFromPath,
   rectPoly,
   wrapText,
 } from './geometry';
@@ -232,10 +232,14 @@ export function buildAppearance(
       extra.QuadPoints = [q[0], q[1], q[3], q[2]].flatMap((p) => [f(p.x), f(p.y)]);
       break;
     }
-    case 'rect':
-    case 'cloud': {
+    case 'rect': {
       const r = boxOf(m);
-      viewPts = m.type === 'cloud' ? cloudPoints(r) : rectPoly(r);
+      viewPts = rectPoly(r);
+      ops = `${stroke} ${fillC ? fillC.join(' ') + ' rg' : ''} ${path(viewPts, true)} ${fillC ? 'B' : 'S'}`;
+      break;
+    }
+    case 'cloud': {
+      viewPts = cloudPointsFromPath(m.points, m.cloudArc);
       ops = `${stroke} ${fillC ? fillC.join(' ') + ' rg' : ''} ${path(viewPts, true)} ${fillC ? 'B' : 'S'}`;
       break;
     }
@@ -494,11 +498,15 @@ export async function writeAnnotations(
   for (const [idx, list] of byPage) {
     const page = pages[idx];
     if (!page) continue;
+    const maxZ = Math.max(-1, ...list.map((markup) => markup.zOrder ?? -1));
+    const ordered = list.map((markup, index) => ({ markup, index, order: markup.zOrder ?? (maxZ >= 0 ? maxZ + 1 + index : index) }))
+      .sort((a, b) => a.order - b.order || a.index - b.index)
+      .map(({ markup }) => markup);
     const g = pageGeom(page);
-    const lines = list.filter((m) => m.type === 'line');
+    const lines = ordered.filter((m) => m.type === 'line');
     setPageData(page, { lines: lines.map((m) => ({ ...m, comments: [] })) });
     writeLineContent(page, g, lines);
-    for (const m of list) {
+    for (const m of ordered) {
       if (m.type === 'line') continue;
       const b = buildAppearance(
         m,

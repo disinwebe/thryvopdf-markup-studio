@@ -122,6 +122,12 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           <span>{m.width}</span>
         </label>
       )}
+      {m.type === 'cloud' && (
+        <label>
+          Cloud arc diameter ({m.cloudArc ?? 14} pt)
+          <input type="range" min={4} max={80} step={1} value={m.cloudArc ?? 14} onChange={(e) => upd({ cloudArc: +e.target.value }, 'cloud-arc')} />
+        </label>
+      )}
       <label>
         Opacity
         <input type="range" min={0.1} max={1} step={0.05} value={m.opacity} onChange={(e) => upd({ opacity: +e.target.value }, 'opacity')} />
@@ -141,15 +147,23 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         </label>
       )}
       {m.type === 'stamp' && (
-        <label>
-          Stamp
-          <select value={m.stampImage ? '__custom__' : m.stamp} onChange={(e) => upd({ stamp: e.target.value, stampImage: undefined })}>
-            {m.stampImage && <option value="__custom__">Custom image</option>}
-            {STAMPS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </label>
+        <>
+          <label>
+            Stamp
+            <select value={m.stampImage ? '__custom__' : m.stamp} onChange={(e) => upd({ stamp: e.target.value, stampImage: undefined, stampLockAspectRatio: undefined })}>
+              {m.stampImage && <option value="__custom__">Custom image</option>}
+              {STAMPS.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+          {m.stampImage && (
+            <label className="inline-check">
+              Lock aspect ratio
+              <input type="checkbox" checked={m.stampLockAspectRatio !== false} onChange={(e) => upd({ stampLockAspectRatio: e.target.checked }, 'stamp-ratio')} />
+            </label>
+          )}
+        </>
       )}
       {(m.type === 'text' || m.type === 'callout' || m.type === 'note') && (
         <textarea

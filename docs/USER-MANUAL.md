@@ -74,7 +74,7 @@ Enter your email and password on the sign-in screen. If an administrator issued 
 
 The main workspace has:
 
-- **Top toolbar:** Open and save PDFs, undo/redo, switch Viewer or Compare, open shared documents, check notifications, and sign out.
+- **Top toolbar:** Open and save PDFs, undo/redo, switch Viewer or Compare, place PDF text and symbols, manage signatures, open shared documents, check notifications, and sign out.
 - **Tabs:** Each open PDF has a tab. A dot indicates unsaved changes. Double-click a local PDF tab name to rename it; shared-document names cannot be renamed here.
 - **Markup toolbar:** Select and Pan tools plus markup tools.
 - **Measure toolbar:** A separate row directly below Markup. Choose Length, PolyLength, Area, Perimeter, Angle, or Count here. Choosing a measurement tool does not open the Measurements window.
@@ -107,7 +107,8 @@ To close a document, choose the **X** on its tab or **File > Close Document**. S
 
 1. Open a PDF and choose a tool from the **Markup** toolbar.
 2. Draw on the page:
-   - **Highlight, Text, Cloud, Rectangle, Ellipse, Line, Arrow:** click and drag to define the shape.
+   - **Highlight, Text, Rectangle, Ellipse, Line, Arrow:** click and drag to define the shape.
+   - **Cloud:** click to add each vertex around the area, then press **Enter**, double-click, or right-click to finish.
    - **Pen:** click and drag to draw freehand.
    - **Polyline:** click to add points, then press **Enter**, double-click, or right-click to finish.
    - **Angle:** click three points to finish.
@@ -156,6 +157,29 @@ The red numbered comment ID appears beside the comment box and in the Markups pa
 4. Click the drawing to place the stamp, then use Select to move or resize it.
 
 Supported stamp sources include common image formats and PDF files up to 20 MB. Imported PDF pages and animated images become still images.
+
+### Cloud arc size
+
+Create a Cloud by clicking each vertex around the area to outline, then press **Enter**, double-click, or right-click to finish. Select a Cloud markup and adjust **Cloud arc diameter** in the right-side properties. Smaller values make tighter, more frequent scallops; larger values make broader arcs. The setting is saved with the markup.
+
+### Object stacking order
+
+Right-click a placed Stamp, Text, Symbol, or Signature and choose **Bring to Front** or **Bring to Back** to change its drawing order relative to other stackable objects on that page. This order is preserved in saved PDFs by flattening these objects together as page content; other markups and comments remain PDF annotations. These commands are unavailable in read-only or live shared documents.
+
+### Selecting multiple items
+
+With the **Select** tool active, hold **Ctrl** (or **Command** on macOS) and click items to add or remove them one at a time; **Shift-click** also adds items. Alternatively, drag a selection window across the page to select annotations, measurements, comment boxes, Stamps, Text, Symbols, and Signatures. Drag any selected item to move the selection together. Comment boxes remain attached to their markup and can also be selected and repositioned separately.
+
+### Text, symbols, and signatures
+
+The **Text**, **Symbol**, and **Signatures** buttons are in the top toolbar immediately after **Compare**. These tools write to PDF page content rather than creating markup annotations, so they do not appear in the Markups list or markup count. Use them on local PDFs; live shared documents do not support these page-content edits.
+
+- **Text:** Choose its size and color, then click the page to create a text object and enter its content. Press **Enter** to apply it; use **Shift+Enter** for a new line. Select and drag it to move, drag its corner to resize, and double-click to edit. It is regular PDF text content, not a text-box annotation, and can be searched or edited with a PDF editor that supports editing page content.
+- **Symbol:** Choose a check, X, star, circle, plus/minus, question mark, or exclamation mark, set its size and color, then click the page. Select and drag the symbol to move or drag its corner to resize it. Symbols are flattened into page graphics when saved.
+- **Signatures:** Choose **Signatures**, then upload one or more PNG files. For an image with a white paper background, select **Remove white background from uploaded PNGs** before uploading; white and near-white pixels become transparent. Leave it unchecked for PNGs that already have transparency or contain white ink. Manage the saved names and entries on this device. Choose **Place selected signature**, then click the page. Select and drag the signature to move or drag its corner to resize it. Signatures are flattened into PDF page content when saved.
+- **Cut, copy, and paste:** Right-click a selected Text, Symbol, Signature, Stamp, or markup and choose **Cut**, **Copy**, or **Paste**. **Ctrl/Cmd+X**, **Ctrl/Cmd+C**, and **Ctrl/Cmd+V** work for the current selection too. A right-click Paste places the copied items around the clicked point; keyboard Paste offsets them from their original position.
+
+Save the PDF after placing page content to keep the changes in the output file. Stamps, Text, Symbols, and Signatures are combined in their selected stacking order when saved; the original objects are no longer editable in the saved copy. Other markups and comments remain PDF annotations. The signature list is stored locally on the current device and is not synchronized to the shared server.
 
 ## 6. Measure drawings
 

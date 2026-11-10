@@ -64,6 +64,25 @@ export function calloutTextRuns(co: CalloutLayout, tag?: number): CalloutTextRun
 /** The annotation's end point: its last point, or for box-like shapes the border point nearest the comment box. */
 export function anchorOf(m: Pick<Markup, 'type' | 'points'>, toward: Pt): Pt {
   if (m.type === 'arrow') return m.points[0] ?? { x: 0, y: 0 };
+  if (m.type === 'cloud' && m.points.length >= 3) {
+    let nearest = m.points[0];
+    let nearestDistance = Infinity;
+    for (let index = 0; index < m.points.length; index++) {
+      const a = m.points[index];
+      const b = m.points[(index + 1) % m.points.length];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lengthSquared = dx * dx + dy * dy;
+      const ratio = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((toward.x - a.x) * dx + (toward.y - a.y) * dy) / lengthSquared));
+      const point = { x: a.x + ratio * dx, y: a.y + ratio * dy };
+      const distance = Math.hypot(point.x - toward.x, point.y - toward.y);
+      if (distance < nearestDistance) {
+        nearest = point;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
+  }
   const last = m.points[m.points.length - 1] ?? { x: 0, y: 0 };
   if (m.type === 'callout' || !BOX_TYPES.includes(m.type)) return last;
   const r = boxOf(m);

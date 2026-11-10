@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream } from 'pdf-lib';
 import { readState, saveWithState } from '../src/core/annotations';
 import { stampDimensions, validStampImage } from '../src/core/stamp';
-import { applyHandle, translate } from '../src/core/geometry';
+import { applyHandle, cloudPoints, translate } from '../src/core/geometry';
 import type { Markup } from '../src/core/types';
 import { batchChanges } from '../src/app/shared';
 
@@ -18,9 +18,26 @@ const markup = (): Markup => ({
 });
 
 describe('custom stamp', () => {
+  it('uses the cloud arc diameter when generating cloud points', () => {
+    const box = { x: 0, y: 0, w: 200, h: 120 };
+    expect(cloudPoints(box, 6).length).toBeGreaterThan(cloudPoints(box, 24).length);
+  });
+
+  it('persists cloud arc diameter with the markup state', async () => {
+    const pdf = await PDFDocument.create();
+    pdf.addPage([300, 400]);
+    const cloud = { ...markup(), type: 'cloud' as const, stampImage: undefined, cloudArc: 27 };
+    const bytes = await saveWithState(await pdf.save(), { markups: [cloud], calibrations: {}, sheets: {}, bookmarks: [] });
+    const saved = await readState(await PDFDocument.load(bytes));
+    expect(saved.markups[0].cloudArc).toBe(27);
+  });
+
   it('validates bounded PNGs for local and server-side use', () => {
     expect(validStampImage(image)).toBe(true);
     expect(validMarkup(markup())).toBe(null);
+    const cloud = { ...markup(), type: 'cloud' as const, stampImage: undefined };
+    expect(validMarkup({ ...cloud, cloudArc: 24 })).toBe(null);
+    expect(validMarkup({ ...cloud, cloudArc: 81 })).toBe('Invalid cloud arc diameter.');
     expect(validStampImage({ ...image, data: 'data:image/svg+xml;base64,abc' })).toBe(false);
     expect(validMarkup({ ...markup(), stampImage: { ...image, width: 801 } })).toBe('Invalid stamp image.');
     expect(validMarkup({ ...markup(), type: 'rect' })).toBe('Invalid stamp image.');
@@ -35,16 +52,27 @@ describe('custom stamp', () => {
     expect(new TextEncoder().encode(JSON.stringify({ upserts: batch, deletes: [] })).length).toBeLessThan(4 * 1024 * 1024);
   });
 
+  it('locks custom stamp resizing to the image ratio by default and allows free resizing', () => {
+    const source = markup();
+    const locked = applyHandle(source, 2, { x: 140, y: 160 });
+    const lockedWidth = Math.abs(locked.points[1].x - locked.points[0].x);
+    const lockedHeight = Math.abs(locked.points[1].y - locked.points[0].y);
+    expect(lockedWidth / lockedHeight).toBeCloseTo(70 / 80);
+
+    const free = applyHandle({ ...source, stampLockAspectRatio: false }, 2, { x: 140, y: 160 });
+    expect(free.points).toEqual([{ x: 10, y: 20 }, { x: 140, y: 160 }]);
+  });
+
   it('preserves image, move, resize and opacity in a real PDF annotation', async () => {
     const pdf = await PDFDocument.create();
     pdf.addPage([300, 400]);
     const moved = translate(markup(), 10, 15);
-    const changed = applyHandle(moved, 2, { x: 140, y: 160 });
+    const changed = applyHandle({ ...moved, stampLockAspectRatio: false }, 2, { x: 140, y: 160 });
     changed.opacity = 0.55;
     const bytes = await saveWithState(await pdf.save(), { markups: [changed], calibrations: {}, sheets: {}, bookmarks: [] });
     const reopened = await PDFDocument.load(bytes);
     const state = await readState(reopened);
-    expect(state.markups[0]).toMatchObject({ stampImage: image, opacity: 0.55, points: changed.points });
+    expect(state.markups[0]).toMatchObject({ stampImage: image, stampLockAspectRatio: false, opacity: 0.55, points: changed.points });
     const annots = reopened.getPages()[0].node.Annots() as PDFArray;
     const annot = annots.lookup(0, PDFDict);
     expect(annot.lookup(PDFName.of('Subtype'), PDFName).asString()).toBe('/Stamp');
