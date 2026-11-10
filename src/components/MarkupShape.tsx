@@ -2,6 +2,7 @@ import { arrowHead, boxCenter, boxOf, cloudPointsFromPath, rectPoly, wrapText, a
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, Pt } from '../core/types';
 import { calloutLayout, calloutTextRuns } from '../core/callout';
+import { measurementArrowheads } from '../core/snapping';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
 const d = (p: Pt[], close = false) => 'M' + p.map((q) => `${q.x} ${q.y}`).join(' L') + (close ? ' Z' : '');
@@ -64,16 +65,16 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
     case 'line':
     case 'm-length': {
       const [a, b] = m.points;
+      const arrowheads = measurementArrowheads(m);
+      const startArrow = m.measurementArrowheads === 'start' || m.measurementArrowheads === 'both';
+      const endArrow = m.measurementArrowheads === 'end' || m.measurementArrowheads === 'both';
       body = (
         <>
           <path {...common} d={d([a, b])} />
-          {m.type === 'm-length' && (
-            <>
-              <circle cx={a.x} cy={a.y} r={2.5} fill={m.color} />
-              <circle cx={b.x} cy={b.y} r={2.5} fill={m.color} />
-              <Label text={label} x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2 - 6} color={m.color} />
-            </>
-          )}
+          {!startArrow && <circle cx={a.x} cy={a.y} r={2.5} fill={m.color} />}
+          {!endArrow && <circle cx={b.x} cy={b.y} r={2.5} fill={m.color} />}
+          {arrowheads.map((head, index) => <polygon key={index} points={pts(head)} fill={m.color} stroke={m.color} strokeWidth={1} />)}
+          <Label text={label} x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2 - 6} color={m.color} />
         </>
       );
       break;

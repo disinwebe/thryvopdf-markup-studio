@@ -11,10 +11,13 @@ import { ownsComment, ownsMarkup, type Actor } from '../core/comments';
 import { resizePageObject, type PageContentTool, type PageObject } from '../core/pageContent';
 import { orderedPageLayers, topPageLayerAt } from '../core/layerOrder';
 import { normalizedRect, selectInWindow } from '../core/selection';
+import { SnapIndex, SnapTarget, snapPoint } from '../core/snapping';
+import { pageSnapIndex } from '../pdf/snapping';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
 const MULTI: Tool[] = ['cloud', 'polyline', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
+const SNAP_TOOLS: Tool[] = ['calibrate', 'm-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
 
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; sl: number; st: number }
@@ -68,10 +71,38 @@ export function PageView(p: PageViewProps) {
     setDraftState(d);
   };
   const [cur, setCur] = useState<Pt | null>(null);
+  const [snapIndex, setSnapIndex] = useState<SnapIndex | null>(null);
+  const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null);
   const [selectionWindow, setSelectionWindow] = useState<ReturnType<typeof normalizedRect> | null>(null);
   const drag = useRef<Drag | null>(null);
   const spaceDown = useRef(false);
   const anchor = useRef<{ pt: Pt; ox: number; oy: number } | null>(null);
+  const messageRef = useRef(p.onMessage);
+  messageRef.current = p.onMessage;
+
+  const snapAt = (point: Pt): Pt => {
+    if (!SNAP_TOOLS.includes(tool) || !snapIndex) {
+      setSnapTarget(null);
+      return point;
+    }
+    const target = snapPoint(point, snapIndex, 10 / zoom);
+    setSnapTarget(target);
+    return target?.point ?? point;
+  };
+
+  useEffect(() => {
+    let live = true;
+    setSnapIndex(null);
+    setSnapTarget(null);
+    pageSnapIndex(doc.pdf, doc.page).then((index) => {
+      if (live) setSnapIndex(index);
+    }).catch((error: unknown) => {
+      if (live) messageRef.current(`Could not load measurement snap geometry: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return () => {
+      live = false;
+    };
+  }, [doc.pdf, doc.page]);
 
   useEffect(() => {
     let live = true;
@@ -263,7 +294,7 @@ export function PageView(p: PageViewProps) {
       return;
     }
     if (e.button !== 0) return;
-    const pt = toPt(e);
+    const pt = snapAt(toPt(e));
     e.currentTarget.setPointerCapture(e.pointerId);
 
     if (p.contentTool) {
@@ -421,7 +452,7 @@ export function PageView(p: PageViewProps) {
       sc.scrollTop = dg.st - (e.clientY - dg.sy);
       return;
     }
-    const pt = toPt(e);
+    const pt = snapAt(toPt(e));
     if (draftRef.current) setCur(pt);
     if (!dg) return;
     if (dg.kind === 'selection-window') {
@@ -522,7 +553,7 @@ export function PageView(p: PageViewProps) {
       return;
     }
     if (!dg) return;
-    if (dg.kind === 'two' && dg.moved && draftRef.current) finishTwo(draftRef.current[0], toPt(e));
+    if (dg.kind === 'two' && dg.moved && draftRef.current) finishTwo(draftRef.current[0], snapAt(toPt(e)));
     else if (dg.kind === 'pen' && draftRef.current) {
       const pts = simplify(draftRef.current, 0.8);
       setDraft(null);
@@ -602,6 +633,16 @@ export function PageView(p: PageViewProps) {
             {preview && (
               <g opacity={0.85}>
                 <MarkupShape m={preview} cal={cal} />
+              </g>
+            )}
+            {snapTarget && SNAP_TOOLS.includes(tool) && (
+              <g aria-hidden="true" pointerEvents="none" stroke="#1565c0" strokeWidth={1.5 / zoom}>
+                {snapTarget.kind === 'intersection' ? (
+                  <>
+                    <path d={`M${snapTarget.point.x - 6 / zoom} ${snapTarget.point.y} L${snapTarget.point.x + 6 / zoom} ${snapTarget.point.y} M${snapTarget.point.x} ${snapTarget.point.y - 6 / zoom} L${snapTarget.point.x} ${snapTarget.point.y + 6 / zoom}`} />
+                    <circle cx={snapTarget.point.x} cy={snapTarget.point.y} r={3 / zoom} fill="#fff" />
+                  </>
+                ) : <circle cx={snapTarget.point.x} cy={snapTarget.point.y} r={4 / zoom} fill="#fff" />}
               </g>
             )}
             {pageMarkups.filter((markup) => p.selectedMarkupIds.includes(markup.id)).map((markup) => {

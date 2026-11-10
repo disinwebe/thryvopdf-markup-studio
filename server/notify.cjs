@@ -248,6 +248,12 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
       }
       if (changed) save();
     },
+    clear(email) {
+      if (inbox[email]) {
+        delete inbox[email];
+        save();
+      }
+    },
     dropUser(email) {
       if (inbox[email]) { delete inbox[email]; save(); }
     },

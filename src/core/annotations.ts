@@ -26,6 +26,7 @@ import { countNumbers, DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
 import { isReviewMarkup, numberMarkups } from './numbering';
 import { calloutLayout, calloutTextRuns } from './callout';
+import { measurementArrowheads } from './snapping';
 
 export interface PageGeom {
   x0: number;
@@ -274,8 +275,18 @@ export function buildAppearance(
         extra.LE = ['None', 'OpenArrow'];
       }
       if (m.type === 'm-length') {
-        ops += ` ${col.join(' ')} rg ${circlePath(a, 2.5)} ${circlePath(b, 2.5)}`;
         viewPts = [a, b];
+        const heads = measurementArrowheads(m);
+        const startArrow = m.measurementArrowheads === 'start' || m.measurementArrowheads === 'both';
+        const endArrow = m.measurementArrowheads === 'end' || m.measurementArrowheads === 'both';
+        if (startArrow || endArrow) {
+          ops = `${stroke} ${path([a, b])} S`;
+          if (!startArrow) ops += ` ${col.join(' ')} rg ${circlePath(a, 2.5)}`;
+          if (!endArrow) ops += ` ${col.join(' ')} rg ${circlePath(b, 2.5)}`;
+          ops += ` ${col.join(' ')} rg ${heads.map((head) => path(head, true)).join(' ')} f`;
+          extra.LE = [startArrow ? 'ClosedArrow' : 'None', endArrow ? 'ClosedArrow' : 'None'];
+          viewPts.push(...heads.flat());
+        } else ops += ` ${col.join(' ')} rg ${circlePath(a, 2.5)} ${circlePath(b, 2.5)}`;
         const anchor = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         const text = measureLabel(m, cal);
         includeLabel(text, anchor.x + 4, anchor.y - 6);

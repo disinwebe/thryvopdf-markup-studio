@@ -79,6 +79,19 @@ describe('assignment notifications', () => {
     expect((await call('POST', '/api/notifications/read', bob, { all: true })).unread).toBe(0);
   });
 
+  it('clears only the signed-in user notification inbox', async () => {
+    const up = await upload(ann, ['bob@example.com']);
+    await new Promise((res) => setTimeout(res, 25));
+    const before = await call('GET', '/api/notifications', bob);
+    expect(before.notifications.length).toBeGreaterThan(0);
+
+    const cleared = await call('POST', '/api/notifications/read', bob, { clear: true });
+    expect(cleared).toMatchObject({ status: 200, notifications: [], unread: 0 });
+    expect((await call('GET', '/api/notifications', bob)).notifications).toEqual([]);
+    expect((await call('GET', '/api/notifications', admin)).notifications.length).toBeGreaterThan(0);
+    expect((await call('GET', '/api/docs', ann)).docs.some((d: any) => d.id === up.doc.id)).toBe(true);
+  });
+
   it('tracks each assigned reviewer and reopens completion after markup changes', async () => {
     const up = await upload(ann, ['bob@example.com', 'cara@example.com']);
     const id = up.doc.id;

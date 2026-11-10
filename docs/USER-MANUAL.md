@@ -64,6 +64,8 @@ If the connection screen appears:
 4. Sign in with your company account, or choose **Register another user** if registration is open.
 5. Server registrations may require administrator approval before the account can sign in.
 
+When registering, choose your discipline from the list; it includes Instrumentation, Process, and Piping.
+
 Use **Change** on the sign-in screen to update the server address. Choose **Use local accounts on this PC only** only if you intend to use a separate account store on this computer; local accounts are not shared with other PCs.
 
 ### Sign in and password
@@ -214,6 +216,12 @@ Measurements are drawing checks, not review comments: placing one does not open 
 
 The Takeoff table is separate from the Markups panel. Measurement entries are not comments and are not included in markup-comment CSV exports. Page calibration is saved in the PDF, but is not synchronized to other collaborators on a shared document. Coordinate measurement assumptions with your team before sharing quantities.
 
+The subject remains the default while you continue using the same measurement tool, so repeated Count placements can share a subject such as `D2`. Choosing a different measurement tool clears the subject for the new takeoff type.
+
+For Length, PolyLength, Area, Perimeter, Angle, and calibration, clicks snap to nearby vector line endpoints or intersections. The snap marker shows the target before you click. Snapping works on vector drawing geometry; scanned or image-only pages do not contain line endpoints to snap to.
+
+To add arrowheads to a Length measurement, select it and choose **Start**, **End**, or **Both** under **Endpoint arrowheads** in the properties panel. Adjust **Arrow size** there as needed. The arrows appear in the viewer and saved PDF.
+
 ### Read the measurement labels
 
 - **Length** shows the calibrated distance between the two picked points.
@@ -298,7 +306,7 @@ Shared documents are available when the app is connected in server mode. A signe
 1. Open **Shared Documents**.
 2. Choose **Upload current tab**, **Upload PDFs...**, or **Upload project folder...**.
 3. Choose a group (existing, new, or no group) and optionally enter a description.
-4. Select the users who should have access. The uploader retains access; without selecting others, only the uploader can access the new document.
+4. In **Users allowed to access these documents**, optionally filter the list by discipline or search names and email addresses, then select the users who should have access. Select-all applies to the users currently matching the filters. The uploader retains access; without selecting others, only the uploader can access the new document.
 5. Choose **Upload** and review the result or per-file upload status.
 
 Uploads must be PDFs no larger than 150 MB each. Folder upload retains subfolder names as labels; it does not create separate folder permissions. Selection is limited to 500 PDFs. An upload with a large number of existing markups may take longer to complete.
@@ -308,7 +316,7 @@ Uploads must be PDFs no larger than 150 MB each. Folder upload retains subfolder
 Only the uploader can change a document's access list:
 
 1. In Shared Documents, find the uploaded document and choose **Manage access**.
-2. Select or clear the users who should have access.
+2. Optionally filter by discipline or search names and email addresses, then select or clear the users who should have access. Select-all applies to the users currently matching the filters.
 3. Choose **Save access**.
 
 The administrator can delete a document or group only where they have the required access. Group rename and deletion permissions depend on the uploader/admin role and access to the documents in the group. Deleting a document or group removes it for everyone and cannot be undone.

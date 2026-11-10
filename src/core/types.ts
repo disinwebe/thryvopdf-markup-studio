@@ -79,6 +79,8 @@ export interface Markup {
   calloutSize?: { width: number; height: number };
   /** Hide the drawing callout without deleting the review thread. */
   calloutHidden?: boolean;
+  measurementArrowheads?: 'none' | 'start' | 'end' | 'both';
+  measurementArrowSize?: number;
 }
 
 export type Unit = 'ft' | 'in' | 'm' | 'mm';
@@ -124,4 +126,4 @@ export const uid = () => {
   return b[0].toString(36) + b[1].toString(36) + Date.now().toString(36).slice(-3);
 };
 
-export const DISCIPLINE_LIST = ['General', 'Architectural', 'Structural', 'Civil', 'Mechanical', 'Electrical', 'Plumbing', 'Fire Protection', 'Landscape', 'Interior'];
+export const DISCIPLINE_LIST = ['General', 'Architectural', 'Structural', 'Civil', 'Mechanical', 'Instrumentation', 'Process', 'Piping', 'Electrical', 'Plumbing', 'Fire Protection', 'Landscape', 'Interior'];

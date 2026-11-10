@@ -34,8 +34,13 @@ export function useNotifications(user: AuthUser | null, serverMode: boolean) {
     try { apply(scope, await window.api.notifications({ read })); } catch { /* next poll retries */ }
   }, [scope, apply]);
 
+  const clearAll = useCallback(async () => {
+    if (scope === null || !window.api) return;
+    try { apply(scope, await window.api.notifications({ clear: true })); } catch { /* next poll retries */ }
+  }, [scope, apply]);
+
   if (scope === null) return null;
-  return { state: snap?.scope === scope ? snap.state : { notifications: [], unread: 0, error: false }, markRead };
+  return { state: snap?.scope === scope ? snap.state : { notifications: [], unread: 0, error: false }, markRead, clearAll };
 }
 
 export type NotificationsApi = NonNullable<ReturnType<typeof useNotifications>>;
@@ -43,7 +48,7 @@ export type NotificationsApi = NonNullable<ReturnType<typeof useNotifications>>;
 export function NotificationBell({ api, onOpenShared, onOpenNotification }: { api: NotificationsApi | null; onOpenShared?: () => void; onOpenNotification?: (notification: AppNotification) => void }) {
   const [open, setOpen] = useState(false);
   if (!api) return null;
-  const { state, markRead } = api;
+  const { state, markRead, clearAll } = api;
   const latest = state.notifications.find((n) => !n.read);
   const openNotification = (notification: AppNotification) => {
     void markRead([notification.id]);
@@ -66,7 +71,10 @@ export function NotificationBell({ api, onOpenShared, onOpenNotification }: { ap
         <div className="notif-list">
           <div className="row between">
             <strong>Notifications</strong>
-            <button type="button" onClick={() => void markRead('all')} disabled={state.unread === 0}>Mark all read</button>
+            <div className="row">
+              <button type="button" onClick={() => void markRead('all')} disabled={state.unread === 0}>Mark all read</button>
+              <button type="button" onClick={() => void clearAll()} disabled={state.notifications.length === 0}>Clear all notifications</button>
+            </div>
           </div>
           {state.error && <p className="muted">Could not refresh notifications. Retrying shortly.</p>}
           {state.notifications.length === 0 && <p className="muted">No notifications.</p>}
