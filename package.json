@@ -11,6 +11,7 @@
     "build": "tsc --noEmit && vite build && node scripts/embed-license-key.cjs",
     "start": "npm run build && electron .",
     "electron": "electron .",
+    "manual:pdf": "node scripts/generate-user-manual.cjs",
     "test": "vitest run",
     "server": "node server/server.cjs",
     "dist": "npm run build && electron-builder --win nsis --publish never",

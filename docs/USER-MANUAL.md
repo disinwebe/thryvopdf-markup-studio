@@ -15,7 +15,7 @@ This manual follows the current ThryvoPDF Markup Studio 1.0 desktop build. It ex
 - [Add and edit markups](#5-add-and-edit-markups)
 - [Measure drawings](#6-measure-drawings)
 - [Compare drawing revisions](#7-compare-drawing-revisions)
-- [Organize pages, bookmarks, and sheet metadata](#8-organize-pages-bookmarks-and-sheet-metadata)
+- [Organize pages and bookmarks](#8-organize-pages-and-bookmarks)
 - [Search text in open PDFs](#9-search-text-in-open-pdfs)
 - [Shared documents and review assignments](#10-shared-documents-and-review-assignments)
 - [Notifications](#11-notifications)
@@ -223,11 +223,11 @@ The Takeoff table is separate from the Markups panel. Measurement entries are no
 - **Angle** reports the angle formed by three points.
 - **Count** places a numbered marker. The Takeoff table groups counts by subject.
 
-In the example, labels are shown directly on the drawing. Counts are numbered in the drawing and summarized by subject in Takeoff. Always confirm the active page's calibration and unit before using quantities.
+In the example, labels are shown directly on the drawing. Counts are numbered in the drawing and summarized by subject in Takeoff. Multiple measurement markups can also be selected together and moved as a group. Always confirm the active page's calibration and unit before using quantities.
 
-![Drawing with length, polyline, area, angle, and count examples](user-manual-assets/measurements.png)
+![Illustration of length, polyline, area, angle, and count measurements on a calibrated drawing, with multiple measurements selected](user-manual-assets/measurements.svg)
 
-*Figure 3. Example measurement overlay. The displayed values are illustrative; calibrate your own drawing before measuring.*
+*Figure 3. Measurement overlay with a group of selected measurements. Values are illustrative; calibrate your own drawing before measuring.*
 
 ## 7. Compare drawing revisions
 
@@ -246,7 +246,7 @@ In the example, labels are shown directly on the drawing. Counts are numbered in
 
 Compare is raster-based and finds visual differences; it does not interpret drawing objects or text semantics.
 
-## 8. Organize pages, bookmarks, and sheet metadata
+## 8. Organize pages and bookmarks
 
 ### Organize pages
 
@@ -267,21 +267,14 @@ If no page is selected, applicable actions can apply to all pages. The app preve
 4. Edit a title, move it up/down, indent/outdent it, or delete it.
 5. Save the PDF to store the bookmark outline.
 
-### Sheet index
-
-1. Open the **Sheet index** panel, if it is exposed in your build.
-2. Enter sheet number, title, discipline, and revision for each page.
-3. Select a page number to navigate to it. Click a column heading to sort by that field.
-4. Choose **Export this doc CSV** or **Export all open CSV**.
-
 ## 9. Search text in open PDFs
 
-1. Open the **Search documents** panel from **View**, if available in your build.
+1. Open a PDF, switch to **Viewer** if needed, and choose **View > Search text in open PDFs...** or press **Ctrl+Shift+F**.
 2. Enter the text to find and choose **Search** or press **Enter**.
 3. Leave **All open documents** checked to search every open PDF; uncheck it to search only the active PDF.
 4. Select a result to navigate to its page.
 
-Search works on PDFs with a text layer. Scanned pages without OCR text cannot be searched.
+Text search is available in unlicensed viewer mode as well as licensed mode. It searches PDF text layers; scanned pages without OCR text cannot be searched.
 
 ## 10. Shared documents and review assignments
 
@@ -327,7 +320,7 @@ The administrator can delete a document or group only where they have the requir
 3. Your status is separate from other reviewers' statuses. A document's group count becomes Done only after every assigned reviewer has completed their review.
 4. If markup content changes after completion, the server reopens reviews for the updated markup revision.
 
-The uploader receives an email when a reviewer marks a review done, with assigned users copied, if the administrator has configured email. Reopening a review sends an in-app alert to other assigned reviewers; completion and reopening status is also visible in the document list.
+Newly assigned reviewers receive an in-app alert and, if the administrator has configured email, an assignment email. The uploader receives an email when a reviewer marks a review done, with assigned users copied, if email is configured. Reopening a review sends an in-app alert to other assigned reviewers; completion and reopening status is also visible in the document list.
 
 ### Work in a shared PDF
 
@@ -337,14 +330,14 @@ The uploader receives an email when a reviewer marks a review done, with assigne
 4. If offline or your session expires, the banner displays a warning. Keep the document open and restore the connection so pending changes can sync.
 5. You can move, resize, edit, or delete only markups and comments you authored. The server enforces these restrictions.
 
-Shared documents sync markups and comments, not page calibration, bookmarks, sheet metadata, or page organization. Page reorder, rotate, and insert are unavailable on shared tabs. If two people edit the same markup at the same time, the last change accepted by the server wins.
+Shared documents sync markups and comments, not page calibration, bookmarks, or page organization. Page reorder, rotate, and insert are unavailable on shared tabs. If two people edit the same markup at the same time, the last change accepted by the server wins.
 
 ## 11. Notifications
 
 In server mode, choose **Notifications** in the top-right area:
 
 - The unread count appears on the button.
-- Assignment, review, and pending-registration alerts appear in the inbox.
+- Assignment, review, and pending-registration alerts appear in the inbox. Newly assigned reviewers are notified in-app; they also receive an email when the administrator has enabled and configured assignment email.
 - Choose **Open** on an alert to go to Shared Documents or, for a registration alert, user management.
 - Choose **Mark read** on an alert or **Mark all read** in the inbox.
 - The inbox refreshes automatically about every 30 seconds.
@@ -409,6 +402,7 @@ The manager saves email credentials in the server data folder's `notify.json`; l
 | `Ctrl+=` / `Ctrl+-` | Zoom in / out |
 | `Ctrl+Alt+L` | Show or hide left panel |
 | `Ctrl+Alt+R` | Show or hide right panel |
+| `Ctrl+Shift+F` | Search text in open PDFs |
 | `PageUp` / `PageDown` | Previous / next page |
 | `Enter` / double-click / right-click | Finish multi-point markup |
 

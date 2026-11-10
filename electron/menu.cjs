@@ -69,6 +69,7 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
       ] },
       { type: 'separator' },
       item('Or&ganize pages...', 'organizePanel', doc && viewerActive && writable),
+      item('&Search text in open PDFs...', 'searchPanel', doc && viewerActive, 'CmdOrCtrl+Shift+F'),
       item('Toggle &left panel', 'toggleLeftPanel', doc && viewerActive, 'CmdOrCtrl+Alt+L'),
       item('Toggle &right panel', 'toggleRightPanel', doc && viewerActive, 'CmdOrCtrl+Alt+R'),
     ] },
