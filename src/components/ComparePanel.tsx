@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Doc, downloadName, saveBytes } from '../app/model';
 import { CompareStats, Raster, autoAlign, compareRasters, COLOR_ADDED, COLOR_REMOVED } from '../core/compare';
 import { pageSize, renderRaster } from '../pdf/pdfjs';
+import { ContextMenuIcon } from './ContextMenuIcon';
 
 const BOX_W = 1800,
   BOX_H = 1300;
@@ -56,9 +57,15 @@ export function ComparePanel({
   const rasters = useRef<{ a: Raster; b: Raster } | null>(null);
   const overlay = useRef<Raster | null>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [panEnabled, setPanEnabled] = useState(false);
+  const [panning, setPanning] = useState(false);
   const cOver = useRef<HTMLCanvasElement>(null);
   const cA = useRef<HTMLCanvasElement>(null);
   const cB = useRef<HTMLCanvasElement>(null);
+  const compareView = useRef<HTMLDivElement>(null);
+  const compareMenu = useRef<HTMLDivElement>(null);
+  const panDrag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
 
   const docA = docs.find((d) => d.id === aId);
   const docB = docs.find((d) => d.id === bId);
@@ -67,6 +74,22 @@ export function ComparePanel({
     if (!docs.find((d) => d.id === aId)) setAId(docs[0]?.id ?? '');
     if (!docs.find((d) => d.id === bId)) setBId(docs[docs.length - 1]?.id ?? '');
   }, [docs, aId, bId]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!compareMenu.current?.contains(event.target as Node)) setContextMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('pointerdown', closeOutside);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeOutside);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [contextMenu]);
 
   const recompute = (t = tol, s = shift) => {
     const r = rasters.current;
@@ -227,22 +250,67 @@ export function ComparePanel({
           <span>Changed: {(stats.changeRatio * 100).toFixed(1)}%</span>
         </div>
       )}
-      <div className="compare-view">
+      <div
+        className={'compare-view' + (panEnabled ? ' pan-enabled' : '') + (panning ? ' panning' : '')}
+        ref={compareView}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setContextMenu({
+            x: Math.max(4, Math.min(event.clientX, window.innerWidth - 180)),
+            y: Math.max(4, Math.min(event.clientY, window.innerHeight - 130)),
+          });
+        }}
+        onPointerDown={(event) => {
+          if (!panEnabled || event.button !== 0 || !compareView.current) return;
+          panDrag.current = { x: event.clientX, y: event.clientY, left: compareView.current.scrollLeft, top: compareView.current.scrollTop };
+          setPanning(true);
+          event.currentTarget.setPointerCapture(event.pointerId);
+          event.preventDefault();
+        }}
+        onPointerMove={(event) => {
+          const drag = panDrag.current;
+          if (!drag || !compareView.current) return;
+          compareView.current.scrollLeft = drag.left - (event.clientX - drag.x);
+          compareView.current.scrollTop = drag.top - (event.clientY - drag.y);
+        }}
+        onPointerUp={() => { panDrag.current = null; setPanning(false); }}
+        onPointerCancel={() => { panDrag.current = null; setPanning(false); }}
+      >
         {!size && <p className="muted pad">Pick two documents/pages and press Compare. Open a new revision with “Open revision…”.</p>}
         {size && mode !== 'side' && <canvas ref={cOver} style={{ width: size.w * zoom, height: size.h * zoom }} />}
         {size && mode === 'side' && (
-          <div className="side">
+          <div className="compare-side-by-side">
             <div>
               <div className="cap">A · {docA?.name} p{aPage + 1}</div>
-              <canvas ref={cA} style={{ width: size.w * zoom, height: size.h * zoom }} />
+              <canvas ref={cA} className="compare-page" style={{ width: size.w * zoom, height: size.h * zoom }} />
             </div>
             <div>
               <div className="cap">B · {docB?.name} p{bPage + 1}</div>
-              <canvas ref={cB} style={{ width: size.w * zoom, height: size.h * zoom }} />
+              <canvas ref={cB} className="compare-page" style={{ width: size.w * zoom, height: size.h * zoom }} />
             </div>
           </div>
         )}
       </div>
+      {contextMenu && (
+        <div
+          className="viewer-context-menu compare-context-menu"
+          ref={compareMenu}
+          role="menu"
+          aria-label="Compare view context menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button role="menuitem" onClick={() => { setPanEnabled((enabled) => !enabled); setContextMenu(null); }}>
+            <ContextMenuIcon action="pan" />{panEnabled ? 'Stop panning' : 'Pan'}
+          </button>
+          <button role="menuitem" onClick={() => { setZoom((value) => Math.min(3, value * 1.25)); setContextMenu(null); }}>
+            <ContextMenuIcon action="zoom-in" />Zoom In
+          </button>
+          <button role="menuitem" onClick={() => { setZoom((value) => Math.max(0.1, value / 1.25)); setContextMenu(null); }}>
+            <ContextMenuIcon action="zoom-out" />Zoom Out
+          </button>
+        </div>
+      )}
     </div>
   );
 }

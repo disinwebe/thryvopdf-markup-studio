@@ -36,6 +36,7 @@ export interface PageViewProps {
   onLive(markups: Markup[]): void;
   onZoom(z: number): void;
   onCalibrate(a: Pt, b: Pt): void;
+  onContextMenu(event: React.MouseEvent<HTMLDivElement>, markupId: string | null, point: Pt): void;
   onMessage(msg: string): void;
 }
 
@@ -448,8 +449,15 @@ export function PageView(p: PageViewProps) {
             onDoubleClick={onDouble}
             onContextMenu={(e) => {
               e.preventDefault();
+              const point = toPt(e);
               const d = draftRef.current;
               if (d && MULTI.includes(tool)) finish(d);
+              const calloutHit = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, point));
+              const candidates = doc.shared ? doc.markups.filter((m) => ownsMarkup(m, p.user)) : doc.markups;
+              const hit = calloutHit ?? pickTop(candidates, doc.page, point, 6 / zoom);
+              const selectable = hit && (!doc.shared || ownsMarkup(hit, p.user)) ? hit : null;
+              if (selectable) p.onSelect(selectable.id);
+              p.onContextMenu(e, selectable?.id ?? null, point);
             }}
           />
         </div>
