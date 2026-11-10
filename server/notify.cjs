@@ -155,6 +155,7 @@ function sendMail(cfg, to, subject, text, timeoutMs = 20000, cc = []) {
 function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }) {
   const inboxFile = path.join(dir, 'notifications.json');
   const configFile = path.join(dir, 'notify.json');
+  const subscribers = new Map();
   let inbox = {};
   try {
     const j = JSON.parse(fs.readFileSync(inboxFile, 'utf8'));
@@ -174,11 +175,30 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
     try { return normalizeSmtp(JSON.parse(fs.readFileSync(configFile, 'utf8')).smtp); } catch { return normalizeSmtp(); }
   };
   const view = (n) => ({ id: n.id, type: n.type, docId: n.docId, docName: n.docName, by: n.by, message: n.message, created: n.created, read: !!n.read });
+  const emit = (email) => {
+    const listeners = subscribers.get(email);
+    if (!listeners?.size) return;
+    const snapshot = {
+      notifications: (inbox[email] || []).map(view),
+      unread: (inbox[email] || []).filter((item) => !item.read).length,
+    };
+    for (const listener of listeners) listener(snapshot);
+  };
 
   return {
+    subscribe(email, listener) {
+      const listeners = subscribers.get(email) || new Set();
+      listeners.add(listener);
+      subscribers.set(email, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (!listeners.size) subscribers.delete(email);
+      };
+    },
     registered(user, admins) {
       const created = new Date(now()).toISOString();
-      for (const admin of [...new Map(admins.map((a) => [a.email, a])).values()]) {
+      const uniqueAdmins = [...new Map(admins.map((a) => [a.email, a])).values()];
+      for (const admin of uniqueAdmins) {
         const items = inbox[admin.email] || (inbox[admin.email] = []);
         items.unshift({
           id: crypto.randomBytes(9).toString('base64url'),
@@ -189,11 +209,16 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
         });
         if (items.length > MAX_PER_USER) items.length = MAX_PER_USER;
       }
-      if (admins.length) save();
+      if (uniqueAdmins.length) {
+        save();
+        for (const admin of uniqueAdmins) emit(admin.email);
+      }
     },
     reviewed(doc, by, recipients, done) {
       const created = new Date(now()).toISOString();
-      const list = [...new Map(recipients.map((r) => [r.email, r])).values()].filter((r) => r.email !== by.email);
+      const owner = { name: doc.ownerName || doc.owner, email: doc.owner };
+      const list = [...new Map([...recipients, owner].filter((r) => r.email).map((r) => [r.email, r])).values()]
+        .filter((r) => r.email !== by.email);
       for (const recipient of list) {
         const items = inbox[recipient.email] || (inbox[recipient.email] = []);
         items.unshift({
@@ -208,16 +233,19 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
         });
         if (items.length > MAX_PER_USER) items.length = MAX_PER_USER;
       }
-      if (list.length) save();
-      if (!done) return Promise.resolve();
+      if (list.length) {
+        save();
+        for (const recipient of list) emit(recipient.email);
+      }
       const cfg = smtp();
-      const owner = { name: doc.ownerName || doc.owner, email: doc.owner };
       if (!cfg.enabled || !EMAIL_RE.test(owner.email)) return Promise.resolve();
       const cc = [...new Set(recipients.map((recipient) => recipient.email))]
         .filter((email) => email !== owner.email && EMAIL_RE.test(email));
-      const text = `${by.name} marked their review as done for "${doc.name}".\n\nUploader: ${owner.name} (${owner.email})\nDocument: ${doc.name}\n\nThis is an automated message from your ThryvoPDF server.`;
-      return Promise.resolve().then(() => send(cfg, owner.email, `Review completed: ${doc.name}`.slice(0, 200), text, undefined, cc))
-        .catch((e) => log(`Review completion email to ${owner.email} failed: ${e.message}`));
+      const status = done ? 'completed' : 'reopened';
+      const action = done ? 'marked their review as done' : 'reopened their review';
+      const text = `${by.name} ${action} for "${doc.name}".\n\nUploader: ${owner.name} (${owner.email})\nDocument: ${doc.name}\n\nThis is an automated message from your ThryvoPDF server.`;
+      return Promise.resolve().then(() => send(cfg, owner.email, `Review ${status}: ${doc.name}`.slice(0, 200), text, undefined, cc))
+        .catch((e) => log(`Review ${status} email to ${owner.email} failed: ${e.message}`));
     },
     // Records an in-app alert and sends an email for each newly assigned user.
     assigned(doc, by, recipients, publicUrl) {
@@ -229,7 +257,10 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
         items.unshift({ id: crypto.randomBytes(9).toString('base64url'), type: 'assignment', docId: doc.id, docName: doc.name, by: by.name, message, created, read: false });
         if (items.length > MAX_PER_USER) items.length = MAX_PER_USER;
       }
-      if (list.length) save();
+      if (list.length) {
+        save();
+        for (const recipient of list) emit(recipient.email);
+      }
       const cfg = smtp();
       if (!cfg.enabled) return Promise.resolve();
       return Promise.all(list.filter((r) => EMAIL_RE.test(r.email)).map((r) => {
@@ -246,16 +277,24 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
       for (const n of inbox[email] || []) {
         if ((ids === 'all' || ids.includes(n.id)) && !n.read) { n.read = true; changed = true; }
       }
-      if (changed) save();
+      if (changed) {
+        save();
+        emit(email);
+      }
     },
     clear(email) {
       if (inbox[email]) {
         delete inbox[email];
         save();
+        emit(email);
       }
     },
     dropUser(email) {
-      if (inbox[email]) { delete inbox[email]; save(); }
+      if (inbox[email]) {
+        delete inbox[email];
+        save();
+        emit(email);
+      }
     },
   };
 }

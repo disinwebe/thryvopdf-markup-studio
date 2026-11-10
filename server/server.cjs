@@ -256,6 +256,10 @@ function createApp(opts = {}) {
     members.every((email) => typeof email === 'string' && email === normEmail(email) && find(email)?.status === 'active');
   const invalidMembers = [400, { ok: false, error: 'Select valid active users for document access.' }];
   handlers['GET /api/notifications'] = authed((s) => [200, { ok: true, ...notifier.list(s.user.email) }]);
+  handlers['POST /api/notifications/clear'] = authed((s) => {
+    notifier.clear(s.user.email);
+    return [200, { ok: true, ...notifier.list(s.user.email) }];
+  });
   handlers['POST /api/notifications/read'] = authed((s, b) => {
     if (b.clear === true) notifier.clear(s.user.email);
     else {
@@ -295,6 +299,55 @@ function createApp(opts = {}) {
       res.end(JSON.stringify(body));
     };
     const url = new URL(req.url || '/', 'http://x');
+    if (req.method === 'GET' && url.pathname === '/api/notifications/stream') {
+      const session = sessionOf(req);
+      if (!session) {
+        res.writeHead(401, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: false, error: 'Session expired. Sign in again.' }));
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.write('retry: 3000\n\n');
+      let closed = false;
+      let heartbeat;
+      let unsubscribe = () => {};
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+      };
+      const push = (snapshot) => {
+        if (closed || res.destroyed || res.writableEnded) return;
+        try {
+          res.write(`event: notifications\ndata: ${JSON.stringify(snapshot)}\n\n`);
+        } catch {
+          finish();
+          res.destroy();
+        }
+      };
+      res.on('close', finish);
+      req.on('aborted', finish);
+      unsubscribe = notifier.subscribe(session.user.email, push);
+      push(notifier.list(session.user.email));
+      heartbeat = setInterval(() => {
+        if (!sessionOf(req)) {
+          if (!closed && !res.destroyed && !res.writableEnded) {
+            res.write('event: auth\ndata: {"expired":true}\n\n');
+            res.end();
+          }
+          finish();
+          return;
+        }
+        if (!closed && !res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
+      }, 15_000);
+      return;
+    }
     let h = handlers[`${req.method} ${url.pathname}`];
     let m = null;
     let raw = false;

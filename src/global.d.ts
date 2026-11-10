@@ -54,6 +54,7 @@ interface Window {
     sharedDocs(args: { op: 'list' | 'users' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group' | 'delete-group' | 'members' | 'review'; id?: string; name?: string; project?: string; newProject?: string; revision?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; members?: string[]; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number; done?: boolean }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
     notifications(args?: { read?: string[] | 'all'; clear?: boolean }): Promise<{ ok: boolean; error?: string; notifications?: AppNotification[]; unread?: number }>;
+    onNotifications?(callback: (snapshot: { notifications: AppNotification[]; unread: number }) => void): () => void;
     adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;
     adminAction(args: { email: string; action: string; role?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string }>;
     testServer(url: string): Promise<{ ok: boolean; error?: string; url?: string; hasUsers?: boolean }>;
