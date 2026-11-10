@@ -80,7 +80,12 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 .compare { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .compare-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .compare-view { flex: 1; overflow: auto; background: var(--canvas); padding: 10px; }
-.compare-view.side, .side-by { display: flex; gap: 10px; }
+.compare-side-by-side { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; width: max-content; min-width: 100%; }
+.compare-side-by-side > div { flex: 0 0 auto; }
+.compare-page { display: block; max-width: none; height: auto; }
+.compare-view.pan-enabled { cursor: grab; }
+.compare-view.pan-enabled canvas { pointer-events: none; }
+.compare-view.panning { cursor: grabbing; }
 .legend span { margin-right: 10px; }
 .cap { text-align: center; color: var(--mut); }
 .nudge { display: inline-flex; gap: 2px; }
@@ -89,6 +94,10 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 .empty { margin: auto; text-align: center; }
 .status { display: flex; align-items: center; gap: 10px; padding: 3px 10px; background: var(--stat); color: var(--mut); border-top: 1px solid var(--line); font-size: 12px; }
 .status-link { padding: 0; border: 0; background: none; color: var(--acc); text-decoration: underline; cursor: pointer; font-size: inherit; }
+.viewer-context-menu { position: fixed; z-index: 20; display: flex; flex-direction: column; min-width: 190px; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px var(--shadow); }
+.viewer-context-menu button { display: flex; align-items: center; gap: 9px; width: 100%; padding: 5px 10px; text-align: left; border: 0; background: transparent; }
+.context-menu-icon { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.context-menu-separator { height: 1px; margin: 4px 2px; background: var(--line); }
 .auth { height: 100%; display: flex; align-items: center; justify-content: center; }
 .auth-card { width: 360px; display: flex; flex-direction: column; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 24px; }
 .auth-card h1 { margin: 0; font-size: 20px; } .auth-card h2 { margin: 0 0 4px; font-size: 14px; color: var(--mut); font-weight: 500; }

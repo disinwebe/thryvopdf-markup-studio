@@ -29,7 +29,7 @@ interface AuthStatus {
 type AuthResult = { ok: true; user: AuthUser; pending?: undefined } | { ok: true; pending: true; message: string; user?: undefined } | { ok: false; error: string };
 interface Window {
   api?: {
-    setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; serverMode: boolean; blocked: boolean; viewOnly?: boolean }): void;
+    setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; canFlattenSelected?: boolean; canFlattenAll?: boolean; serverMode: boolean; blocked: boolean; viewOnly?: boolean }): void;
     setNativeTheme(theme: 'dark' | 'light'): void;
     onMenuAction(fn: (action: string) => void): () => void;
     quitApp(): Promise<void>;

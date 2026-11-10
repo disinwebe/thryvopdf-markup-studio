@@ -74,7 +74,7 @@ describe('native menu wiring', () => {
   });
   it('disables document and server actions when unavailable and sends selected actions', () => {
     const send = vi.fn();
-    const menu = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: true, selected: true, canUndo: true, serverMode: true, admin: true, passwordAvailable: true }, send, 'win32');
+    const menu = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: true, selected: true, canFlattenSelected: true, canUndo: true, serverMode: true, admin: true, passwordAvailable: true }, send, 'win32');
     expect(menu.map((m: { label: string }) => m.label)).toEqual(['&File', '&Edit', '&Option', '&View', '&Help']);
     const file = menu[0].submenu;
     expect(file.find((m: { label: string }) => m.label === '&Save').enabled).toBe(true);
@@ -82,6 +82,19 @@ describe('native menu wiring', () => {
     expect(send).toHaveBeenCalledWith('csv');
     file.find((m: { label: string }) => m.label === '&Logout').click();
     expect(send).toHaveBeenCalledWith('logout');
+    const edit = menu[1].submenu;
+    const flatten = edit.find((entry: { label: string }) => entry.label === '&Flatten').submenu;
+    const flattenSelected = flatten.find((entry: { label: string }) => entry.label === 'Flatten &selected markup');
+    expect(flattenSelected.enabled).toBe(true);
+    flattenSelected.click();
+    expect(send).toHaveBeenCalledWith('flatten');
+    expect(flatten.find((entry: { label: string }) => entry.label === 'Flatten &All').enabled).toBe(false);
+    const allMenu = menuTemplate({ signedIn: true, documentOpen: true, canFlattenAll: true }, send, 'win32');
+    const flattenAll = allMenu[1].submenu.find((entry: { label: string }) => entry.label === '&Flatten').submenu
+      .find((entry: { label: string }) => entry.label === 'Flatten &All');
+    expect(flattenAll.enabled).toBe(true);
+    flattenAll.click();
+    expect(send).toHaveBeenCalledWith('flattenAll');
     const option = menu[2].submenu;
     for (const [label, action] of [['&Users...', 'users'], ['&Password...', 'password'], ['&Theme: toggle light / dark', 'theme']]) {
       const entry = option.find((m: { label: string }) => m.label === label);
@@ -140,6 +153,7 @@ describe('native menu wiring', () => {
     expect(file.find((m: { label: string }) => m.label === '&Open PDF...').enabled).toBe(true);
     expect(file.find((m: { label: string }) => m.label === '&Save').enabled).toBe(false);
     expect(file.find((m: { label: string }) => m.label === '&Logout').enabled).toBe(false);
+    expect(menu[1].submenu.find((entry: { label: string }) => entry.label === '&Flatten').enabled).toBe(false);
     menu[4].submenu.find((m: { label: string }) => m.label === '&License...').click();
     expect(send).toHaveBeenCalledWith('license');
   });

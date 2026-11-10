@@ -10,7 +10,7 @@ const actionIcons = {
 };
 
 function menuTemplate(state, send, platform = process.platform, iconForAction = () => undefined) {
-  const { signedIn = false, licensed = true, documentOpen = false, viewerActive = false, canUndo = false, canRedo = false, selected = false, serverMode = false, admin = false, passwordAvailable = false, blocked = false, viewOnly = false } = state;
+  const { signedIn = false, licensed = true, documentOpen = false, viewerActive = false, canUndo = false, canRedo = false, selected = false, canFlattenSelected = false, canFlattenAll = false, serverMode = false, admin = false, passwordAvailable = false, blocked = false, viewOnly = false } = state;
   const usable = (signedIn || viewOnly) && !blocked;
   const doc = usable && documentOpen;
   const writable = licensed && !viewOnly;
@@ -39,6 +39,10 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
       item('&Select tool (V)', 'select', doc && licensed),
       item('Pa&n tool (H; hold Space)', 'pan', doc),
       item('&Delete selected markup', 'delete', doc && writable && selected),
+      { label: '&Flatten', enabled: doc && writable, submenu: [
+        item('Flatten &selected markup', 'flatten', doc && writable && canFlattenSelected),
+        item('Flatten &All', 'flattenAll', doc && writable && canFlattenAll),
+      ] },
     ] },
     { label: '&Option', submenu: [
       { ...item('&Users...', 'users', usable && admin), visible: admin },

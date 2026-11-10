@@ -2,6 +2,9 @@ import { canDeleteMarkup } from './core/comments';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveWithState } from './core/annotations';
 import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure, uid } from './core/types';
+import { boxOf, translate } from './core/geometry';
+import { loadPdf } from './pdf/pdfjs';
+import { rasterizeMarkups } from './app/rasterizeMarkups';
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
@@ -35,6 +38,7 @@ import { loadMarkupStyleDefaults, saveMarkupStyleDefaults } from './app/styleDef
 import { KeyIcon } from './components/KeyIcon';
 import { CommentPopup } from './components/CommentPopup';
 import { SelectIcon } from './components/SelectIcon';
+import { ContextMenuIcon } from './components/ContextMenuIcon';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
@@ -52,6 +56,7 @@ const HISTORY_LIMIT = 100;
 
 type RightTab = 'markups' | 'measure' | 'organize' | 'sheets' | 'search';
 type LeftTab = 'pages' | 'bookmarks' | 'project';
+type ViewerContextMenu = { x: number; y: number; markupId: string | null; point: Pt };
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
@@ -86,12 +91,20 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [library, setLibrary] = useState(false);
   const [sharedRevision, setSharedRevision] = useState(0);
   const [commentTarget, setCommentTarget] = useState<{ docId: string; markupId: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<ViewerContextMenu | null>(null);
+  const [clipboardMarkup, setClipboardMarkup] = useState<Markup | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<HTMLDivElement>(null);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
 
   const active = docs.find((d) => d.id === activeId) ?? null;
+  useEffect(() => {
+    if (!viewOnly && (tool === 'stamp' || active?.markups.find((markup) => markup.id === selectedId)?.type === 'stamp')) {
+      setDefaultsOpen(true);
+    }
+  }, [tool, selectedId, activeId, viewOnly]);
   const logout = async () => {
     if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
     await leaveAll();
@@ -99,6 +112,21 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
   const say = useCallback((m: string) => { setMsg(m); setSavedPdfPath(null); }, []);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!contextMenuRef.current?.contains(event.target as Node)) setContextMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('pointerdown', closeOutside);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeOutside);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [contextMenu]);
 
   const updateDoc = useCallback((id: string, fn: (d: Doc) => Partial<Doc>) => {
     setDocs((all) => all.map((d) => (d.id === id ? { ...d, ...fn(d) } : d)));
@@ -204,6 +232,81 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     }
     commit(active.id, active.markups.filter((m) => m.id !== id));
     setSelectedId(null);
+  };
+
+  const copyContextMarkup = () => {
+    const markup = active?.markups.find((item) => item.id === contextMenu?.markupId);
+    if (markup) setClipboardMarkup({ ...markup, points: markup.points.map((point) => ({ ...point })), comments: [] });
+    setContextMenu(null);
+  };
+
+  const cutContextMarkup = () => {
+    const markup = active?.markups.find((item) => item.id === contextMenu?.markupId);
+    if (!markup) return;
+    setClipboardMarkup({ ...markup, points: markup.points.map((point) => ({ ...point })), comments: [] });
+    deleteMarkup(markup.id);
+    setContextMenu(null);
+  };
+
+  const pasteContextMarkup = () => {
+    if (!active || !clipboardMarkup || readOnly || !contextMenu) return;
+    const bounds = boxOf(clipboardMarkup);
+    const pasted = translate(clipboardMarkup, contextMenu.point.x - (bounds.x + bounds.w / 2), contextMenu.point.y - (bounds.y + bounds.h / 2));
+    const markup: Markup = {
+      ...pasted,
+      id: uid(),
+      page: active.page,
+      author: user.name,
+      authorEmail: user.email,
+      date: new Date().toISOString(),
+      status: 'None',
+      comments: [],
+    };
+    commit(active.id, [...active.markups, markup]);
+    setSelectedId(markup.id);
+    setContextMenu(null);
+    say('Markup pasted.');
+  };
+
+  const flattenContextMarkups = async (requestedIds: string[]) => {
+    const document = active;
+    if (!document || readOnly) return;
+    if (document.shared) {
+      setContextMenu(null);
+      say('Flattening is unavailable in live shared documents because their page-content changes are not synchronized. Open a local PDF copy to flatten it.');
+      return;
+    }
+    const requested = new Set(requestedIds);
+    const targets = document.markups.filter((markup) => requested.has(markup.id) && canDeleteMarkup(markup, user));
+    if (!targets.length) {
+      setContextMenu(null);
+      say('There are no markups you can flatten.');
+      return;
+    }
+    const partial = targets.length !== requested.size;
+    const scope = requested.size === 1 ? 'the selected markup' : 'all markups you can edit';
+    const warning = partial ? '\nMarkups you do not own will remain editable.' : '';
+    if (!window.confirm(`Flatten ${scope} into the PDF as raster images? This is permanent and cannot be undone. Save a copy first if you may need to edit them later.${warning}`)) return;
+    setContextMenu(null);
+    say(`Rasterizing ${targets.length} markup(s)...`);
+    try {
+      const result = await rasterizeMarkups(document.bytes, stateOf(document), targets.map((markup) => markup.id));
+      const pdf = await loadPdf(result.bytes);
+      updateDoc(document.id, () => ({
+        bytes: result.bytes,
+        pdf,
+        markups: result.markups,
+        undo: [],
+        redo: [],
+        dirty: true,
+      }));
+      setSelectedId(null);
+      say(`Flattened ${targets.length} markup(s) into the PDF. Save to keep the changes.`);
+    } catch (error) {
+      const message = 'Could not flatten markup(s): ' + (error instanceof Error ? error.message : String(error));
+      say(message);
+      window.alert(message);
+    }
   };
 
   // ---- file ops -----
@@ -460,7 +563,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       return;
     }
     if (library || actions.uiBlocked || commentTarget || defaultsOpen || licenseInfo) return;
-    if (readOnly && ['save', 'saveAs', 'csv', 'undo', 'redo', 'delete', 'toolDefaults', 'measurePanel', 'organizePanel', 'sheetsPanel'].includes(action)) return;
+    if (readOnly && ['save', 'saveAs', 'csv', 'undo', 'redo', 'delete', 'flatten', 'flattenAll', 'toolDefaults', 'measurePanel', 'organizePanel', 'sheetsPanel'].includes(action)) return;
     if (readOnly && action.startsWith('measure')) return;
     switch (action) {
       case 'open': void open(); break;
@@ -477,6 +580,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'select': setTool('select'); setPending(null); break;
       case 'pan': setTool('hand'); setPending(null); break;
       case 'delete': if (selectedId) deleteMarkup(selectedId); break;
+      case 'flatten':
+        if (selectedId) void flattenContextMarkups([selectedId]);
+        break;
+      case 'flattenAll':
+        if (active) void flattenContextMarkups(active.markups.map((markup) => markup.id));
+        break;
       case 'theme': setTheme(theme === 'dark' ? 'light' : 'dark'); break;
       case 'toggleLeftPanel': setLeftPanelVisible((visible) => !visible); break;
       case 'toggleRightPanel': setRightPanelVisible((visible) => !visible); break;
@@ -510,11 +619,13 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     api.setMenuState({
       signedIn: true, documentOpen: !!active, viewerActive: view === 'viewer', canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
       selected: !viewOnly && !!active && !!selectedId && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
+      canFlattenSelected: !viewOnly && !!active && !active.shared && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
+      canFlattenAll: !viewOnly && !!active && !active.shared && active.markups.some((markup) => canDeleteMarkup(markup, user)),
       serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || !!licenseInfo, viewOnly,
     });
   }, [active, selectedId, user, view, actions.serverMode, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, licenseInfo]);
   useEffect(() => () => window.api?.setMenuState({
-    signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, serverMode: false, blocked: false, viewOnly: false,
+    signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, canFlattenSelected: false, canFlattenAll: false, serverMode: false, blocked: false, viewOnly: false,
   }), []);
 
   const onDrop = async (e: React.DragEvent) => {
@@ -581,9 +692,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
 
   const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
+  const contextMarkup = contextMenu && active?.markups.find((markup) => markup.id === contextMenu.markupId && markup.page === active.page);
+  const flattenableCount = active?.markups.filter((markup) => canDeleteMarkup(markup, user)).length ?? 0;
 
   const toolBtn = (t: Tool) => (
-    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
+    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); if (t === 'stamp') setDefaultsOpen(true); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
       {t === 'select' ? <SelectIcon theme={theme} /> : <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>}{TOOL_LABEL[t]}
     </button>
   );
@@ -731,11 +844,30 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 user={user}
                 selectedId={selectedId}
                 fit={fit}
-                onSelect={(id) => { setSelectedId(id); if (id) setRightTab((t) => (t === 'measure' || t === 'markups' ? t : 'markups')); }}
+                onSelect={(id) => {
+                  setSelectedId(id);
+                  if (id) {
+                    setRightTab((tab) => (tab === 'measure' || tab === 'markups' ? tab : 'markups'));
+                    const markup = active.markups.find((item) => item.id === id);
+                    if (markup?.type === 'stamp') {
+                      setTool('select');
+                      setDefaultsOpen(true);
+                    }
+                  }
+                }}
                 onCreate={createMarkup}
                 onBeginEdit={beginEdit}
                 onLive={live}
                 onZoom={setZoom}
+                onContextMenu={(event, markupId, point) => {
+                  const currentSelection = active.markups.find((markup) => markup.id === selectedId && markup.page === active.page)?.id ?? null;
+                  setContextMenu({
+                    x: Math.max(4, Math.min(event.clientX, window.innerWidth - 220)),
+                    y: Math.max(4, Math.min(event.clientY, window.innerHeight - 360)),
+                    markupId: markupId ?? currentSelection,
+                    point,
+                  });
+                }}
                 onCalibrate={(a, b) => {
                   setPending({ a, b });
                   setRightTab('measure');
@@ -775,6 +907,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                     if (m) {
                       setSelectedId(id);
                       setTool('select');
+                      if (m.type === 'stamp') setDefaultsOpen(true);
                       goto(m.page);
                     }
                   }}
@@ -847,6 +980,47 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         )}
       </div>
       <div className="status">{msg}{savedPdfPath && <button className="status-link" onClick={() => void window.api?.openSavedPdf(savedPdfPath).catch((error) => say('Could not open the saved PDF: ' + (error instanceof Error ? error.message : String(error))))}>Open saved PDF</button>}</div>
+      {contextMenu && active && (
+        <div
+          className="viewer-context-menu"
+          ref={contextMenuRef}
+          role="menu"
+          aria-label="PDF viewer context menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button role="menuitem" disabled={!contextMarkup || readOnly || !canDeleteMarkup(contextMarkup, user)} onClick={cutContextMarkup}><ContextMenuIcon action="cut" />Cut</button>
+          <button role="menuitem" disabled={!contextMarkup} onClick={copyContextMarkup}><ContextMenuIcon action="copy" />Copy</button>
+          <button role="menuitem" disabled={!clipboardMarkup || readOnly} onClick={pasteContextMarkup}><ContextMenuIcon action="paste" />Paste</button>
+          <div className="context-menu-separator" />
+          <button role="menuitem" onClick={() => { setTool('select'); setPending(null); setContextMenu(null); }}><ContextMenuIcon action="select" />Select</button>
+          <button role="menuitem" onClick={() => { setTool('hand'); setContextMenu(null); }}><ContextMenuIcon action="pan" />Pan</button>
+          <button role="menuitem" onClick={() => { zoomBy(1.25); setContextMenu(null); }}><ContextMenuIcon action="zoom-in" />Zoom In</button>
+          <button role="menuitem" onClick={() => { zoomBy(1 / 1.25); setContextMenu(null); }}><ContextMenuIcon action="zoom-out" />Zoom Out</button>
+          {contextMarkup && (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                role="menuitem"
+                disabled={readOnly || !!active.shared || !canDeleteMarkup(contextMarkup, user)}
+                title={active.shared ? 'Open a local PDF copy to flatten shared-document markups.' : undefined}
+                onClick={() => void flattenContextMarkups([contextMarkup.id])}
+              >
+                <ContextMenuIcon action="flatten" />Flatten
+              </button>
+            </>
+          )}
+          <div className="context-menu-separator" />
+          <button
+            role="menuitem"
+            disabled={readOnly || !!active.shared || flattenableCount === 0}
+            title={active.shared ? 'Open a local PDF copy to flatten shared-document markups.' : undefined}
+            onClick={() => void flattenContextMarkups(active.markups.map((markup) => markup.id))}
+          >
+            <ContextMenuIcon action="flatten-all" />Flatten All
+          </button>
+        </div>
+      )}
       {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} onChanged={() => setSharedRevision((n) => n + 1)} />}
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
       {defaultsOpen && (
