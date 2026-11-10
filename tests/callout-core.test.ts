@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { anchorOf, calloutLayout, defaultCalloutPos, hitCallout, moveCallout } from '../src/core/callout';
 import { canDeleteComment, canDeleteMarkup, canEditComment } from '../src/core/comments';
-import { translate } from '../src/core/geometry';
+import { distToPath, translate } from '../src/core/geometry';
 import { saveWithState, readState } from '../src/core/annotations';
 import { Markup } from '../src/core/types';
 import { PDFDocument } from 'pdf-lib';
@@ -34,6 +34,17 @@ describe('comment callout geometry', () => {
   });
   it('connects boxes at the border point nearest the comment box', () => {
     expect(anchorOf({ type: 'rect', points: [{ x: 0, y: 0 }, { x: 100, y: 50 }] }, { x: 300, y: 25 })).toEqual({ x: 100, y: 25 });
+  });
+  it('keeps Cloud comment connectors attached to the nearest polygon edge as the Cloud moves', () => {
+    const cloud = m({
+      type: 'cloud',
+      points: [{ x: 10, y: 10 }, { x: 100, y: 10 }, { x: 10, y: 100 }],
+      callout: { x: 130, y: 30 },
+    });
+    const before = calloutLayout(cloud)!;
+    expect(distToPath(before.anchor, cloud.points, true)).toBeLessThan(0.001);
+    const moved = translate(cloud, 30, 20);
+    expect(calloutLayout(moved)!.anchor).toEqual({ x: before.anchor.x + 30, y: before.anchor.y + 20 });
   });
   it('has no box without comments, and moves/translates with the markup', () => {
     expect(calloutLayout(m({ comments: [] }))).toBeNull();

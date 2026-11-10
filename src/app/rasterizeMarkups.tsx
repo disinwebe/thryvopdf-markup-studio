@@ -6,6 +6,8 @@ import { pageGeom, saveWithState, type DocState } from '../core/annotations';
 import type { Markup } from '../core/types';
 import { MarkupShape } from '../components/MarkupShape';
 import { flattenMarkups, type PageRaster } from '../core/flatten';
+import { orderedPageLayers } from '../core/layerOrder';
+import type { PageObject } from '../core/pageContent';
 
 function pageTransform(rotation: number, width: number, height: number) {
   switch (rotation) {
@@ -39,6 +41,70 @@ async function toPng(svg: string, width: number, height: number): Promise<Uint8A
   } finally {
     URL.revokeObjectURL(blobUrl);
   }
+}
+
+function pageObjectSvg(object: PageObject): string {
+  if (object.kind === 'signature' && object.signature) {
+    return `<image href="${object.signature.data}" x="${object.x}" y="${object.y}" width="${object.width}" height="${object.height}" preserveAspectRatio="none"/>`;
+  }
+  if (object.kind === 'symbol') {
+    const glyphs = { check: '✓', x: '×', star: '★', circle: '●', 'open-circle': '○', plus: '+', minus: '−', question: '?', exclamation: '!' };
+    return `<text x="${object.x + object.width / 2}" y="${object.y + object.height * 0.82}" text-anchor="middle" font-size="${object.height}" fill="${object.color}">${glyphs[object.symbol ?? 'check']}</text>`;
+  }
+  const lines = (object.text ?? '').split(/\r?\n/).map((line, index) =>
+    `<tspan x="${object.x}" dy="${index === 0 ? 0 : object.fontSize * 1.2}">${escapeXml(line)}</tspan>`).join('');
+  return `<text x="${object.x}" y="${object.y + object.fontSize}" font-size="${object.fontSize}" fill="${object.color}" font-family="Helvetica, Arial, sans-serif">${lines}</text>`;
+}
+
+function escapeXml(text: string): string {
+  return text.replace(/[<>&'"]/g, (character) => ({
+    '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;',
+  })[character]!);
+}
+
+/** Flattens only stamps and the Text/Symbol/Signature page objects as one ordered visual layer. */
+export async function flattenStackableLayers(
+  bytes: Uint8Array,
+  state: DocState,
+  pageObjects: PageObject[],
+  stampIds?: string[],
+): Promise<{ bytes: Uint8Array; markups: Markup[] }> {
+  const requestedStamps = stampIds ? new Set(stampIds) : null;
+  const stamps = state.markups.filter((markup) => markup.type === 'stamp' && (!requestedStamps || requestedStamps.has(markup.id)));
+  const stackableIds = new Set(stamps.map((markup) => markup.id));
+  const pages = new Set([...stamps.map((markup) => markup.page), ...pageObjects.map((object) => object.page)]);
+  if (!pages.size) return { bytes: await saveWithState(bytes, state), markups: state.markups };
+
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const rasters: PageRaster[] = [];
+  for (const pageIndex of pages) {
+    const page = pdf.getPages()[pageIndex];
+    if (!page) throw new Error(`Could not find PDF page ${pageIndex + 1} for flattening.`);
+    const geometry = pageGeom(page);
+    const scale = Math.min(3, 4096 / Math.max(geometry.w, geometry.h), Math.sqrt(16_000_000 / (geometry.w * geometry.h)));
+    const width = Math.max(1, Math.ceil(geometry.w * scale));
+    const height = Math.max(1, Math.ceil(geometry.h * scale));
+    const stack = orderedPageLayers(
+      stamps.filter((markup) => markup.page === pageIndex),
+      pageObjects.filter((object) => object.page === pageIndex),
+    );
+    const shapes = stack.map((layer) => layer.kind === 'markup'
+      ? renderToStaticMarkup(<MarkupShape m={layer.value} cal={state.calibrations[pageIndex] ?? DEFAULT_CAL} />)
+      : pageObjectSvg(layer.value)).join('');
+    const transform = pageTransform(geometry.rotation, geometry.w, geometry.h);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${geometry.w} ${geometry.h}">${transform ? `<g transform="${transform}">${shapes}</g>` : shapes}</svg>`;
+    rasters.push({ page: pageIndex, png: await toPng(svg, width, height) });
+  }
+
+  const markups = state.markups.filter((markup) => !stackableIds.has(markup.id));
+  for (const raster of rasters) {
+    const page = pdf.getPages()[raster.page];
+    const image = await pdf.embedPng(raster.png);
+    const crop = page.getCropBox();
+    page.drawImage(image, { x: crop.x, y: crop.y, width: crop.width, height: crop.height });
+  }
+  const flattened = await pdf.save();
+  return { bytes: await saveWithState(flattened, { ...state, markups }), markups };
 }
 
 export async function rasterizeMarkups(

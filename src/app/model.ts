@@ -1,4 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
+import type { PageObject } from '../core/pageContent';
 import { DocState, readState } from '../core/annotations';
 import { Bookmark, Calibration, Markup, MarkupType, Pt, SheetMeta, uid } from '../core/types';
 import { PDFDocumentProxy, loadPdf } from '../pdf/pdfjs';
@@ -11,6 +12,7 @@ export interface Doc {
   pdf: PDFDocumentProxy;
   numPages: number;
   markups: Markup[];
+  pageObjects: PageObject[];
   undo: Markup[][];
   redo: Markup[][];
   calibrations: Record<number, Calibration>;
@@ -70,6 +72,7 @@ export async function createDoc(name: string, bytes: Uint8Array, path?: string, 
     pdf,
     numPages: pdf.numPages,
     ...st,
+    pageObjects: [],
     undo: [],
     redo: [],
     dirty,
@@ -90,6 +93,7 @@ export interface Style {
   fontSize: number;
   stamp: string;
   stampImage?: import('../core/stamp').StampImage;
+  stampLockAspectRatio?: boolean;
   subject: string;
 }
 
@@ -159,7 +163,10 @@ export function makeMarkup(
   if (type === 'note') m.text = '';
   if (type === 'stamp') {
     m.stamp = style.stamp;
-    if (style.stampImage) m.stampImage = style.stampImage;
+    if (style.stampImage) {
+      m.stampImage = style.stampImage;
+      m.stampLockAspectRatio = style.stampLockAspectRatio !== false;
+    }
   }
   if (style.fill && ['rect', 'ellipse', 'cloud', 'text', 'callout'].includes(type)) m.fill = style.fillColor;
   if (type.startsWith('m-') && style.subject.trim()) m.subject = style.subject.trim();

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Doc, Style, Tool, makeMarkup } from '../app/model';
-import { applyHandle, boxOf, dist, handlesOf, pickTop, simplify, translate, HandleKey } from '../core/geometry';
+import { applyHandle, boxOf, dist, handlesOf, hitMarkup, pickTop, simplify, translate, HandleKey } from '../core/geometry';
 import { countNumbers, DEFAULT_CAL } from '../core/measurement';
 import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas } from '../pdf/pdfjs';
@@ -8,10 +8,13 @@ import { MarkupShape } from './MarkupShape';
 import { numberMarkups } from '../core/numbering';
 import { CALLOUT_MAX, CALLOUT_MIN_H, CALLOUT_MIN_W, calloutLayout, hitCallout, moveCallout } from '../core/callout';
 import { ownsComment, ownsMarkup, type Actor } from '../core/comments';
+import { resizePageObject, type PageContentTool, type PageObject } from '../core/pageContent';
+import { orderedPageLayers, topPageLayerAt } from '../core/layerOrder';
+import { normalizedRect, selectInWindow } from '../core/selection';
 
-const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
+const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
-const MULTI: Tool[] = ['polyline', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
+const MULTI: Tool[] = ['cloud', 'polyline', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
 
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; sl: number; st: number }
@@ -19,6 +22,10 @@ type Drag =
   | { kind: 'callout'; start: Pt; orig: Markup; from: Pt; began: boolean }
   | { kind: 'callout-resize'; start: Pt; orig: Markup; width: number; height: number; began: boolean }
   | { kind: 'handle'; key: HandleKey; orig: Markup; began: boolean }
+  | { kind: 'page-object-move'; start: Pt; orig: PageObject }
+  | { kind: 'page-object-resize'; start: Pt; orig: PageObject }
+  | { kind: 'selection-move'; start: Pt; markups: Markup[]; callouts: Markup[]; pageObjects: PageObject[]; began: boolean }
+  | { kind: 'selection-window'; start: Pt; additive: boolean }
   | { kind: 'two'; moved: boolean }
   | { kind: 'pen' };
 
@@ -28,16 +35,22 @@ export interface PageViewProps {
   style: Style;
   author: string;
   user: Actor;
-  selectedId: string | null;
+  selectedMarkupIds: string[];
+  selectedCalloutIds: string[];
+  selectedPageObjectIds: string[];
   fit: { mode: 'width' | 'page'; n: number };
-  onSelect(id: string | null): void;
   onCreate(m: Markup): void;
   onBeginEdit(): void;
   onLive(markups: Markup[]): void;
   onZoom(z: number): void;
   onCalibrate(a: Pt, b: Pt): void;
-  onContextMenu(event: React.MouseEvent<HTMLDivElement>, markupId: string | null, point: Pt): void;
+  onContextMenu(event: React.MouseEvent<HTMLDivElement>, markupId: string | null, pageObjectId: string | null, point: Pt, calloutOnly?: boolean): void;
   onMessage(msg: string): void;
+  contentTool: PageContentTool | null;
+  onCreatePageObject(page: number, point: Pt): void;
+  onSelectionChange(markupIds: string[], pageObjectIds: string[], calloutIds?: string[]): void;
+  onPageObjectsChange(objects: PageObject[]): void;
+  onEditPageObject(id: string): void;
 }
 
 export function PageView(p: PageViewProps) {
@@ -55,6 +68,7 @@ export function PageView(p: PageViewProps) {
     setDraftState(d);
   };
   const [cur, setCur] = useState<Pt | null>(null);
+  const [selectionWindow, setSelectionWindow] = useState<ReturnType<typeof normalizedRect> | null>(null);
   const drag = useRef<Drag | null>(null);
   const spaceDown = useRef(false);
   const anchor = useRef<{ pt: Pt; ox: number; oy: number } | null>(null);
@@ -156,6 +170,7 @@ export function PageView(p: PageViewProps) {
     const type = tool as MarkupType;
     let ok = true;
     if (tool === 'polyline' || tool === 'm-polylength') ok = points.length >= 2;
+    if (tool === 'cloud') ok = points.length >= 3;
     if (tool === 'm-area' || tool === 'm-perimeter') ok = points.length >= 3;
     if (tool === 'm-angle') ok = points.length === 3;
     if (!ok) {
@@ -204,8 +219,40 @@ export function PageView(p: PageViewProps) {
     return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
   };
 
-  const selected = doc.markups.find((m) => m.id === p.selectedId && m.page === doc.page && (!doc.shared || ownsMarkup(m, p.user))) ?? null;
+  const selected = p.selectedMarkupIds.length === 1
+    ? doc.markups.find((m) => m.id === p.selectedMarkupIds[0] && m.page === doc.page && (!doc.shared || ownsMarkup(m, p.user))) ?? null
+    : null;
   const canMoveCallout = (m: Markup) => !doc.shared || (ownsMarkup(m, p.user) && m.comments.every((comment) => ownsComment(comment, p.user)));
+  const additiveSelection = (e: React.PointerEvent) => e.ctrlKey || e.metaKey || e.shiftKey;
+  const selectMarkup = (id: string, additive: boolean) => {
+    if (!additive) {
+      p.onSelectionChange([id], [], []);
+      return;
+    }
+    const ids = new Set(p.selectedMarkupIds);
+    ids.has(id) ? ids.delete(id) : ids.add(id);
+    p.onSelectionChange([...ids], p.selectedPageObjectIds, p.selectedCalloutIds);
+  };
+  const selectPageObject = (id: string, additive: boolean) => {
+    if (!additive) {
+      p.onSelectionChange([], [id], []);
+      return;
+    }
+    const ids = new Set(p.selectedPageObjectIds);
+    ids.has(id) ? ids.delete(id) : ids.add(id);
+    p.onSelectionChange(p.selectedMarkupIds, [...ids], p.selectedCalloutIds);
+  };
+  const selectCallout = (id: string, additive: boolean) => {
+    if (!additive) {
+      p.onSelectionChange([], [], [id]);
+      return;
+    }
+    const ids = new Set(p.selectedCalloutIds);
+    ids.has(id) ? ids.delete(id) : ids.add(id);
+    p.onSelectionChange(p.selectedMarkupIds, p.selectedPageObjectIds, [...ids]);
+  };
+  const isSelectedMarkup = (id: string) => p.selectedMarkupIds.includes(id);
+  const isSelectedPageObject = (id: string) => p.selectedPageObjectIds.includes(id);
 
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const sc = scroller.current!;
@@ -219,38 +266,100 @@ export function PageView(p: PageViewProps) {
     const pt = toPt(e);
     e.currentTarget.setPointerCapture(e.pointerId);
 
+    if (p.contentTool) {
+      p.onCreatePageObject(doc.page, pt);
+      return;
+    }
+
     if (tool === 'select') {
-      const calloutHit = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, pt));
-      if (doc.shared && calloutHit && !ownsMarkup(calloutHit, p.user)) {
-        p.onSelect(null);
+      const selectedPageObject = p.selectedPageObjectIds.length === 1
+        ? doc.pageObjects.find((object) => object.id === p.selectedPageObjectIds[0] && object.page === doc.page)
+        : undefined;
+      if (selectedPageObject && pt.x >= selectedPageObject.x + selectedPageObject.width - 10 / zoom &&
+          pt.y >= selectedPageObject.y + selectedPageObject.height - 10 / zoom &&
+          pt.x <= selectedPageObject.x + selectedPageObject.width + 6 / zoom &&
+          pt.y <= selectedPageObject.y + selectedPageObject.height + 6 / zoom) {
+        drag.current = { kind: 'page-object-resize', start: pt, orig: selectedPageObject };
+        e.preventDefault();
         return;
       }
-      if (selected) {
+      if (!additiveSelection(e) && selected) {
         const box = calloutLayout(selected);
         if (canMoveCallout(selected) && box && dist({ x: box.x + box.w, y: box.y + box.h }, pt) * zoom <= 10) {
           drag.current = { kind: 'callout-resize', start: pt, orig: selected, width: box.w, height: box.h, began: false };
           return;
         }
-        const h = handlesOf(selected).find((h) => dist(h.p, pt) * zoom <= 9);
-        if (h) {
-          drag.current = { kind: 'handle', key: h.key, orig: selected, began: false };
+        const handle = handlesOf(selected).find((item) => dist(item.p, pt) * zoom <= 9);
+        if (handle) {
+          drag.current = { kind: 'handle', key: handle.key, orig: selected, began: false };
           return;
         }
       }
+      const calloutHit = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, pt));
       if (calloutHit && (!doc.shared || ownsMarkup(calloutHit, p.user))) {
-        p.onSelect(calloutHit.id);
-        if (canMoveCallout(calloutHit)) {
-          const l = calloutLayout(calloutHit)!;
-          drag.current = { kind: 'callout', start: pt, orig: calloutHit, from: { x: l.x, y: l.y }, began: false };
+        const additive = additiveSelection(e);
+        const alreadySelected = p.selectedCalloutIds.includes(calloutHit.id);
+        if (additive) {
+          selectCallout(calloutHit.id, true);
+          return;
+        }
+        if (!alreadySelected) selectCallout(calloutHit.id, false);
+        const groupIds = alreadySelected ? p.selectedMarkupIds : [];
+        const groupCalloutIds = (alreadySelected ? p.selectedCalloutIds : [calloutHit.id])
+          .filter((id) => {
+            const markup = doc.markups.find((item) => item.id === id);
+            return !!markup && canMoveCallout(markup);
+          });
+        const groupObjectIds = alreadySelected ? p.selectedPageObjectIds : [];
+        if (groupIds.length + groupCalloutIds.length + groupObjectIds.length > 1) {
+          drag.current = {
+            kind: 'selection-move', start: pt,
+            markups: doc.markups.filter((markup) => groupIds.includes(markup.id)),
+            callouts: doc.markups.filter((markup) => groupCalloutIds.includes(markup.id)),
+            pageObjects: doc.pageObjects.filter((object) => groupObjectIds.includes(object.id)),
+            began: false,
+          };
+        } else if (canMoveCallout(calloutHit)) {
+          const layout = calloutLayout(calloutHit)!;
+          drag.current = { kind: 'callout', start: pt, orig: calloutHit, from: { x: layout.x, y: layout.y }, began: false };
         }
         return;
       }
-      const candidates = doc.shared ? doc.markups.filter((m) => ownsMarkup(m, p.user)) : doc.markups;
-      const hit = pickTop(candidates, doc.page, pt, 6 / zoom);
-      if (hit) {
-        p.onSelect(hit.id);
-        drag.current = { kind: 'move', start: pt, orig: hit, began: false };
-      } else p.onSelect(null);
+      const pageMarkups = doc.markups.filter((markup) => markup.page === doc.page && (!doc.shared || ownsMarkup(markup, p.user)));
+      const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
+      const annotationHit = pickTop(pageMarkups.filter((markup) => markup.type !== 'stamp'), doc.page, pt, 6 / zoom);
+      const topLayer = topPageLayerAt(pageMarkups.filter((markup) => markup.type === 'stamp'), pageObjects, pt, (markup) => hitMarkup(markup, pt, 6 / zoom));
+      const foundMarkup = annotationHit ?? (topLayer?.kind === 'markup' ? topLayer.value : null);
+      const hitObject = annotationHit ? null : topLayer?.kind === 'page-object' ? topLayer.value : null;
+      if (foundMarkup || hitObject) {
+        const additive = additiveSelection(e);
+        const alreadySelected = foundMarkup ? isSelectedMarkup(foundMarkup.id) : isSelectedPageObject(hitObject!.id);
+        if (additive) {
+          if (foundMarkup) selectMarkup(foundMarkup.id, true);
+          else selectPageObject(hitObject!.id, true);
+          return;
+        }
+        if (!alreadySelected) {
+          if (foundMarkup) selectMarkup(foundMarkup.id, false);
+          else selectPageObject(hitObject!.id, false);
+        }
+        const groupMarkupIds = alreadySelected ? p.selectedMarkupIds : foundMarkup ? [foundMarkup.id] : [];
+        const groupCalloutIds = alreadySelected ? p.selectedCalloutIds : [];
+        const groupObjectIds = alreadySelected ? p.selectedPageObjectIds : hitObject ? [hitObject.id] : [];
+        const markups = doc.markups.filter((markup) => groupMarkupIds.includes(markup.id));
+        const callouts = doc.markups.filter((markup) => groupCalloutIds.includes(markup.id));
+        const objects = doc.pageObjects.filter((object) => groupObjectIds.includes(object.id));
+        if (markups.length + callouts.length + objects.length > 1) {
+          drag.current = { kind: 'selection-move', start: pt, markups, callouts, pageObjects: objects, began: false };
+        } else if (foundMarkup) {
+          drag.current = { kind: 'move', start: pt, orig: foundMarkup, began: false };
+        } else {
+          drag.current = { kind: 'page-object-move', start: pt, orig: hitObject! };
+        }
+        return;
+      }
+      drag.current = { kind: 'selection-window', start: pt, additive: additiveSelection(e) };
+      setSelectionWindow(normalizedRect(pt, pt));
       return;
     }
     if (TWO_POINT.includes(tool)) {
@@ -315,6 +424,10 @@ export function PageView(p: PageViewProps) {
     const pt = toPt(e);
     if (draftRef.current) setCur(pt);
     if (!dg) return;
+    if (dg.kind === 'selection-window') {
+      setSelectionWindow(normalizedRect(dg.start, pt));
+      return;
+    }
     if (dg.kind === 'move') {
       const dx = pt.x - dg.start.x,
         dy = pt.y - dg.start.y;
@@ -324,6 +437,38 @@ export function PageView(p: PageViewProps) {
         p.onBeginEdit();
       }
       p.onLive(doc.markups.map((m) => (m.id === dg.orig.id ? translate(dg.orig, dx, dy) : m)));
+    } else if (dg.kind === 'page-object-move') {
+      const dx = pt.x - dg.start.x;
+      const dy = pt.y - dg.start.y;
+      p.onPageObjectsChange(doc.pageObjects.map((object) => object.id === dg.orig.id
+        ? { ...dg.orig, x: dg.orig.x + dx, y: dg.orig.y + dy }
+        : object));
+    } else if (dg.kind === 'page-object-resize') {
+      p.onPageObjectsChange(doc.pageObjects.map((object) => object.id === dg.orig.id
+        ? resizePageObject(dg.orig, pt.x - dg.start.x, pt.y - dg.start.y)
+        : object));
+    } else if (dg.kind === 'selection-move') {
+      const dx = pt.x - dg.start.x;
+      const dy = pt.y - dg.start.y;
+      if (!dg.began) {
+        if (Math.hypot(dx, dy) * zoom < 3) return;
+        dg.began = true;
+        if (dg.markups.length || dg.callouts.length) p.onBeginEdit();
+      }
+      const markupOffsets = new Map(dg.markups.map((markup) => [markup.id, markup]));
+      const calloutOffsets = new Map(dg.callouts.map((markup) => [markup.id, markup]));
+      const objectOffsets = new Map(dg.pageObjects.map((object) => [object.id, object]));
+      if (markupOffsets.size || calloutOffsets.size) p.onLive(doc.markups.map((markup) => {
+        const original = markupOffsets.get(markup.id);
+        if (original) return translate(original, dx, dy);
+        const callout = calloutOffsets.get(markup.id);
+        const layout = callout && calloutLayout(callout);
+        return layout ? moveCallout(markup, { x: layout.x + dx, y: layout.y + dy }) : markup;
+      }));
+      if (objectOffsets.size) p.onPageObjectsChange(doc.pageObjects.map((object) => {
+        const original = objectOffsets.get(object.id);
+        return original ? { ...original, x: original.x + dx, y: original.y + dy } : object;
+      }));
     } else if (dg.kind === 'callout') {
       const dx = pt.x - dg.start.x,
         dy = pt.y - dg.start.y;
@@ -360,6 +505,22 @@ export function PageView(p: PageViewProps) {
   const onUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const dg = drag.current;
     drag.current = null;
+    if (dg?.kind === 'selection-window') {
+      const end = toPt(e);
+      setSelectionWindow(null);
+      if (dist(dg.start, end) * zoom < 3) {
+        if (!dg.additive) p.onSelectionChange([], [], []);
+        return;
+      }
+      const pageMarkups = doc.markups.filter((markup) => markup.page === doc.page && (!doc.shared || ownsMarkup(markup, p.user)));
+      const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
+      const found = selectInWindow(pageMarkups, pageObjects, normalizedRect(dg.start, end));
+      const markupIds = dg.additive ? new Set([...p.selectedMarkupIds, ...found.markupIds]) : new Set(found.markupIds);
+      const pageObjectIds = dg.additive ? new Set([...p.selectedPageObjectIds, ...found.pageObjectIds]) : new Set(found.pageObjectIds);
+      const calloutIds = dg.additive ? new Set([...p.selectedCalloutIds, ...found.calloutIds]) : new Set(found.calloutIds);
+      p.onSelectionChange([...markupIds], [...pageObjectIds], [...calloutIds]);
+      return;
+    }
     if (!dg) return;
     if (dg.kind === 'two' && dg.moved && draftRef.current) finishTwo(draftRef.current[0], toPt(e));
     else if (dg.kind === 'pen' && draftRef.current) {
@@ -370,6 +531,11 @@ export function PageView(p: PageViewProps) {
   };
 
   const onDouble = () => {
+    if (p.selectedPageObjectIds.length === 1) {
+      const object = doc.pageObjects.find((item) => item.id === p.selectedPageObjectIds[0] && item.page === doc.page);
+      if (object?.kind === 'text') p.onEditPageObject(object.id);
+      return;
+    }
     const d = draftRef.current;
     if (d && MULTI.includes(tool) && d.length >= 2) finish(d.slice(0, -1));
   };
@@ -379,12 +545,20 @@ export function PageView(p: PageViewProps) {
   const tags = useMemo(() => numberMarkups(doc.markups), [doc.markups]);
   const cal = doc.calibrations[doc.page] ?? DEFAULT_CAL;
   const pageMarkups = doc.markups.filter((m) => m.page === doc.page);
+  const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
+  const layers = orderedPageLayers(pageMarkups.filter((markup) => markup.type === 'stamp'), pageObjects);
+  const selectedPageObject = p.selectedPageObjectIds.length === 1
+    ? pageObjects.find((object) => object.id === p.selectedPageObjectIds[0])
+    : undefined;
+  const symbolGlyph = (symbol?: PageObject['symbol']) => ({
+    check: '✓', x: '×', star: '★', circle: '●', 'open-circle': '○', plus: '+', minus: '−', question: '?', exclamation: '!',
+  }[symbol ?? 'check']);
 
   let preview: Markup | null = null;
   if (draft && cur) {
     const type = (tool === 'calibrate' ? 'line' : tool) as MarkupType;
     const pts = TWO_POINT.includes(tool) ? [draft[0], cur] : MULTI.includes(tool) ? [...draft, cur] : draft;
-    if (pts.length >= 2 && type !== ('select' as string))
+    if (pts.length >= (tool === 'cloud' ? 3 : 2) && type !== ('select' as string))
       preview = makeMarkup(tool === 'calibrate' ? 'line' : type, doc.page, pts, tool === 'calibrate' ? { ...style, color: '#ff6d00', width: 2 } : style, p.author);
     if (preview && tool === 'callout') preview.points = [...pts, { x: pts[0].x - 40, y: pts[1].y + 40 }];
   } else if (draft && tool === 'pen' && draft.length >= 2) {
@@ -392,7 +566,7 @@ export function PageView(p: PageViewProps) {
   }
 
   const cursor =
-    tool === 'hand' ? 'grab' : tool === 'select' ? 'default' : 'crosshair';
+    p.contentTool ? 'crosshair' : tool === 'hand' ? 'grab' : tool === 'select' ? 'default' : 'crosshair';
   const hs = selected && tool === 'select' ? handlesOf(selected) : [];
   const hsz = 5 / zoom;
   const selectedCallout = selected && tool === 'select' && canMoveCallout(selected) ? calloutLayout(selected) : null;
@@ -412,17 +586,45 @@ export function PageView(p: PageViewProps) {
             viewBox={`0 0 ${size.w} ${size.h}`}
             style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }}
           >
-            {pageMarkups.map((m) => (
-              <MarkupShape key={m.id} m={m} cal={cal} countNo={countNos.get(m.id)} tag={tags.get(m.id)} />
+            {layers.map((layer) => layer.kind === 'markup'
+              ? <MarkupShape key={layer.value.id} m={layer.value} cal={cal} countNo={countNos.get(layer.value.id)} tag={tags.get(layer.value.id)} />
+              : layer.value.kind === 'signature' && layer.value.signature
+                ? <image key={layer.value.id} href={layer.value.signature.data} x={layer.value.x} y={layer.value.y} width={layer.value.width} height={layer.value.height} preserveAspectRatio="none" />
+                : layer.value.kind === 'symbol'
+                  ? <text key={layer.value.id} x={layer.value.x + layer.value.width / 2} y={layer.value.y + layer.value.height * .82} textAnchor="middle" fontSize={layer.value.height} fill={layer.value.color}>{symbolGlyph(layer.value.symbol)}</text>
+                  : <text key={layer.value.id} x={layer.value.x} y={layer.value.y + layer.value.fontSize} fontSize={layer.value.fontSize} fill={layer.value.color} fontFamily="Helvetica, Arial, sans-serif">
+                    {(layer.value.text ?? '').split(/\r?\n/).map((line, index) => <tspan key={index} x={layer.value.x} dy={index === 0 ? 0 : layer.value.fontSize * 1.2}>{line}</tspan>)}
+                  </text>
+            )}
+            {pageMarkups.filter((markup) => markup.type !== 'stamp').map((markup) => (
+              <MarkupShape key={markup.id} m={markup} cal={cal} countNo={countNos.get(markup.id)} tag={tags.get(markup.id)} />
             ))}
             {preview && (
               <g opacity={0.85}>
                 <MarkupShape m={preview} cal={cal} />
               </g>
             )}
-            {selected && (
-              <SelectionBox m={selected} zoom={zoom} />
-            )}
+            {pageMarkups.filter((markup) => p.selectedMarkupIds.includes(markup.id)).map((markup) => {
+              return <g key={`selection-${markup.id}`}>
+                <SelectionBox m={markup} zoom={zoom} />
+              </g>;
+            })}
+            {pageMarkups.filter((markup) => p.selectedCalloutIds.includes(markup.id)).map((markup) => {
+              const callout = calloutLayout(markup);
+              return callout && <rect key={`callout-selection-${markup.id}`} x={callout.x - hsz} y={callout.y - hsz}
+                width={callout.w + hsz * 2} height={callout.h + hsz * 2} fill="none" stroke="#1976d2"
+                strokeWidth={1.5 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} />;
+            })}
+            {pageObjects.filter((object) => p.selectedPageObjectIds.includes(object.id)).map((object) => (
+              <g key={`selection-${object.id}`}>
+                <rect x={object.x} y={object.y} width={object.width} height={object.height}
+                  fill="none" stroke="#1976d2" strokeWidth={1.5 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} />
+                {selectedPageObject?.id === object.id && <rect x={object.x + object.width - hsz} y={object.y + object.height - hsz}
+                  width={hsz * 2} height={hsz * 2} fill="#fff" stroke="#1976d2" strokeWidth={1.5 / zoom} />}
+              </g>
+            ))}
+            {selectionWindow && <rect x={selectionWindow.x} y={selectionWindow.y} width={selectionWindow.w} height={selectionWindow.h}
+              fill="#2563eb22" stroke="#2563eb" strokeWidth={1 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} />}
             {hs.map((h) => (
               <rect
                 key={String(h.key)}
@@ -451,13 +653,22 @@ export function PageView(p: PageViewProps) {
               e.preventDefault();
               const point = toPt(e);
               const d = draftRef.current;
-              if (d && MULTI.includes(tool)) finish(d);
+              if (d && MULTI.includes(tool)) {
+                finish(d);
+                return;
+              }
               const calloutHit = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, point));
               const candidates = doc.shared ? doc.markups.filter((m) => ownsMarkup(m, p.user)) : doc.markups;
-              const hit = calloutHit ?? pickTop(candidates, doc.page, point, 6 / zoom);
-              const selectable = hit && (!doc.shared || ownsMarkup(hit, p.user)) ? hit : null;
-              if (selectable) p.onSelect(selectable.id);
-              p.onContextMenu(e, selectable?.id ?? null, point);
+              const pageMarkups = candidates.filter((markup) => markup.page === doc.page);
+              const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
+              const annotationHit = pickTop(pageMarkups.filter((markup) => markup.type !== 'stamp'), doc.page, point, 6 / zoom);
+              const topLayer = calloutHit || annotationHit ? null : topPageLayerAt(pageMarkups.filter((markup) => markup.type === 'stamp'), pageObjects, point, (markup) => hitMarkup(markup, point, 6 / zoom));
+              const selectable = annotationHit ?? (topLayer?.kind === 'markup' ? topLayer.value : null);
+              const selectedObject = topLayer?.kind === 'page-object' ? topLayer.value : null;
+              if (calloutHit && !p.selectedCalloutIds.includes(calloutHit.id)) p.onSelectionChange([], [], [calloutHit.id]);
+              else if (selectable && !p.selectedMarkupIds.includes(selectable.id)) p.onSelectionChange([selectable.id], [], []);
+              else if (selectedObject && !p.selectedPageObjectIds.includes(selectedObject.id)) p.onSelectionChange([], [selectedObject.id], []);
+              p.onContextMenu(e, calloutHit ? null : selectable?.id ?? null, selectedObject?.id ?? null, point, !!calloutHit);
             }}
           />
         </div>

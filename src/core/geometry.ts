@@ -18,8 +18,8 @@ export function bbox(pts: Pt[]): Rect {
 }
 
 /** Rectangle for box-style markups (uses first two points). */
-export function boxOf(m: Pick<Markup, 'points'>): Rect {
-  return bbox(m.points.slice(0, 2));
+export function boxOf(m: Pick<Markup, 'points'> & Partial<Pick<Markup, 'type'>>): Rect {
+  return bbox(m.type === 'cloud' ? m.points : m.points.slice(0, 2));
 }
 
 export const isBox = (m: Pick<Markup, 'type'>) => BOX_TYPES.includes(m.type);
@@ -64,16 +64,28 @@ export const inRect = (p: Pt, r: Rect, tol = 0) =>
 
 /** Closed scalloped outline around a rectangle (revision cloud), as a sampled polygon. */
 export function cloudPoints(r: Rect, arc = 14): Pt[] {
-  const corners = rectPoly(r);
+  return cloudPointsFromPath(rectPoly(r), arc);
+}
+
+/** Closed scalloped outline following an arbitrary polygon. */
+export function cloudPointsFromPath(points: Pt[], arc = 14): Pt[] {
+  if (points.length === 2) return cloudPointsFromPath(rectPoly(bbox(points)), arc);
+  if (points.length < 3) return [];
+  const area = points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0);
+  const corners = points;
   const out: Pt[] = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < corners.length; i++) {
     const a = corners[i],
-      b = corners[(i + 1) % 4];
+      b = corners[(i + 1) % corners.length];
     const len = dist(a, b);
     if (len < 1) continue;
     const n = Math.max(1, Math.round(len / arc));
     const d = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
-    const nrm = { x: d.y, y: -d.x };
+    const orientation = area >= 0 ? 1 : -1;
+    const nrm = { x: d.y * orientation, y: -d.x * orientation };
     const seg = len / n;
     for (let k = 0; k < n; k++) {
       const s = { x: a.x + d.x * seg * k, y: a.y + d.y * seg * k };
@@ -156,7 +168,9 @@ export function hitMarkup(m: Markup, p: Pt, tol: number): boolean {
     case 'rect':
       return m.fill ? inRect(p, boxOf(m), tol) : distToPath(p, rectPoly(boxOf(m)), true) <= t;
     case 'cloud':
-      return m.fill ? inRect(p, boxOf(m), tol) : distToPath(p, rectPoly(boxOf(m)), true) <= t + 6;
+      return m.fill
+        ? (m.points.length === 2 ? inRect(p, boxOf(m), tol) : pointInPolygon(p, m.points)) || distToPath(p, m.points, true) <= t
+        : distToPath(p, cloudPointsFromPath(m.points, m.cloudArc), true) <= t + 6;
     case 'ellipse': {
       const r = boxOf(m);
       const rx = r.w / 2,
@@ -219,6 +233,21 @@ export function applyHandle(m: Markup, key: HandleKey, p: Pt): Markup {
     const corners = rectPoly(boxOf(m));
     const opposite = corners[(key + 2) % 4];
     const pts = m.points.slice();
+    if (m.type === 'stamp' && m.stampImage && m.stampLockAspectRatio !== false) {
+      const box = boxOf(m);
+      if (box.w <= 0 || box.h <= 0) return { ...m, points: [opposite, p] };
+      const targetWidth = Math.abs(p.x - opposite.x);
+      const targetHeight = Math.abs(p.y - opposite.y);
+      const scale = Math.max(targetWidth / box.w, targetHeight / box.h, 0.01);
+      const width = box.w * scale;
+      const height = box.h * scale;
+      const right = key === 1 || key === 2;
+      const bottom = key === 2 || key === 3;
+      const target = { x: opposite.x + (right ? width : -width), y: opposite.y + (bottom ? height : -height) };
+      pts[0] = key === 0 || key === 3 ? target : opposite;
+      pts[1] = key === 1 || key === 2 ? target : opposite;
+      return { ...m, points: pts };
+    }
     pts[0] = opposite;
     pts[1] = p;
     return { ...m, points: pts };

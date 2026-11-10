@@ -54,13 +54,16 @@ export interface Markup {
   points: Pt[];
   color: string;
   fill?: string;
+  cloudArc?: number;
   width: number;
   opacity: number;
   text?: string;
   fontSize?: number;
   stamp?: string;
+  zOrder?: number;
   /** Embedded PNG, independent of the source file path. */
   stampImage?: import('./stamp').StampImage;
+  stampLockAspectRatio?: boolean;
   status: Status;
   author: string;
   /** stamped when created; deletion is limited to the author */
@@ -111,7 +114,7 @@ export const MEASURE_TYPES: MarkupType[] = [
 ];
 export const isMeasure = (t: MarkupType) => t.startsWith('m-');
 
-export const BOX_TYPES: MarkupType[] = ['highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'stamp'];
+export const BOX_TYPES: MarkupType[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'stamp'];
 
 export const STAMPS = ['APPROVED', 'REJECTED', 'DRAFT', 'FOR REVIEW', 'REVISED', 'VOID', 'CONFIDENTIAL', 'AS BUILT'];
 

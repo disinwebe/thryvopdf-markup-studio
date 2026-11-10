@@ -1,8 +1,9 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { useEffect, useRef, useState } from 'react';
-import { Doc, downloadName, saveBytes } from '../app/model';
+import { Doc, downloadName, saveBytes, stateOf } from '../app/model';
 import { CompareStats, Raster, autoAlign, compareRasters, COLOR_ADDED, COLOR_REMOVED } from '../core/compare';
-import { pageSize, renderRaster } from '../pdf/pdfjs';
+import { prepareComparisonPdf } from '../core/comparePdf';
+import { loadPdfForCompare, pageSize, renderRaster } from '../pdf/pdfjs';
 import { ContextMenuIcon } from './ContextMenuIcon';
 
 const BOX_W = 1800,
@@ -134,12 +135,24 @@ export function ComparePanel({
     if (!docA || !docB) return onMessage('Open two PDFs (or a revision) to compare');
     setBusy(true);
     try {
-      const sa = await pageSize(docA.pdf, aPage);
+      const [annotatedA, annotatedB] = await Promise.all([
+        prepareComparisonPdf(docA.bytes, docA.pageObjects, stateOf(docA)),
+        prepareComparisonPdf(docB.bytes, docB.pageObjects, stateOf(docB)),
+      ]);
+      const [pdfA, pdfB] = await Promise.all([
+        loadPdfForCompare(annotatedA),
+        loadPdfForCompare(annotatedB),
+      ]);
+      const sa = await pageSize(pdfA, aPage);
       const scale = Math.min(BOX_W / sa.w, BOX_H / sa.h);
       const w = Math.round(sa.w * scale),
         h = Math.round(sa.h * scale);
-      const [ra, rb] = await Promise.all([renderRaster(docA.pdf, aPage, w, h), renderRaster(docB.pdf, bPage, w, h)]);
-      rasters.current = { a: ra.raster, b: rb.raster };
+      try {
+        const [ra, rb] = await Promise.all([renderRaster(pdfA, aPage, w, h), renderRaster(pdfB, bPage, w, h)]);
+        rasters.current = { a: ra.raster, b: rb.raster };
+      } finally {
+        await Promise.all([pdfA.destroy(), pdfB.destroy()]);
+      }
       setSize({ w, h });
       const zero = { dx: 0, dy: 0 };
       setShift(zero);

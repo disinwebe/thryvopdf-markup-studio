@@ -2,9 +2,9 @@ import { canDeleteMarkup } from './core/comments';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveWithState } from './core/annotations';
 import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure, uid } from './core/types';
-import { boxOf, translate } from './core/geometry';
+import { translate } from './core/geometry';
 import { loadPdf } from './pdf/pdfjs';
-import { rasterizeMarkups } from './app/rasterizeMarkups';
+import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups';
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
@@ -39,6 +39,10 @@ import { KeyIcon } from './components/KeyIcon';
 import { CommentPopup } from './components/CommentPopup';
 import { SelectIcon } from './components/SelectIcon';
 import { ContextMenuIcon } from './components/ContextMenuIcon';
+import { SYMBOLS, type PageContentTool, type PageObject, type PdfSymbol } from './core/pageContent';
+import { importSignature, loadSignatures, saveSignatures, type SavedSignature } from './app/signatures';
+import { reorderPageLayers } from './core/layerOrder';
+import { markupSelectionBounds } from './core/selection';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
@@ -51,12 +55,13 @@ const TOOL_HINT: Partial<Record<Tool, string>> = {
   select: 'Select (V)',
   hand: 'Pan (H to toggle, or hold Space while using another tool)',
   line: 'Drawing-only line (not a comment)',
+  cloud: 'Click to add cloud vertices; press Enter, double-click, or right-click to finish',
 };
 const HISTORY_LIMIT = 100;
 
 type RightTab = 'markups' | 'measure' | 'organize' | 'sheets' | 'search';
 type LeftTab = 'pages' | 'bookmarks' | 'project';
-type ViewerContextMenu = { x: number; y: number; markupId: string | null; point: Pt };
+type ViewerContextMenu = { x: number; y: number; markupId: string | null; pageObjectId: string | null; stackId: string | null; point: Pt; calloutOnly: boolean };
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
@@ -92,7 +97,25 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [sharedRevision, setSharedRevision] = useState(0);
   const [commentTarget, setCommentTarget] = useState<{ docId: string; markupId: string } | null>(null);
   const [contextMenu, setContextMenu] = useState<ViewerContextMenu | null>(null);
-  const [clipboardMarkup, setClipboardMarkup] = useState<Markup | null>(null);
+  const [clipboardSelection, setClipboardSelection] = useState<{ markups: Markup[]; pageObjects: PageObject[] }>({ markups: [], pageObjects: [] });
+  const [contentMode, setContentMode] = useState<'text' | 'symbol' | 'signature' | null>(null);
+  const [contentSize, setContentSize] = useState(24);
+  const [contentColor, setContentColor] = useState('#202020');
+  const [contentSymbol, setContentSymbol] = useState<PdfSymbol>('check');
+  const [signatureStore] = useState(loadSignatures);
+  const [signatures, setSignatures] = useState<SavedSignature[]>(signatureStore.items);
+  const [signatureError, setSignatureError] = useState(signatureStore.error ?? '');
+  const [signatureId, setSignatureId] = useState<string | null>(signatureStore.items[0]?.id ?? null);
+  const [removeSignatureBackground, setRemoveSignatureBackground] = useState(false);
+  const [signatureManagerOpen, setSignatureManagerOpen] = useState(false);
+  const [selectedMarkupIds, setSelectedMarkupIds] = useState<string[]>([]);
+  const [selectedCalloutIds, setSelectedCalloutIds] = useState<string[]>([]);
+  const [selectedPageObjectIds, setSelectedPageObjectIds] = useState<string[]>([]);
+  const [editingPageObjectId, setEditingPageObjectId] = useState<string | null>(null);
+  const [editingPageObjectIsNew, setEditingPageObjectIsNew] = useState(false);
+  const [pageObjectTextDraft, setPageObjectTextDraft] = useState('');
+  const signatureFileInput = useRef<HTMLInputElement>(null);
+  const signatureListRef = useRef(signatures);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<HTMLDivElement>(null);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
@@ -100,17 +123,54 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   docsRef.current = docs;
 
   const active = docs.find((d) => d.id === activeId) ?? null;
+  const updateSelection = (markupIds: string[], pageObjectIds: string[], calloutIds: string[] = []) => {
+    setSelectedMarkupIds(markupIds);
+    setSelectedCalloutIds(calloutIds);
+    setSelectedPageObjectIds(pageObjectIds);
+    setSelectedId(markupIds[markupIds.length - 1] ?? null);
+  };
   useEffect(() => {
-    if (!viewOnly && (tool === 'stamp' || active?.markups.find((markup) => markup.id === selectedId)?.type === 'stamp')) {
-      setDefaultsOpen(true);
-    }
-  }, [tool, selectedId, activeId, viewOnly]);
+    updateSelection([], []);
+  }, [activeId, active?.page]);
+  const selectedSignature = signatures.find((signature) => signature.id === signatureId) ?? null;
+  const contentTool: PageContentTool | null = contentMode === 'text'
+    ? { kind: 'text', size: contentSize, color: contentColor }
+    : contentMode === 'symbol'
+      ? { kind: 'symbol', symbol: contentSymbol, size: contentSize, color: contentColor }
+      : contentMode === 'signature' && selectedSignature
+        ? { kind: 'signature', signature: selectedSignature }
+        : null;
   const logout = async () => {
     if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
     await leaveAll();
     actions.logout();
   };
   const say = useCallback((m: string) => { setMsg(m); setSavedPdfPath(null); }, []);
+  const setSavedSignatures = (next: SavedSignature[]) => {
+    try {
+      saveSignatures(next);
+      signatureListRef.current = next;
+      setSignatures(next);
+      setSignatureError('');
+    } catch (error) {
+      setSignatureError(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const addSignatures = async (files: FileList | null, removeBackground: boolean) => {
+    if (!files) return;
+    let firstAdded: string | null = null;
+    for (const file of Array.from(files)) {
+      try {
+        const signature = await importSignature(file, signatureListRef.current, removeBackground);
+        const next = [...signatureListRef.current, signature];
+        setSavedSignatures(next);
+        if (!firstAdded) firstAdded = signature.id;
+      } catch (error) {
+        setSignatureError(error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (!signatureId && firstAdded) setSignatureId(firstAdded);
+  };
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -194,7 +254,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const createMarkup = (m: Markup) => {
     if (!active || viewOnly) return;
     commit(active.id, [...active.markups, { ...m, authorEmail: user.email }]);
-    setSelectedId(m.id);
+    updateSelection([m.id], []);
     if (isReviewMarkup(m)) {
       setCommentTarget({ docId: active.id, markupId: m.id });
       setRightTab('markups');
@@ -231,41 +291,135 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       return;
     }
     commit(active.id, active.markups.filter((m) => m.id !== id));
-    setSelectedId(null);
+    updateSelection([], []);
   };
 
-  const copyContextMarkup = () => {
-    const markup = active?.markups.find((item) => item.id === contextMenu?.markupId);
-    if (markup) setClipboardMarkup({ ...markup, points: markup.points.map((point) => ({ ...point })), comments: [] });
+  const contextSelectionIds = () => {
+    const markupIds = contextMenu?.calloutOnly ? selectedMarkupIds : contextMenu?.markupId && selectedMarkupIds.includes(contextMenu.markupId)
+      ? selectedMarkupIds
+      : contextMenu?.markupId ? [contextMenu.markupId] : selectedMarkupIds;
+    const objectIds = contextMenu?.pageObjectId && selectedPageObjectIds.includes(contextMenu.pageObjectId)
+      ? selectedPageObjectIds
+      : contextMenu?.pageObjectId ? [contextMenu.pageObjectId] : selectedPageObjectIds;
+    return { markupIds, objectIds };
+  };
+  const canCutSelection = () => {
+    if (!active || readOnly || (active.shared && selectedPageObjectIds.length > 0)) return false;
+    return selectedMarkupIds.length + selectedPageObjectIds.length > 0 &&
+      selectedMarkupIds.every((id) => {
+        const markup = active.markups.find((item) => item.id === id);
+        return !!markup && canDeleteMarkup(markup, user);
+      });
+  };
+  const canCutContextSelection = () => {
+    if (!active || readOnly) return false;
+    const ids = contextSelectionIds();
+    const markups = active.markups.filter((markup) => ids.markupIds.includes(markup.id));
+    const objects = active.pageObjects.filter((object) => ids.objectIds.includes(object.id));
+    return (markups.length > 0 || objects.length > 0) &&
+      (!active.shared || objects.length === 0) &&
+      markups.every((markup) => canDeleteMarkup(markup, user));
+  };
+  const copySelection = (useContextTarget = false) => {
+    if (!active) return;
+    const ids = useContextTarget ? contextSelectionIds() : { markupIds: selectedMarkupIds, objectIds: selectedPageObjectIds };
+    const markups = active.markups.filter((markup) => ids.markupIds.includes(markup.id)).map((markup) => ({
+      ...markup,
+      points: markup.points.map((point) => ({ ...point })),
+      comments: [],
+    }));
+    const pageObjects = active.pageObjects.filter((object) => ids.objectIds.includes(object.id)).map((object) => ({ ...object }));
+    if (markups.length || pageObjects.length) setClipboardSelection({ markups, pageObjects });
     setContextMenu(null);
   };
-
-  const cutContextMarkup = () => {
-    const markup = active?.markups.find((item) => item.id === contextMenu?.markupId);
-    if (!markup) return;
-    setClipboardMarkup({ ...markup, points: markup.points.map((point) => ({ ...point })), comments: [] });
-    deleteMarkup(markup.id);
+  const cutSelection = (useContextTarget = false) => {
+    if (!active || readOnly) return;
+    const ids = useContextTarget ? contextSelectionIds() : { markupIds: selectedMarkupIds, objectIds: selectedPageObjectIds };
+    const markups = active.markups.filter((markup) => ids.markupIds.includes(markup.id));
+    const pageObjects = active.pageObjects.filter((object) => ids.objectIds.includes(object.id));
+    if (!markups.length && !pageObjects.length) return;
+    if (active.shared && pageObjects.length) return;
+    if (!markups.every((markup) => canDeleteMarkup(markup, user))) return;
+    setClipboardSelection({
+      markups: markups.map((markup) => ({ ...markup, points: markup.points.map((point) => ({ ...point })), comments: [] })),
+      pageObjects: pageObjects.map((object) => ({ ...object })),
+    });
+    if (markups.length) commit(active.id, active.markups.filter((markup) => !ids.markupIds.includes(markup.id)));
+    if (pageObjects.length) updateDoc(active.id, (document) => ({
+      pageObjects: document.pageObjects.filter((object) => !ids.objectIds.includes(object.id)),
+      dirty: true,
+    }));
+    updateSelection([], []);
     setContextMenu(null);
   };
-
-  const pasteContextMarkup = () => {
-    if (!active || !clipboardMarkup || readOnly || !contextMenu) return;
-    const bounds = boxOf(clipboardMarkup);
-    const pasted = translate(clipboardMarkup, contextMenu.point.x - (bounds.x + bounds.w / 2), contextMenu.point.y - (bounds.y + bounds.h / 2));
-    const markup: Markup = {
-      ...pasted,
+  const deleteSelection = () => {
+    if (!active || readOnly) return;
+    const markups = active.markups.filter((markup) => selectedMarkupIds.includes(markup.id) && canDeleteMarkup(markup, user));
+    const pageObjects = active.shared ? [] : active.pageObjects.filter((object) => selectedPageObjectIds.includes(object.id));
+    if (markups.length) commit(active.id, active.markups.filter((markup) => !markups.some((item) => item.id === markup.id)));
+    if (pageObjects.length) updateDoc(active.id, (document) => ({
+      pageObjects: document.pageObjects.filter((object) => !pageObjects.some((item) => item.id === object.id)),
+      dirty: true,
+    }));
+    updateSelection([], []);
+  };
+  const pasteSelection = (point?: Pt) => {
+    if (!active || readOnly || (!clipboardSelection.markups.length && !clipboardSelection.pageObjects.length)) return;
+    const availablePageObjects = active.shared ? [] : clipboardSelection.pageObjects;
+    if (!clipboardSelection.markups.length && !availablePageObjects.length) return;
+    const items = [
+      ...clipboardSelection.markups.map((markup) => markupSelectionBounds(markup)),
+      ...availablePageObjects.map((object) => ({ x: object.x, y: object.y, w: object.width, h: object.height })),
+    ];
+    const x = Math.min(...items.map((item) => item.x));
+    const y = Math.min(...items.map((item) => item.y));
+    const right = Math.max(...items.map((item) => item.x + item.w));
+    const bottom = Math.max(...items.map((item) => item.y + item.h));
+    const target = point ?? { x: (x + right) / 2 + 20, y: (y + bottom) / 2 + 20 };
+    const dx = target.x - (x + right) / 2;
+    const dy = target.y - (y + bottom) / 2;
+    const markups = clipboardSelection.markups.map((markup) => ({
+      ...translate(markup, dx, dy),
       id: uid(),
       page: active.page,
       author: user.name,
       authorEmail: user.email,
       date: new Date().toISOString(),
-      status: 'None',
+      status: 'None' as Markup['status'],
       comments: [],
-    };
-    commit(active.id, [...active.markups, markup]);
-    setSelectedId(markup.id);
+    }));
+    const pageObjects = availablePageObjects.map((object) => ({
+      ...object,
+      id: uid(),
+      page: active.page,
+      x: object.x + dx,
+      y: object.y + dy,
+    }));
+    if (!markups.length && !pageObjects.length) return;
+    if (markups.length) commit(active.id, [...active.markups, ...markups]);
+    if (pageObjects.length) updateDoc(active.id, (document) => ({ pageObjects: [...document.pageObjects, ...pageObjects], dirty: true }));
+    updateSelection(markups.map((markup) => markup.id), pageObjects.map((object) => object.id));
     setContextMenu(null);
-    say('Markup pasted.');
+    say('Selection pasted.');
+  };
+
+  const stackContextLayer = (direction: 'front' | 'back') => {
+    if (!active || !contextMenu) return;
+    const id = contextMenu.stackId;
+    if (!id || active.shared || readOnly) return;
+    const pageMarkups = active.markups.filter((markup) => markup.page === active.page && markup.type === 'stamp');
+    const pageObjects = active.pageObjects.filter((object) => object.page === active.page);
+    const reordered = reorderPageLayers(pageMarkups, pageObjects, id, direction);
+    if (!reordered.changed) return;
+    const markupOrder = new Map(reordered.markups.map((markup) => [markup.id, markup]));
+    const objectOrder = new Map(reordered.pageObjects.map((object) => [object.id, object]));
+    updateDoc(active.id, () => ({
+      markups: active.markups.map((markup) => markupOrder.get(markup.id) ?? markup),
+      pageObjects: active.pageObjects.map((object) => objectOrder.get(object.id) ?? object),
+      dirty: true,
+    }));
+    setContextMenu(null);
+    say(direction === 'front' ? 'Object brought to front.' : 'Object sent to back.');
   };
 
   const flattenContextMarkups = async (requestedIds: string[]) => {
@@ -290,17 +444,27 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     setContextMenu(null);
     say(`Rasterizing ${targets.length} markup(s)...`);
     try {
-      const result = await rasterizeMarkups(document.bytes, stateOf(document), targets.map((markup) => markup.id));
+      const flattenedLayers = await flattenStackableLayers(
+        document.bytes,
+        stateOf(document),
+        document.pageObjects,
+        targets.filter((markup) => markup.type === 'stamp').map((markup) => markup.id),
+      );
+      const remainingTargets = targets.filter((markup) => markup.type !== 'stamp');
+      const result = remainingTargets.length
+        ? await rasterizeMarkups(flattenedLayers.bytes, { ...stateOf(document), markups: flattenedLayers.markups }, remainingTargets.map((markup) => markup.id))
+        : flattenedLayers;
       const pdf = await loadPdf(result.bytes);
       updateDoc(document.id, () => ({
         bytes: result.bytes,
         pdf,
         markups: result.markups,
+        pageObjects: [],
         undo: [],
         redo: [],
         dirty: true,
       }));
-      setSelectedId(null);
+      updateSelection([], []);
       say(`Flattened ${targets.length} markup(s) into the PDF. Save to keep the changes.`);
     } catch (error) {
       const message = 'Could not flatten markup(s): ' + (error instanceof Error ? error.message : String(error));
@@ -310,7 +474,62 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
 
   // ---- file ops -----
-  const bake = (d: Doc) => saveWithState(d.bytes, stateOf(d));
+  const bake = async (d: Doc) => (await flattenStackableLayers(d.bytes, stateOf(d), d.pageObjects)).bytes;
+
+  const createPageObject = (page: number, point: Pt) => {
+    const documentId = active?.id;
+    const placement = contentTool;
+    if (!documentId || !placement || readOnly) return;
+    if (active?.shared) {
+      say('Text, symbol, and signature placement is not available in a live shared document. Open a local PDF copy to add page content.');
+      setContentMode(null);
+      return;
+    }
+    const object: PageObject = placement.kind === 'text'
+      ? { id: uid(), page, kind: 'text', x: point.x, y: point.y, width: Math.max(50, placement.size * 6), height: placement.size * 1.5, fontSize: placement.size, color: placement.color, text: 'Text' }
+      : placement.kind === 'symbol'
+        ? { id: uid(), page, kind: 'symbol', x: point.x - placement.size / 2, y: point.y - placement.size / 2, width: placement.size, height: placement.size, fontSize: placement.size, color: placement.color, symbol: placement.symbol }
+        : { id: uid(), page, kind: 'signature', x: point.x, y: point.y, width: 140, height: 140 * placement.signature.height / placement.signature.width, fontSize: 0, color: '#000000', signature: placement.signature };
+    updateDoc(documentId, (document) => ({ pageObjects: [...document.pageObjects, object], dirty: true     }));
+    updateSelection([], [object.id]);
+    setContentMode(null);
+    if (object.kind === 'text') {
+      setPageObjectTextDraft(object.text ?? '');
+      setEditingPageObjectId(object.id);
+      setEditingPageObjectIsNew(true);
+    } else {
+      say(`${object.kind === 'symbol' ? 'Symbol' : 'Signature'} placed. Select and drag to move; drag the corner to resize.`);
+    }
+  };
+  const updatePageObjects = (objects: PageObject[]) => {
+    if (!active || active.shared || readOnly) return;
+    updateDoc(active.id, () => ({ pageObjects: objects, dirty: true }));
+  };
+  const editPageObject = (id: string) => {
+    const object = active?.pageObjects.find((item) => item.id === id);
+    if (!object || object.kind !== 'text') return;
+    setPageObjectTextDraft(object.text ?? '');
+    setEditingPageObjectId(id);
+    setEditingPageObjectIsNew(false);
+  };
+  const savePageObjectText = () => {
+    if (!active || !editingPageObjectId || !pageObjectTextDraft.trim()) return;
+    const text = pageObjectTextDraft.trim();
+    updatePageObjects(active.pageObjects.map((object) => object.id === editingPageObjectId && object.kind === 'text'
+      ? { ...object, text, width: Math.max(40, Math.max(...text.split(/\r?\n/).map((line) => line.length)) * object.fontSize * 0.62), height: Math.max(1, text.split(/\r?\n/).length) * object.fontSize * 1.35 }
+      : object));
+    setEditingPageObjectId(null);
+    setEditingPageObjectIsNew(false);
+    say('PDF text updated. Double-click the text to edit it again.');
+  };
+  const cancelPageObjectText = () => {
+    if (editingPageObjectIsNew && active && editingPageObjectId) {
+      updatePageObjects(active.pageObjects.filter((object) => object.id !== editingPageObjectId));
+      updateSelection([], []);
+    };
+    setEditingPageObjectId(null);
+    setEditingPageObjectIsNew(false);
+  };
 
   const save = async (as = false) => {
     if (!active || viewOnly) return;
@@ -318,8 +537,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       const bytes = await bake(active);
       const path = await saveBytes(active.name, bytes, 'pdf', as ? undefined : active.path);
       if (!path) return;
-      updateDoc(active.id, () => ({ bytes, path, name: baseName(path), dirty: false }));
-      setMsg(`Saved ${baseName(path)} with ${active.markups.length} markup annotation(s)`);
+      updateDoc(active.id, () => ({ path, name: baseName(path), dirty: false }));
+      setMsg(`Saved ${baseName(path)} with ${active.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)`);
       setSavedPdfPath(path);
     } catch (e) {
       const message = 'Save failed: ' + (e instanceof Error ? e.message : String(e));
@@ -368,13 +587,14 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       const bytes = await bake(active);
       const up = await window.api!.sharedDocs({ op: 'upload', name: active.name, bytes, project, description, members });
       if (!up.ok) return fail('Upload failed: ' + (up.error || 'unknown error'));
-      for (let i = 0; i < active.markups.length;) {
-        const batch = batchChanges(active.markups.slice(i), []).upserts;
+      const annotations = active.markups.filter((markup) => markup.type !== 'stamp');
+      for (let i = 0; i < annotations.length;) {
+        const batch = batchChanges(annotations.slice(i), []).upserts;
         const r = await window.api!.sharedDocs({ op: 'ops', id: up.doc.id, upserts: batch, cid });
         if (!r.ok) return fail(`Uploaded ${active.name}, but copying existing markups failed: ${r.error || 'unknown error'}`);
         i += batch.length;
       }
-      const message = `Uploaded ${active.name} with ${active.markups.length} markup(s). Open it from the list to collaborate; this tab stays a local copy.`;
+      const message = `Uploaded ${active.name} with ${annotations.length} markup(s). Open it from the list to collaborate; this tab stays a local copy.`;
       say(message);
       return { ok: true, message };
     } catch (e) {
@@ -422,6 +642,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       pdf: fresh.pdf,
       numPages: fresh.numPages,
       markups: fresh.markups,
+      pageObjects: [],
       calibrations: fresh.calibrations,
       sheets: fresh.sheets,
       bookmarks,
@@ -431,7 +652,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       page: Math.max(0, Math.min(fresh.numPages - 1, page)),
       textCache: new Map(),
     }));
-    setSelectedId(null);
+    updateSelection([], []);
   };
 
   const applyPlan = async (d: Doc, plan: PagePlan[], extras: Uint8Array[] = []) => {
@@ -526,9 +747,19 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   keyRef.current = (e) => {
     if (commentTarget || defaultsOpen || licenseInfo || library || actions.uiBlocked || isTypingTarget(e.target)) return;
     const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
     const next = active && !readOnly ? toolForKey(e, tool) : null;
     const history = active && !readOnly ? historyShortcut(e) : null;
-    if (next) {
+    if (mod && key === 'c' && (selectedMarkupIds.length || selectedPageObjectIds.length)) {
+      e.preventDefault();
+      copySelection();
+    } else if (mod && key === 'x' && canCutSelection()) {
+      e.preventDefault();
+      cutSelection();
+    } else if (mod && key === 'v' && (clipboardSelection.markups.length || clipboardSelection.pageObjects.length)) {
+      e.preventDefault();
+      pasteSelection();
+    } else if (next) {
       e.preventDefault();
       setTool(next);
       setPending(null);
@@ -541,11 +772,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     } else if (mod && e.key.toLowerCase() === 'o') {
       e.preventDefault();
       open();
-    } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId && tool === 'select') {
-      deleteMarkup(selectedId);
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
+      if (selectedMarkupIds.length || selectedPageObjectIds.length) deleteSelection();
     } else if (e.key === 'Escape') {
       setTool('select');
       setPending(null);
+      setContentMode(null);
     } else if (e.key === 'PageDown' && active) goto(active.page + 1);
     else if (e.key === 'PageUp' && active) goto(active.page - 1);
   };
@@ -662,6 +894,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       }
       if (patch.stamp !== undefined) mp.stamp = patch.stamp;
       if (patch.stamp !== undefined) mp.stampImage = patch.stampImage;
+      if (patch.stampLockAspectRatio !== undefined) mp.stampLockAspectRatio = patch.stampLockAspectRatio;
       updateMarkup(selected.id, mp, 'style');
     } else if (tool !== 'select' && tool !== 'hand') {
       setStyles((s) => ({ ...s, [tool]: { ...(s[tool] ?? defaultStyle(tool)), ...patch } }));
@@ -678,9 +911,9 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       });
       if (!image) return;
       if (editingSelected && selected?.type === 'stamp') {
-        updateMarkup(selected.id, { stamp: 'Custom image', stampImage: image });
+        updateMarkup(selected.id, { stamp: 'Custom image', stampImage: image, stampLockAspectRatio: selected.stampLockAspectRatio !== false });
       } else {
-        setStyles((s) => ({ ...s, stamp: { ...(s.stamp ?? defaultStyle('stamp')), stamp: 'Custom image', stampImage: image } }));
+        setStyles((s) => ({ ...s, stamp: { ...(s.stamp ?? defaultStyle('stamp')), stamp: 'Custom image', stampImage: image, stampLockAspectRatio: s.stamp?.stampLockAspectRatio !== false } }));
         setTool('stamp');
       }
       say('Custom stamp loaded. Click the drawing to place it.');
@@ -693,10 +926,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
   const contextMarkup = contextMenu && active?.markups.find((markup) => markup.id === contextMenu.markupId && markup.page === active.page);
+  const contextStackable = !!contextMenu?.stackId;
   const flattenableCount = active?.markups.filter((markup) => canDeleteMarkup(markup, user)).length ?? 0;
 
   const toolBtn = (t: Tool) => (
-    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); if (t === 'stamp') setDefaultsOpen(true); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
+    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { setTool(t); setPending(null); if (t === 'stamp') setDefaultsOpen(true); if (t === 'cloud') say('Click to add cloud vertices. Press Enter, double-click, or right-click to finish.'); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
       {t === 'select' ? <SelectIcon theme={theme} /> : <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>}{TOOL_LABEL[t]}
     </button>
   );
@@ -714,6 +948,26 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         <span className="sep" />
         <button className={view === 'viewer' ? 'on' : ''} onClick={() => setView('viewer')}><span className="tool-icon" aria-hidden="true">▤</span>Viewer</button>
         <button className={view === 'compare' ? 'on' : ''} onClick={() => setView('compare')} disabled={readOnly || docs.length === 0}><span className="tool-icon" aria-hidden="true">◫</span>Compare</button>
+        <button className={contentMode === 'text' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'text' ? null : 'text'); }} disabled={!active || readOnly || !!active.shared} title="Click the page to add editable PDF text"><span className="tool-icon" aria-hidden="true">T</span>Text</button>
+        <button className={contentMode === 'symbol' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'symbol' ? null : 'symbol'); }} disabled={!active || readOnly || !!active.shared} title="Place a flattened symbol"><span className="tool-icon" aria-hidden="true">✓</span>Symbol</button>
+        <button className={contentMode === 'signature' ? 'on' : ''} onClick={() => setSignatureManagerOpen(true)} disabled={!active || readOnly || !!active.shared} title="Manage and place transparent PNG signatures"><span className="tool-icon" aria-hidden="true">✍</span>Signatures</button>
+        {contentMode === 'text' && (
+          <span className="toolbar-content-controls">
+            <input aria-label="PDF text size" type="number" min={6} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(6, Math.min(96, +e.target.value || 24)))} />
+            <input aria-label="PDF text color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+            <span className="muted small">Click page, then type</span>
+          </span>
+        )}
+        {contentMode === 'symbol' && (
+          <span className="toolbar-content-controls">
+            <select aria-label="Symbol" value={contentSymbol} onChange={(e) => setContentSymbol(e.target.value as PdfSymbol)}>
+              {SYMBOLS.map((symbol) => <option key={symbol.value} value={symbol.value}>{symbol.glyph} {symbol.label}</option>)}
+            </select>
+            <input aria-label="Symbol size" type="number" min={12} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(12, Math.min(96, +e.target.value || 24)))} />
+            <input aria-label="Symbol color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+            <span className="muted small">Click page to place</span>
+          </span>
+        )}
         <span className="grow" />
         {viewOnly && <><span className="muted">Unlicensed viewing — editing is disabled.</span><button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>License information…</button><button onClick={onImportLicense}>Import license…</button></>}
         <span className="who" title={user.email}>{viewOnly ? <><b>Guest viewer</b></> : <>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</>}</span>
@@ -748,7 +1002,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
       <div className="tabs">
         {docs.map((d) => (
-          <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); setSelectedId(null); }} onDoubleClick={() => promptRename(d)} title={d.shared ? 'Shared document names cannot be changed here' : 'Double-click to rename this tab'}>
+          <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); updateSelection([], []); }} onDoubleClick={() => promptRename(d)} title={d.shared ? 'Shared document names cannot be changed here' : 'Double-click to rename this tab'}>
             {renamingId === d.id && !d.shared ? (
               <TabNameEditor key={d.id} name={d.name} onSave={(name) => { void renameDocument(d.id, name); setRenamingId(null); }} onCancel={() => setRenamingId(null)} />
             ) : <>
@@ -842,30 +1096,33 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 style={toolStyle}
                 author={author}
                 user={user}
-                selectedId={selectedId}
+                selectedMarkupIds={selectedMarkupIds}
+                selectedCalloutIds={selectedCalloutIds}
+                selectedPageObjectIds={selectedPageObjectIds}
                 fit={fit}
-                onSelect={(id) => {
-                  setSelectedId(id);
-                  if (id) {
-                    setRightTab((tab) => (tab === 'measure' || tab === 'markups' ? tab : 'markups'));
-                    const markup = active.markups.find((item) => item.id === id);
-                    if (markup?.type === 'stamp') {
-                      setTool('select');
-                      setDefaultsOpen(true);
-                    }
-                  }
+                contentTool={contentTool}
+                onCreatePageObject={createPageObject}
+                onSelectionChange={(markupIds, pageObjectIds, calloutIds) => {
+                  updateSelection(markupIds, pageObjectIds, calloutIds);
+                  if (markupIds.length) setRightTab((tab) => (tab === 'measure' || tab === 'markups' ? tab : 'markups'));
                 }}
+                onPageObjectsChange={updatePageObjects}
+                onEditPageObject={editPageObject}
                 onCreate={createMarkup}
                 onBeginEdit={beginEdit}
                 onLive={live}
                 onZoom={setZoom}
-                onContextMenu={(event, markupId, point) => {
+                onContextMenu={(event, markupId, pageObjectId, point, calloutOnly = false) => {
                   const currentSelection = active.markups.find((markup) => markup.id === selectedId && markup.page === active.page)?.id ?? null;
+                  const clickedMarkup = active.markups.find((markup) => markup.id === markupId && markup.page === active.page);
                   setContextMenu({
                     x: Math.max(4, Math.min(event.clientX, window.innerWidth - 220)),
-                    y: Math.max(4, Math.min(event.clientY, window.innerHeight - 360)),
-                    markupId: markupId ?? currentSelection,
+                    y: Math.max(4, Math.min(event.clientY, window.innerHeight - 410)),
+                    markupId: calloutOnly ? null : markupId ?? currentSelection,
+                    pageObjectId,
+                    stackId: pageObjectId ?? (clickedMarkup?.type === 'stamp' ? clickedMarkup.id : null),
                     point,
+                    calloutOnly,
                   });
                 }}
                 onCalibrate={(a, b) => {
@@ -905,9 +1162,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   onSelect={(id) => {
                     const m = active.markups.find((x) => x.id === id);
                     if (m) {
-                      setSelectedId(id);
+                      updateSelection([id], []);
                       setTool('select');
-                      if (m.type === 'stamp') setDefaultsOpen(true);
                       goto(m.page);
                     }
                   }}
@@ -989,14 +1245,21 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <button role="menuitem" disabled={!contextMarkup || readOnly || !canDeleteMarkup(contextMarkup, user)} onClick={cutContextMarkup}><ContextMenuIcon action="cut" />Cut</button>
-          <button role="menuitem" disabled={!contextMarkup} onClick={copyContextMarkup}><ContextMenuIcon action="copy" />Copy</button>
-          <button role="menuitem" disabled={!clipboardMarkup || readOnly} onClick={pasteContextMarkup}><ContextMenuIcon action="paste" />Paste</button>
+          <button role="menuitem" disabled={!canCutContextSelection()} onClick={() => cutSelection(true)}><ContextMenuIcon action="cut" />Cut</button>
+          <button role="menuitem" disabled={!contextMarkup && !contextMenu.pageObjectId && !selectedMarkupIds.length && !selectedPageObjectIds.length} onClick={() => copySelection(true)}><ContextMenuIcon action="copy" />Copy</button>
+          <button role="menuitem" disabled={readOnly || (!clipboardSelection.markups.length && !clipboardSelection.pageObjects.length) || (!!active.shared && clipboardSelection.markups.length === 0)} onClick={() => pasteSelection(contextMenu.point)}><ContextMenuIcon action="paste" />Paste</button>
           <div className="context-menu-separator" />
           <button role="menuitem" onClick={() => { setTool('select'); setPending(null); setContextMenu(null); }}><ContextMenuIcon action="select" />Select</button>
           <button role="menuitem" onClick={() => { setTool('hand'); setContextMenu(null); }}><ContextMenuIcon action="pan" />Pan</button>
           <button role="menuitem" onClick={() => { zoomBy(1.25); setContextMenu(null); }}><ContextMenuIcon action="zoom-in" />Zoom In</button>
           <button role="menuitem" onClick={() => { zoomBy(1 / 1.25); setContextMenu(null); }}><ContextMenuIcon action="zoom-out" />Zoom Out</button>
+          {contextStackable && (
+            <>
+              <div className="context-menu-separator" />
+              <button role="menuitem" disabled={readOnly || !!active.shared} onClick={() => stackContextLayer('front')}><ContextMenuIcon action="bring-front" />Bring to Front</button>
+              <button role="menuitem" disabled={readOnly || !!active.shared} onClick={() => stackContextLayer('back')}><ContextMenuIcon action="bring-back" />Bring to Back</button>
+            </>
+          )}
           {contextMarkup && (
             <>
               <div className="context-menu-separator" />
@@ -1023,6 +1286,72 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       )}
       {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} onChanged={() => setSharedRevision((n) => n + 1)} />}
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
+      {editingPageObjectId && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Edit PDF text">
+          <div className="usermgmt page-text-editor">
+            <div className="row between"><b>{editingPageObjectIsNew ? 'Add PDF text' : 'Edit PDF text'}</b><button onClick={cancelPageObjectText}>Cancel</button></div>
+            <p className="muted">This is editable PDF page text, not a markup annotation. Double-click it on the page to edit it later.</p>
+            <textarea autoFocus aria-label="PDF text" rows={4} value={pageObjectTextDraft} onChange={(e) => setPageObjectTextDraft(e.target.value)} onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelPageObjectText();
+              } else if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                savePageObjectText();
+              }
+            }} />
+            <div className="row">
+              <button className="primary" disabled={!pageObjectTextDraft.trim()} onClick={savePageObjectText}>Apply text</button>
+              <button onClick={cancelPageObjectText}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {signatureManagerOpen && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Manage signatures">
+          <div className="usermgmt signature-manager">
+            <div className="row between"><b>Manage signatures</b><button onClick={() => setSignatureManagerOpen(false)}>Close</button></div>
+            <p className="muted">Signatures are stored on this device and flattened into PDF page content when placed.</p>
+            <label className="inline-check">
+              <input type="checkbox" checked={removeSignatureBackground} onChange={(e) => setRemoveSignatureBackground(e.target.checked)} />
+              Remove white background from uploaded PNGs
+            </label>
+            <p className="muted">Enable this for signatures scanned on white paper. It removes white and near-white pixels; leave it off for PNGs that already have transparency or contain white ink.</p>
+            <input ref={signatureFileInput} type="file" accept="image/png,.png" multiple hidden onChange={(e) => { void addSignatures(e.currentTarget.files, removeSignatureBackground); e.currentTarget.value = ''; }} />
+            <button onClick={() => signatureFileInput.current?.click()}>Upload PNG signatures...</button>
+            {signatureError && <p className="warn" role="alert">{signatureError}</p>}
+            {signatures.length === 0 ? <p className="muted">No signatures saved yet.</p> : (
+              <div className="signature-list">
+                {signatures.map((signature) => (
+                  <div className="signature-item" key={signature.id}>
+                    <label className="inline-check">
+                      <input type="radio" name="active-signature" checked={signatureId === signature.id} onChange={() => setSignatureId(signature.id)} />
+                      <img src={signature.data} alt="" />
+                    </label>
+                    <input aria-label="Signature name" value={signature.name} onChange={(e) => setSavedSignatures(signatures.map((item) => item.id === signature.id ? { ...item, name: e.target.value } : item))} />
+                    <button className="danger" onClick={() => {
+                      const next = signatures.filter((item) => item.id !== signature.id);
+                      setSavedSignatures(next);
+                      if (signatureId === signature.id) setSignatureId(next[0]?.id ?? null);
+                      if (contentMode === 'signature' && signatureId === signature.id) setContentMode(null);
+                    }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="row">
+              <button className="primary" disabled={!selectedSignature} onClick={() => {
+                if (!selectedSignature) return;
+                setTool('select');
+                setContentMode('signature');
+                setSignatureManagerOpen(false);
+                say(`Click the PDF page to place ${selectedSignature.name}.`);
+              }}>Place selected signature</button>
+              <button onClick={() => setSignatureManagerOpen(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
       {defaultsOpen && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Tool defaults">
           <div className="usermgmt tool-dialog">
@@ -1042,6 +1371,16 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 {STAMPS.map((s) => <option key={s}>{s}</option>)}
               </select></label>
               <button onClick={() => void chooseStamp()}>Import stamp...</button>
+              {(editingSelected ? !!selected?.stampImage : !!shown.stampImage) && (
+                <label className="inline-check">
+                  Lock aspect ratio
+                  <input
+                    type="checkbox"
+                    checked={editingSelected ? selected?.stampLockAspectRatio !== false : shown.stampLockAspectRatio !== false}
+                    onChange={(e) => changeStyle({ stampLockAspectRatio: e.target.checked })}
+                  />
+                </label>
+              )}
             </>}
           </div>
         </div>
