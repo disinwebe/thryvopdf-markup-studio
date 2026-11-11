@@ -13,9 +13,10 @@ import { orderedPageLayers, topPageLayerAt } from '../core/layerOrder';
 import { normalizedRect, selectInWindow } from '../core/selection';
 import { SnapIndex, SnapTarget, snapPoint } from '../core/snapping';
 import { pageSnapIndex } from '../pdf/snapping';
+import { expandGroupedSelection } from '../core/grouping';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
-const CLICK: Tool[] = ['stamp', 'note', 'm-count'];
+const CLICK: Tool[] = ['stamp', 'note', 'm-count', 'image'];
 const MULTI: Tool[] = ['cloud', 'polyline', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
 const SNAP_TOOLS: Tool[] = ['calibrate', 'm-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
 
@@ -54,6 +55,8 @@ export interface PageViewProps {
   onSelectionChange(markupIds: string[], pageObjectIds: string[], calloutIds?: string[]): void;
   onPageObjectsChange(objects: PageObject[]): void;
   onEditPageObject(id: string): void;
+  onAddImage(page: number, point: Pt): void;
+  onEditComments(markupId: string): void;
 }
 
 export function PageView(p: PageViewProps) {
@@ -256,24 +259,57 @@ export function PageView(p: PageViewProps) {
   const canMoveCallout = (m: Markup) => !doc.shared || (ownsMarkup(m, p.user) && m.comments.every((comment) => ownsComment(comment, p.user)));
   const additiveSelection = (e: React.PointerEvent) => e.ctrlKey || e.metaKey || e.shiftKey;
   const selectMarkup = (id: string, additive: boolean) => {
+    const markup = doc.markups.find((item) => item.id === id);
+    const group = markup?.groupId;
+    const groupMarkupIds = group ? doc.markups.filter((item) => item.page === doc.page && item.groupId === group).map((item) => item.id) : [id];
+    const groupObjectIds = group ? doc.pageObjects.filter((item) => item.page === doc.page && item.groupId === group).map((item) => item.id) : [];
     if (!additive) {
-      p.onSelectionChange([id], [], []);
+      const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, [id], []);
+      p.onSelectionChange(expanded.markupIds, expanded.pageObjectIds, []);
       return;
     }
-    const ids = new Set(p.selectedMarkupIds);
-    ids.has(id) ? ids.delete(id) : ids.add(id);
-    p.onSelectionChange([...ids], p.selectedPageObjectIds, p.selectedCalloutIds);
+    const selected = groupMarkupIds.some((item) => p.selectedMarkupIds.includes(item)) || groupObjectIds.some((item) => p.selectedPageObjectIds.includes(item));
+    const markupIds = new Set(p.selectedMarkupIds);
+    const objectIds = new Set(p.selectedPageObjectIds);
+    for (const item of groupMarkupIds) selected ? markupIds.delete(item) : markupIds.add(item);
+    for (const item of groupObjectIds) selected ? objectIds.delete(item) : objectIds.add(item);
+    p.onSelectionChange([...markupIds], [...objectIds], p.selectedCalloutIds);
   };
   const selectPageObject = (id: string, additive: boolean) => {
+    const object = doc.pageObjects.find((item) => item.id === id);
+    const group = object?.groupId;
+    const groupMarkupIds = group ? doc.markups.filter((item) => item.page === doc.page && item.groupId === group).map((item) => item.id) : [];
+    const groupObjectIds = group ? doc.pageObjects.filter((item) => item.page === doc.page && item.groupId === group).map((item) => item.id) : [id];
     if (!additive) {
-      p.onSelectionChange([], [id], []);
+      const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, [], [id]);
+      p.onSelectionChange(expanded.markupIds, expanded.pageObjectIds, []);
       return;
     }
-    const ids = new Set(p.selectedPageObjectIds);
-    ids.has(id) ? ids.delete(id) : ids.add(id);
-    p.onSelectionChange(p.selectedMarkupIds, [...ids], p.selectedCalloutIds);
+    const selected = groupMarkupIds.some((item) => p.selectedMarkupIds.includes(item)) || groupObjectIds.some((item) => p.selectedPageObjectIds.includes(item));
+    const markupIds = new Set(p.selectedMarkupIds);
+    const objectIds = new Set(p.selectedPageObjectIds);
+    for (const item of groupMarkupIds) selected ? markupIds.delete(item) : markupIds.add(item);
+    for (const item of groupObjectIds) selected ? objectIds.delete(item) : objectIds.add(item);
+    p.onSelectionChange([...markupIds], [...objectIds], p.selectedCalloutIds);
   };
   const selectCallout = (id: string, additive: boolean) => {
+    const markup = doc.markups.find((item) => item.id === id);
+    if (markup?.groupId) {
+      const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, [id], []);
+      if (!additive) {
+        p.onSelectionChange(expanded.markupIds, expanded.pageObjectIds, [id]);
+        return;
+      }
+      const selected = p.selectedCalloutIds.includes(id);
+      const markupIds = new Set(p.selectedMarkupIds);
+      const objectIds = new Set(p.selectedPageObjectIds);
+      const calloutIds = new Set(p.selectedCalloutIds);
+      for (const item of expanded.markupIds) selected ? markupIds.delete(item) : markupIds.add(item);
+      for (const item of expanded.pageObjectIds) selected ? objectIds.delete(item) : objectIds.add(item);
+      selected ? calloutIds.delete(id) : calloutIds.add(id);
+      p.onSelectionChange([...markupIds], [...objectIds], [...calloutIds]);
+      return;
+    }
     if (!additive) {
       p.onSelectionChange([], [], [id]);
       return;
@@ -335,6 +371,18 @@ export function PageView(p: PageViewProps) {
           return;
         }
         if (!alreadySelected) selectCallout(calloutHit.id, false);
+        if (calloutHit.groupId) {
+          const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, [calloutHit.id], []);
+          drag.current = {
+            kind: 'selection-move',
+            start: pt,
+            markups: doc.markups.filter((markup) => expanded.markupIds.includes(markup.id)),
+            callouts: [],
+            pageObjects: doc.pageObjects.filter((object) => expanded.pageObjectIds.includes(object.id)),
+            began: false,
+          };
+          return;
+        }
         const groupIds = alreadySelected ? p.selectedMarkupIds : [];
         const groupCalloutIds = (alreadySelected ? p.selectedCalloutIds : [calloutHit.id])
           .filter((id) => {
@@ -374,9 +422,12 @@ export function PageView(p: PageViewProps) {
           if (foundMarkup) selectMarkup(foundMarkup.id, false);
           else selectPageObject(hitObject!.id, false);
         }
-        const groupMarkupIds = alreadySelected ? p.selectedMarkupIds : foundMarkup ? [foundMarkup.id] : [];
+        const selectedMarkupIds = alreadySelected ? p.selectedMarkupIds : foundMarkup ? [foundMarkup.id] : [];
+        const selectedObjectIds = alreadySelected ? p.selectedPageObjectIds : hitObject ? [hitObject.id] : [];
+        const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, selectedMarkupIds, selectedObjectIds);
+        const groupMarkupIds = expanded.markupIds;
         const groupCalloutIds = alreadySelected ? p.selectedCalloutIds : [];
-        const groupObjectIds = alreadySelected ? p.selectedPageObjectIds : hitObject ? [hitObject.id] : [];
+        const groupObjectIds = expanded.pageObjectIds;
         const markups = doc.markups.filter((markup) => groupMarkupIds.includes(markup.id));
         const callouts = doc.markups.filter((markup) => groupCalloutIds.includes(markup.id));
         const objects = doc.pageObjects.filter((object) => groupObjectIds.includes(object.id));
@@ -405,6 +456,10 @@ export function PageView(p: PageViewProps) {
       return;
     }
     if (CLICK.includes(tool)) {
+      if (tool === 'image') {
+        p.onAddImage(doc.page, pt);
+        return;
+      }
       let points = [pt];
       if (tool === 'stamp') {
         const ratio = style.stampImage ? style.stampImage.width / style.stampImage.height : 3.5;
@@ -549,7 +604,8 @@ export function PageView(p: PageViewProps) {
       const markupIds = dg.additive ? new Set([...p.selectedMarkupIds, ...found.markupIds]) : new Set(found.markupIds);
       const pageObjectIds = dg.additive ? new Set([...p.selectedPageObjectIds, ...found.pageObjectIds]) : new Set(found.pageObjectIds);
       const calloutIds = dg.additive ? new Set([...p.selectedCalloutIds, ...found.calloutIds]) : new Set(found.calloutIds);
-      p.onSelectionChange([...markupIds], [...pageObjectIds], [...calloutIds]);
+      const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, [...markupIds], [...pageObjectIds]);
+      p.onSelectionChange(expanded.markupIds, expanded.pageObjectIds, [...calloutIds]);
       return;
     }
     if (!dg) return;
@@ -561,7 +617,15 @@ export function PageView(p: PageViewProps) {
     }
   };
 
-  const onDouble = () => {
+  const onDouble = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (tool === 'select') {
+      const point = toPt(event);
+      const markup = [...doc.markups].reverse().find((item) => item.page === doc.page && hitCallout(item, point));
+      if (markup) {
+        p.onEditComments(markup.id);
+        return;
+      }
+    }
     if (p.selectedPageObjectIds.length === 1) {
       const object = doc.pageObjects.find((item) => item.id === p.selectedPageObjectIds[0] && item.page === doc.page);
       if (object?.kind === 'text') p.onEditPageObject(object.id);
@@ -709,7 +773,7 @@ export function PageView(p: PageViewProps) {
               if (calloutHit && !p.selectedCalloutIds.includes(calloutHit.id)) p.onSelectionChange([], [], [calloutHit.id]);
               else if (selectable && !p.selectedMarkupIds.includes(selectable.id)) p.onSelectionChange([selectable.id], [], []);
               else if (selectedObject && !p.selectedPageObjectIds.includes(selectedObject.id)) p.onSelectionChange([], [selectedObject.id], []);
-              p.onContextMenu(e, calloutHit ? null : selectable?.id ?? null, selectedObject?.id ?? null, point, !!calloutHit);
+              p.onContextMenu(e, calloutHit?.id ?? selectable?.id ?? null, selectedObject?.id ?? null, point, !!calloutHit);
             }}
           />
         </div>

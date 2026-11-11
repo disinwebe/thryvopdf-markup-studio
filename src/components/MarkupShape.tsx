@@ -187,6 +187,11 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       );
       break;
     }
+    case 'image': {
+      const r = boxOf(m);
+      if (m.image) body = <image href={m.image.data} x={r.x} y={r.y} width={r.w} height={r.h} preserveAspectRatio="none" />;
+      break;
+    }
     case 'note': {
       const p = m.points[0];
       body = (

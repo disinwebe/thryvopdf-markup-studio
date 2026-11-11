@@ -8,7 +8,7 @@ import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
-import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, downloadName, pickFiles, saveBytes, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
+import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, downloadName, makeMarkup, pickFiles, saveBytes, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
 import { PageView } from './components/PageView';
 import { BookmarksPanel, Thumbnails } from './components/Thumbnails';
 import { MarkupsPanel } from './components/MarkupsPanel';
@@ -43,12 +43,15 @@ import { SYMBOLS, type PageContentTool, type PageObject, type PdfSymbol } from '
 import { importSignature, loadSignatures, saveSignatures, type SavedSignature } from './app/signatures';
 import { reorderPageLayers } from './core/layerOrder';
 import { markupSelectionBounds } from './core/selection';
+import { groupItems, ungroupItems, expandGroupedSelection } from './core/grouping';
+import { canEditComment } from './core/comments';
+import { EditCommentsPopup } from './components/EditCommentsPopup';
 
-const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'note'];
+const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'image', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
 const TOOL_ICONS: Partial<Record<Tool, string>> = {
   hand: '✋', line: '╱', highlight: '▰', text: 'T', cloud: '☁', rect: '□',
-  ellipse: '○', arrow: '↗', polyline: '⌁', pen: '✎', stamp: '▣', note: '▤',
+  ellipse: '○', arrow: '↗', polyline: '⌁', pen: '✎', stamp: '▣', image: '▧', note: '▤',
   'm-length': '↔', 'm-polylength': '⌁', 'm-area': '▱', 'm-perimeter': '□', 'm-angle': '∠', 'm-count': '#',
 };
 const TOOL_HINT: Partial<Record<Tool, string>> = {
@@ -61,9 +64,19 @@ const HISTORY_LIMIT = 100;
 
 type RightTab = 'markups' | 'measure' | 'organize' | 'sheets' | 'search';
 type LeftTab = 'pages' | 'bookmarks' | 'project';
-type ViewerContextMenu = { x: number; y: number; markupId: string | null; pageObjectId: string | null; stackId: string | null; point: Pt; calloutOnly: boolean };
+type ViewerContextMenu = { x: number; y: number; markupId: string | null; calloutId: string | null; pageObjectId: string | null; stackId: string | null; point: Pt; calloutOnly: boolean };
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
+
+function ImageToolIcon() {
+  return (
+    <svg className="tool-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <rect x="2.5" y="3" width="15" height="14" rx="1.5" />
+      <circle cx="7" cy="7.5" r="1.5" />
+      <path d="m3.5 15 4.5-4 3 2 2.5-3 3 4" />
+    </svg>
+  );
+}
 
 export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; notifications?: NotificationsApi | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
   const readOnly = viewOnly;
@@ -104,6 +117,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [library, setLibrary] = useState(false);
   const [sharedRevision, setSharedRevision] = useState(0);
   const [commentTarget, setCommentTarget] = useState<{ docId: string; markupId: string } | null>(null);
+  const [editingCommentsTarget, setEditingCommentsTarget] = useState<{ docId: string; markupId: string } | null>(null);
   const [contextMenu, setContextMenu] = useState<ViewerContextMenu | null>(null);
   const [clipboardSelection, setClipboardSelection] = useState<{ markups: Markup[]; pageObjects: PageObject[] }>({ markups: [], pageObjects: [] });
   const [contentMode, setContentMode] = useState<'text' | 'symbol' | 'signature' | null>(null);
@@ -308,6 +322,26 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     updateMarkup(markup.id, { comments: [...markup.comments, { id: uid(), author, authorEmail: user.email, date: new Date().toISOString(), text }] });
     closeCommentPopup();
   };
+  const beginEditComments = (markupId: string) => {
+    if (!active || viewOnly) return;
+    const markup = active.markups.find((item) => item.id === markupId);
+    if (!markup || !markup.comments.some((comment) => canEditComment(comment, user))) return;
+    setEditingCommentsTarget({ docId: active.id, markupId });
+  };
+  const saveEditedComments = (edits: Record<string, string>) => {
+    if (!active || !editingCommentsTarget || active.id !== editingCommentsTarget.docId || viewOnly) return;
+    const markup = active.markups.find((item) => item.id === editingCommentsTarget.markupId);
+    if (!markup) return;
+    const editedAt = new Date().toISOString();
+    const comments = markup.comments.map((comment) => {
+      const text = edits[comment.id]?.trim();
+      return text && canEditComment(comment, user) && text !== comment.text
+        ? { ...comment, text, edited: editedAt }
+        : comment;
+    });
+    updateMarkup(markup.id, { comments });
+    setEditingCommentsTarget(null);
+  };
 
   const deleteMarkup = (id: string) => {
     if (!active || viewOnly) return;
@@ -328,6 +362,47 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       ? selectedPageObjectIds
       : contextMenu?.pageObjectId ? [contextMenu.pageObjectId] : selectedPageObjectIds;
     return { markupIds, objectIds };
+  };
+  const contextGroupSelection = () => {
+    const ids = contextSelectionIds();
+    const markupIds = [...new Set([...ids.markupIds, ...(contextMenu?.calloutId ? [contextMenu.calloutId] : [])])];
+    return expandGroupedSelection(active?.markups ?? [], active?.pageObjects ?? [], active?.page ?? 0, markupIds, ids.objectIds);
+  };
+  const canGroupContextSelection = () => {
+    if (!active || readOnly) return false;
+    const selection = contextGroupSelection();
+    const markups = active.markups.filter((markup) => selection.markupIds.includes(markup.id));
+    const objects = active.pageObjects.filter((object) => selection.pageObjectIds.includes(object.id));
+    return markups.length + objects.length >= 2 &&
+      markups.every((markup) => canDeleteMarkup(markup, user)) &&
+      (!active.shared || objects.length === 0);
+  };
+  const contextHasGroup = () => {
+    if (!active) return false;
+    const selection = contextGroupSelection();
+    return active.markups.some((markup) => selection.markupIds.includes(markup.id) && !!markup.groupId) ||
+      active.pageObjects.some((object) => selection.pageObjectIds.includes(object.id) && !!object.groupId);
+  };
+  const groupContextSelection = () => {
+    if (!active || !canGroupContextSelection()) return;
+    const selection = contextGroupSelection();
+    const grouped = groupItems(active.markups, active.pageObjects, selection.markupIds, selection.pageObjectIds, uid());
+    commit(active.id, grouped.markups);
+    updateDoc(active.id, () => ({ pageObjects: grouped.pageObjects, dirty: true }));
+    updateSelection(selection.markupIds, selection.pageObjectIds);
+    setContextMenu(null);
+  };
+  const ungroupContextSelection = () => {
+    if (!active || readOnly) return;
+    const selection = contextGroupSelection();
+    if (active.shared && (selection.pageObjectIds.length > 0 ||
+        active.markups.some((markup) => selection.markupIds.includes(markup.id) && !canDeleteMarkup(markup, user)))) return;
+    const ungrouped = ungroupItems(active.markups, active.pageObjects, selection.markupIds, selection.pageObjectIds);
+    if (!ungrouped.changed) return;
+    commit(active.id, ungrouped.markups);
+    updateDoc(active.id, () => ({ pageObjects: ungrouped.pageObjects, dirty: true }));
+    updateSelection(selection.markupIds, selection.pageObjectIds);
+    setContextMenu(null);
   };
   const canCutSelection = () => {
     if (!active || readOnly || (active.shared && selectedPageObjectIds.length > 0)) return false;
@@ -949,15 +1024,42 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       window.alert(message);
     }
   };
+  const addImageMarkup = async (page: number, point: Pt) => {
+    if (!active || readOnly || !window.api) return;
+    try {
+      const [file] = await window.api.openFiles({
+        multi: false,
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }],
+      });
+      if (!file) return;
+      const image = await importStamp(file, () => null);
+      if (!image) return;
+      const scale = Math.min(1, 120 / image.width, 120 / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+      const markup = makeMarkup('image', page, [
+        { x: point.x - width / 2, y: point.y - height / 2 },
+        { x: point.x + width / 2, y: point.y + height / 2 },
+      ], { ...toolStyle, image }, author, { image, imageLockAspectRatio: true });
+      createMarkup(markup);
+      say('Image markup added. Add a comment to describe it.');
+    } catch (error) {
+      say(`Could not add image markup: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
   const contextMarkup = contextMenu && active?.markups.find((markup) => markup.id === contextMenu.markupId && markup.page === active.page);
   const contextStackable = !!contextMenu?.stackId;
+  const contextSelection = contextMenu ? contextGroupSelection() : { markupIds: [], pageObjectIds: [] };
+  const contextSelectionSize = contextSelection.markupIds.length + contextSelection.pageObjectIds.length;
+  const showGroupAction = contextSelectionSize > 1;
+  const showUngroupAction = contextMenu ? contextHasGroup() : false;
   const flattenableCount = active?.markups.filter((markup) => canDeleteMarkup(markup, user)).length ?? 0;
 
   const toolBtn = (t: Tool) => (
     <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { chooseTool(t); setPending(null); if (t === 'stamp') setDefaultsOpen(true); if (t === 'cloud') say('Click to add cloud vertices. Press Enter, double-click, or right-click to finish.'); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
-      {t === 'select' ? <SelectIcon theme={theme} /> : <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>}{TOOL_LABEL[t]}
+      {t === 'select' ? <SelectIcon theme={theme} /> : t === 'image' ? <ImageToolIcon /> : <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>}{TOOL_LABEL[t]}
     </button>
   );
 
@@ -1134,6 +1236,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 }}
                 onPageObjectsChange={updatePageObjects}
                 onEditPageObject={editPageObject}
+                onAddImage={addImageMarkup}
+                onEditComments={beginEditComments}
                 onCreate={createMarkup}
                 onBeginEdit={beginEdit}
                 onLive={live}
@@ -1145,6 +1249,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                     x: Math.max(4, Math.min(event.clientX, window.innerWidth - 220)),
                     y: Math.max(4, Math.min(event.clientY, window.innerHeight - 410)),
                     markupId: calloutOnly ? null : markupId ?? currentSelection,
+                    calloutId: calloutOnly ? markupId : null,
                     pageObjectId,
                     stackId: pageObjectId ?? (clickedMarkup?.type === 'stamp' ? clickedMarkup.id : null),
                     point,
@@ -1279,6 +1384,9 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           <button role="menuitem" disabled={!canCutContextSelection()} onClick={() => cutSelection(true)}><ContextMenuIcon action="cut" />Cut</button>
           <button role="menuitem" disabled={!contextMarkup && !contextMenu.pageObjectId && !selectedMarkupIds.length && !selectedPageObjectIds.length} onClick={() => copySelection(true)}><ContextMenuIcon action="copy" />Copy</button>
           <button role="menuitem" disabled={readOnly || (!clipboardSelection.markups.length && !clipboardSelection.pageObjects.length) || (!!active.shared && clipboardSelection.markups.length === 0)} onClick={() => pasteSelection(contextMenu.point)}><ContextMenuIcon action="paste" />Paste</button>
+          {(showGroupAction || showUngroupAction) && <div className="context-menu-separator" />}
+          {showGroupAction && <button role="menuitem" disabled={!canGroupContextSelection()} onClick={groupContextSelection}><ContextMenuIcon action="group" />Group</button>}
+          {showUngroupAction && <button role="menuitem" disabled={readOnly || (active.shared && contextSelection.pageObjectIds.length > 0) || active.markups.some((markup) => contextSelection.markupIds.includes(markup.id) && !canDeleteMarkup(markup, user))} onClick={ungroupContextSelection}><ContextMenuIcon action="ungroup" />Ungroup</button>}
           <div className="context-menu-separator" />
           <button role="menuitem" onClick={() => { setTool('select'); setPending(null); setContextMenu(null); }}><ContextMenuIcon action="select" />Select</button>
           <button role="menuitem" onClick={() => { setTool('hand'); setContextMenu(null); }}><ContextMenuIcon action="pan" />Pan</button>
@@ -1317,6 +1425,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       )}
       {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} onChanged={() => setSharedRevision((n) => n + 1)} />}
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
+      {editingCommentsTarget && active?.id === editingCommentsTarget.docId && (() => {
+        const markup = active.markups.find((item) => item.id === editingCommentsTarget.markupId);
+        const comments = markup?.comments.filter((comment) => canEditComment(comment, user)) ?? [];
+        return comments.length ? <EditCommentsPopup comments={comments} onSave={saveEditedComments} onCancel={() => setEditingCommentsTarget(null)} /> : null;
+      })()}
       {editingPageObjectId && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Edit PDF text">
           <div className="usermgmt page-text-editor">

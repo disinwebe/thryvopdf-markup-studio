@@ -233,17 +233,18 @@ export function applyHandle(m: Markup, key: HandleKey, p: Pt): Markup {
     const corners = rectPoly(boxOf(m));
     const opposite = corners[(key + 2) % 4];
     const pts = m.points.slice();
-    if (m.type === 'stamp' && m.stampImage && m.stampLockAspectRatio !== false) {
+    if ((m.type === 'stamp' && m.stampImage && m.stampLockAspectRatio !== false) ||
+        (m.type === 'image' && m.image && m.imageLockAspectRatio !== false)) {
       const box = boxOf(m);
       if (box.w <= 0 || box.h <= 0) return { ...m, points: [opposite, p] };
       const targetWidth = Math.abs(p.x - opposite.x);
       const targetHeight = Math.abs(p.y - opposite.y);
-      const scale = Math.max(targetWidth / box.w, targetHeight / box.h, 0.01);
-      const width = box.w * scale;
-      const height = box.h * scale;
+      const ratio = m.type === 'image' ? m.image!.width / m.image!.height : box.w / box.h;
+      const fitWidth = Math.max(targetWidth, targetHeight * ratio);
+      const fitHeight = fitWidth / ratio;
       const right = key === 1 || key === 2;
       const bottom = key === 2 || key === 3;
-      const target = { x: opposite.x + (right ? width : -width), y: opposite.y + (bottom ? height : -height) };
+      const target = { x: opposite.x + (right ? fitWidth : -fitWidth), y: opposite.y + (bottom ? fitHeight : -fitHeight) };
       pts[0] = key === 0 || key === 3 ? target : opposite;
       pts[1] = key === 1 || key === 2 ? target : opposite;
       return { ...m, points: pts };

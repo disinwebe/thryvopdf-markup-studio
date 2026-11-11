@@ -30,6 +30,7 @@ export interface PageObject {
   symbol?: PdfSymbol;
   signature?: SavedSignature;
   zOrder?: number;
+  groupId?: string;
 }
 
 export function resizePageObject(object: PageObject, dx: number, dy: number): PageObject {
