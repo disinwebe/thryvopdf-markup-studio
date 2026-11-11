@@ -98,6 +98,7 @@ export interface Style {
   stamp: string;
   stampImage?: import('../core/stamp').StampImage;
   stampLockAspectRatio?: boolean;
+  image?: import('../core/stamp').StampImage;
   subject: string;
 }
 
@@ -172,6 +173,10 @@ export function makeMarkup(
       m.stampLockAspectRatio = style.stampLockAspectRatio !== false;
     }
   }
+  if (type === 'image' && style.image) {
+    m.image = style.image;
+    m.imageLockAspectRatio = true;
+  }
   if (style.fill && ['rect', 'ellipse', 'cloud', 'text', 'callout'].includes(type)) m.fill = style.fillColor;
   if (type.startsWith('m-') && style.subject.trim()) m.subject = style.subject.trim();
   return m;
@@ -192,6 +197,7 @@ export const TOOL_LABEL: Record<string, string> = {
   polyline: 'Polyline',
   pen: 'Pen',
   stamp: 'Stamp',
+  image: 'Image',
   note: 'Note',
   'm-length': 'Length',
   'm-polylength': 'Polylength',

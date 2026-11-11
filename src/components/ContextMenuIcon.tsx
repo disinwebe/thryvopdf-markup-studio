@@ -1,4 +1,4 @@
-export type ContextMenuAction = 'cut' | 'copy' | 'paste' | 'select' | 'pan' | 'zoom-in' | 'zoom-out' | 'flatten' | 'flatten-all' | 'bring-front' | 'bring-back';
+export type ContextMenuAction = 'cut' | 'copy' | 'paste' | 'select' | 'pan' | 'zoom-in' | 'zoom-out' | 'flatten' | 'flatten-all' | 'bring-front' | 'bring-back' | 'group' | 'ungroup';
 
 const paths: Record<ContextMenuAction, React.ReactNode> = {
   cut: <><circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><path d="m8 7 12 10M8 17l5-4m3-2 4-4" /></>,
@@ -12,6 +12,8 @@ const paths: Record<ContextMenuAction, React.ReactNode> = {
   'flatten-all': <><path d="M4 5h16M6 9h12M8 13h8" /><path d="m5 17 2 2 4-4m3 2 2 2 4-4" /></>,
   'bring-front': <><path d="M12 3v12m-5-5 5 5 5-5" /><path d="M5 19h14" /></>,
   'bring-back': <><path d="M12 21V9m-5 5 5-5 5 5" /><path d="M5 5h14" /></>,
+  group: <><rect x="3" y="4" width="8" height="8" rx="1" /><rect x="13" y="4" width="8" height="8" rx="1" /><rect x="8" y="13" width="8" height="8" rx="1" /></>,
+  ungroup: <><rect x="3" y="4" width="8" height="8" rx="1" /><rect x="13" y="4" width="8" height="8" rx="1" /><path d="m8 17 2 2 5-5" /></>,
 };
 
 export function ContextMenuIcon({ action }: { action: ContextMenuAction }) {

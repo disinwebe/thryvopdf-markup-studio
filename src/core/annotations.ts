@@ -386,15 +386,18 @@ export function buildAppearance(
       extra.DA = `/Helv ${size} Tf ${col.join(' ')} rg`;
       break;
     }
-    case 'stamp': {
+    case 'stamp':
+    case 'image': {
       const r = boxOf(m);
-      if (m.stampImage) {
+      const image = m.type === 'image' ? m.image : m.stampImage;
+      if (image) {
         const origin = cv({ x: r.x, y: r.y + r.h });
         const right = cv({ x: r.x + r.w, y: r.y + r.h });
         const top = cv({ x: r.x, y: r.y });
-        ops = `q ${f(right.x - origin.x)} ${f(right.y - origin.y)} ${f(top.x - origin.x)} ${f(top.y - origin.y)} ${f(origin.x)} ${f(origin.y)} cm /StampImage Do Q`;
+        const imageName = m.type === 'image' ? 'MarkupImage' : 'StampImage';
+        ops = `q ${f(right.x - origin.x)} ${f(right.y - origin.y)} ${f(top.x - origin.x)} ${f(top.y - origin.y)} ${f(origin.x)} ${f(origin.y)} cm /${imageName} Do Q`;
         viewPts = rectPoly(r);
-        extra.Name = 'Draft';
+        if (m.type === 'stamp') extra.Name = 'Draft';
         break;
       }
       const t = (m.stamp ?? m.text ?? 'STAMP').toUpperCase();
@@ -530,12 +533,15 @@ export async function writeAnnotations(
       const opacity = m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity;
       const gs = ctx.obj({ Type: 'ExtGState', CA: opacity, ca: opacity, ...(b.blend ? { BM: b.blend } : {}) });
       const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1, BM: 'Normal' });
-      const stampImage = m.type === 'stamp' && m.stampImage ? await doc.embedPng(m.stampImage.data) : undefined;
+      const markupImage = m.type === 'image' && m.image
+        ? await doc.embedPng(m.image.data)
+        : m.type === 'stamp' && m.stampImage ? await doc.embedPng(m.stampImage.data) : undefined;
+      const imageName = m.type === 'image' ? 'MarkupImage' : 'StampImage';
       const ap = ctx.stream('/GS0 gs\n' + b.ops, {
         Type: 'XObject',
         Subtype: 'Form',
         BBox: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
-        Resources: ctx.obj({ Font: { F1: font.ref, F2: boldFont.ref }, ExtGState: { GS0: gs, GS1: gs1 }, ...(stampImage ? { XObject: { StampImage: stampImage.ref } } : {}) }),
+        Resources: ctx.obj({ Font: { F1: font.ref, F2: boldFont.ref }, ExtGState: { GS0: gs, GS1: gs1 }, ...(markupImage ? { XObject: { [imageName]: markupImage.ref } } : {}) }),
       });
       const apRef = ctx.register(ap);
       const dict: Record<string, unknown> = {

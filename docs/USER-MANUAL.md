@@ -114,7 +114,7 @@ To close a document, choose the **X** on its tab or **File > Close Document**. S
    - **Pen:** click and drag to draw freehand.
    - **Polyline:** click to add points, then press **Enter**, double-click, or right-click to finish.
    - **Angle:** click three points to finish.
-   - **Stamp** and **Note:** click to place.
+   - **Stamp**, **Image**, and **Note:** click to place. For Image, choose a PNG or JPEG file; the image is added as a review markup and opens the comment dialog.
 3. For a Text box, edit the displayed text in the properties panel.
 4. To choose another color, width, or opacity, set it in the toolbar before drawing or select the markup and change its properties in the right panel.
 5. After placing a review markup, the **Add comment** dialog appears. Enter a comment and choose **Add comment**; press **Enter** to submit or **Shift+Enter** for a new line. **Cancel** leaves the markup without a comment.
@@ -160,6 +160,15 @@ The red numbered comment ID appears beside the comment box and in the Markups pa
 
 Supported stamp sources include common image formats and PDF files up to 20 MB. Imported PDF pages and animated images become still images.
 
+### Image markups
+
+1. Choose **Image** in the Markup toolbar.
+2. Click the page where the image should be centered, then choose a PNG or JPEG file.
+3. Enter a comment in the dialog to describe the image; canceling leaves the image markup without a comment.
+4. Select the image to move or resize it. Its aspect ratio is preserved.
+
+The image is embedded in the markup and saved into the PDF, so the annotation does not depend on the original image file. Image markups can also be shared in shared documents.
+
 ### Cloud arc size
 
 Create a Cloud by clicking each vertex around the area to outline, then press **Enter**, double-click, or right-click to finish. Select a Cloud markup and adjust **Cloud arc diameter** in the right-side properties. Smaller values make tighter, more frequent scallops; larger values make broader arcs. The setting is saved with the markup.
@@ -170,7 +179,7 @@ Right-click a placed Stamp, Text, Symbol, or Signature and choose **Bring to Fro
 
 ### Selecting multiple items
 
-With the **Select** tool active, hold **Ctrl** (or **Command** on macOS) and click items to add or remove them one at a time; **Shift-click** also adds items. Alternatively, drag a selection window across the page to select annotations, measurements, comment boxes, Stamps, Text, Symbols, and Signatures. Drag any selected item to move the selection together. Comment boxes remain attached to their markup and can also be selected and repositioned separately.
+With the **Select** tool active, hold **Ctrl** (or **Command** on macOS) and click items to add or remove them one at a time; **Shift-click** also adds items. Alternatively, drag a selection window across the page to select annotations, measurements, comment boxes, Stamps, Text, Symbols, and Signatures. Drag any selected item to move the selection together. Right-click a selection and choose **Group** to keep its items selected and moving together; choose **Ungroup** to release a grouped selection. Comment boxes remain attached to their markup and can also be selected and repositioned separately. Double-click a comment box to edit comments you authored.
 
 ### Text, symbols, and signatures
 

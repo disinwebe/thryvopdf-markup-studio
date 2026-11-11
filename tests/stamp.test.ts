@@ -45,6 +45,37 @@ describe('custom stamp', () => {
     expect(() => stampDimensions(0, 5)).toThrow();
   });
 
+  it('validates and persists an embedded image markup with comments and grouping metadata', async () => {
+    const source = {
+      ...markup(),
+      id: 'image1',
+      type: 'image' as const,
+      image,
+      imageLockAspectRatio: true,
+      stampImage: undefined,
+      groupId: 'group1',
+      comments: [{ id: 'comment1', author: 'Test', date: '2026-01-01T00:00:00Z', text: 'See attached image' }],
+    };
+    expect(validMarkup(source)).toBe(null);
+    expect(validMarkup({ ...source, groupId: 'invalid group' })).toBe('Invalid group id.');
+    expect(validMarkup({ ...source, image: undefined })).toBe('Invalid markup image.');
+    const pdf = await PDFDocument.create();
+    pdf.addPage([300, 400]);
+    const bytes = await saveWithState(await pdf.save(), { markups: [source], calibrations: {}, sheets: {}, bookmarks: [] });
+    const reopened = await PDFDocument.load(bytes);
+    expect((await readState(reopened)).markups[0]).toMatchObject({
+      image,
+      imageLockAspectRatio: true,
+      groupId: 'group1',
+      comments: [{ text: 'See attached image' }],
+    });
+    const annotation = (reopened.getPages()[0].node.Annots() as PDFArray).lookup(0, PDFDict);
+    const appearance = annotation.lookup(PDFName.of('AP'), PDFDict).lookup(PDFName.of('N'));
+    if (!(appearance instanceof PDFRawStream)) throw new Error('Expected an image annotation appearance');
+    expect(appearance.dict.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('XObject'), PDFDict).has(PDFName.of('MarkupImage'))).toBe(true);
+    expect(new TextDecoder().decode(appearance.contents)).toContain('/MarkupImage Do');
+  });
+
   it('limits batched image changes below the server request cap', () => {
     const docs = Array.from({ length: 70 }, (_, i) => ({ ...markup(), id: `m${i}`, stampImage: { ...image, data: 'data:image/png;base64,' + 'A'.repeat(170000) } }));
     const batch = batchChanges(docs, []).upserts;
@@ -61,6 +92,19 @@ describe('custom stamp', () => {
 
     const free = applyHandle({ ...source, stampLockAspectRatio: false }, 2, { x: 140, y: 160 });
     expect(free.points).toEqual([{ x: 10, y: 20 }, { x: 140, y: 160 }]);
+  });
+
+  it('locks image markup resizing to its embedded image ratio', () => {
+    const source: Markup = {
+      ...markup(),
+      type: 'image',
+      image: { ...image, width: 70, height: 80 },
+      stampImage: undefined,
+    };
+    const resized = applyHandle(source, 2, { x: 140, y: 160 });
+    const width = Math.abs(resized.points[1].x - resized.points[0].x);
+    const height = Math.abs(resized.points[1].y - resized.points[0].y);
+    expect(width / height).toBeCloseTo(70 / 80);
   });
 
   it('preserves image, move, resize and opacity in a real PDF annotation', async () => {
