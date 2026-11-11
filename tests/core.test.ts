@@ -1,8 +1,8 @@
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { readState, saveWithState } from '../src/core/annotations';
 import { hitMarkup, pickTop, wrapText } from '../src/core/geometry';
-import { buildFromPlan, chunkEvery, extractPages, mergePdfs, movePage, parseRanges, splitPdf } from '../src/core/organize';
+import { buildFromPlan, chunkEvery, extractPages, mergePdfs, movePage, parseRanges, rotatePage, splitPdf } from '../src/core/organize';
 import { Markup, MarkupType } from '../src/core/types';
 
 async function makePdf(pages: number, label = 'P', size: [number, number] = [400, 300]): Promise<Uint8Array> {
@@ -46,6 +46,7 @@ describe('annotations round trip', () => {
       ['note', [[300, 200]]],
       ['m-length', [[10, 10], [60, 10]]],
       ['m-polylength', [[10, 10], [60, 10], [60, 60]]],
+      ['m-spline', [[10, 10], [40, 60], [80, 20]]],
       ['m-area', [[10, 10], [60, 10], [60, 60]]],
       ['m-perimeter', [[10, 10], [60, 10], [60, 60]]],
       ['m-angle', [[10, 10], [60, 10], [60, 60]]],
@@ -151,6 +152,17 @@ describe('hit testing', () => {
 });
 
 describe('organize', () => {
+  it('rotates only the requested page, clockwise or counter-clockwise', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([400, 300]);
+    source.addPage([400, 300]).setRotation(degrees(90));
+    source.addPage([400, 300]).setRotation(degrees(270));
+    const rotated = await PDFDocument.load(await rotatePage(await source.save(), 1, 90));
+    expect(rotated.getPages().map((page) => page.getRotation().angle)).toEqual([0, 180, 270]);
+    const restored = await PDFDocument.load(await rotatePage(await rotated.save(), 1, -90));
+    expect(restored.getPages().map((page) => page.getRotation().angle)).toEqual([0, 90, 270]);
+  });
+
   it('parses ranges', () => {
     expect(parseRanges('1-2, 5, 4-', 6)).toEqual([[0, 1], [4], [3, 4, 5]]);
     expect(() => parseRanges('9', 3)).toThrow();

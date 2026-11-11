@@ -26,6 +26,9 @@ export type MarkupType =
   | 'note'
   | 'm-length'
   | 'm-polylength'
+  | 'm-spline'
+  | 'm-radius'
+  | 'm-diameter'
   | 'm-area'
   | 'm-perimeter'
   | 'm-angle'
@@ -87,6 +90,25 @@ export interface Markup {
   measurementArrowSize?: number;
 }
 
+export interface MeasurementCircle {
+  center: Pt;
+  radius: number;
+  diameterLine: [Pt, Pt];
+}
+
+export function measurementCircle(type: MarkupType, points: Pt[]): MeasurementCircle | null {
+  if (type === 'm-radius' && points.length >= 2) {
+    const [center, edge] = points;
+    return { center, radius: Math.hypot(edge.x - center.x, edge.y - center.y), diameterLine: [center, edge] };
+  }
+  if (type === 'm-diameter' && points.length >= 2) {
+    const [a, b] = points;
+    const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    return { center, radius: Math.hypot(b.x - a.x, b.y - a.y) / 2, diameterLine: [a, b] };
+  }
+  return null;
+}
+
 export type Unit = 'ft' | 'in' | 'm' | 'mm';
 export const UNITS: Unit[] = ['ft', 'in', 'm', 'mm'];
 
@@ -113,6 +135,9 @@ export interface Bookmark {
 export const MEASURE_TYPES: MarkupType[] = [
   'm-length',
   'm-polylength',
+  'm-spline',
+  'm-radius',
+  'm-diameter',
   'm-area',
   'm-perimeter',
   'm-angle',

@@ -12,6 +12,7 @@
     "start": "npm run build && electron .",
     "electron": "electron .",
     "manual:pdf": "node scripts/generate-user-manual.cjs",
+    "manual:screenshots": "node scripts/capture-user-manual-screenshots.cjs",
     "test": "vitest run",
     "server": "node server/server.cjs",
     "dist": "npm run build && electron-builder --win nsis --publish never",

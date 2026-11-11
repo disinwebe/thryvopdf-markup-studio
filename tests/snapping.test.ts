@@ -9,6 +9,7 @@ describe('measurement snapping', () => {
   it('snaps to nearby vector endpoints and segment intersections', () => {
     const index = createSnapIndex({
       endpoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 50, y: -50 }, { x: 50, y: 50 }],
+      centers: [{ x: 100, y: 100 }],
       segments: [
         { a: { x: 0, y: 0 }, b: { x: 100, y: 0 } },
         { a: { x: 50, y: -50 }, b: { x: 50, y: 50 } },
@@ -18,6 +19,23 @@ describe('measurement snapping', () => {
     expect(snapPoint({ x: 1, y: 2 }, index, 10)).toEqual({ point: { x: 0, y: 0 }, kind: 'endpoint' });
     expect(snapPoint({ x: 51, y: 2 }, index, 10)).toEqual({ point: { x: 50, y: 0 }, kind: 'intersection' });
     expect(snapPoint({ x: 200, y: 200 }, index, 10)).toBeNull();
+  });
+
+  it('snaps to segment midpoints and closed-path centers', () => {
+    const index = createSnapIndex({
+      endpoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+      segments: [{ a: { x: 0, y: 0 }, b: { x: 100, y: 0 } }],
+      centers: [{ x: 50, y: 50 }],
+    });
+
+    expect(snapPoint({ x: 50, y: 3 }, index, 5)).toEqual({
+      point: { x: 50, y: 0 },
+      kind: 'midpoint',
+    });
+    expect(snapPoint({ x: 53, y: 50 }, index, 5)).toEqual({
+      point: { x: 50, y: 50 },
+      kind: 'center',
+    });
   });
 
   it('extracts vector endpoints after applying PDF and viewport transforms', () => {
@@ -34,6 +52,28 @@ describe('measurement snapping', () => {
 
     expect(geometry.endpoints).toEqual([{ x: 10, y: 80 }, { x: 30, y: 80 }]);
     expect(geometry.segments).toEqual([{ a: { x: 10, y: 80 }, b: { x: 30, y: 80 } }]);
+    expect(geometry.centers).toEqual([]);
+  });
+
+  it('extracts rectangle center snap targets', () => {
+    const geometry = snapGeometryFromOperatorList({
+      fnArray: [OPS.constructPath],
+      argsArray: [[new Uint8Array([OPS.rectangle]), new Float32Array([10, 20, 40, 60])]],
+    }, [1, 0, 0, -1, 0, 100]);
+
+    expect(geometry.centers).toEqual([{ x: 30, y: 50 }]);
+  });
+
+  it('extracts center snap targets for closed paths but not open polylines', () => {
+    const geometry = snapGeometryFromOperatorList({
+      fnArray: [OPS.constructPath],
+      argsArray: [[
+        new Uint8Array([OPS.moveTo, OPS.lineTo, OPS.lineTo, OPS.closePath, OPS.moveTo, OPS.lineTo, OPS.lineTo]),
+        new Float32Array([10, 20, 50, 20, 50, 60, 100, 100, 120, 100, 120, 120]),
+      ]],
+    }, [1, 0, 0, -1, 0, 100]);
+
+    expect(geometry.centers).toEqual([{ x: 30, y: 60 }]);
   });
 
   it('finds real line endpoints and crossings from a PDF page', async () => {

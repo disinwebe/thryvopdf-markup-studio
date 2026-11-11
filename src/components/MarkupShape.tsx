@@ -1,6 +1,6 @@
-import { arrowHead, boxCenter, boxOf, cloudPointsFromPath, rectPoly, wrapText, approxTextWidth } from '../core/geometry';
+import { arrowHead, boxCenter, boxOf, cloudPointsFromPath, rectPoly, splinePoints, wrapText, approxTextWidth } from '../core/geometry';
 import { measureLabel } from '../core/measurement';
-import { Calibration, Markup, Pt } from '../core/types';
+import { Calibration, Markup, measurementCircle, Pt } from '../core/types';
 import { calloutLayout, calloutTextRuns } from '../core/callout';
 import { measurementArrowheads } from '../core/snapping';
 
@@ -79,6 +79,21 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       );
       break;
     }
+    case 'm-radius':
+    case 'm-diameter': {
+      const circle = measurementCircle(m.type, m.points);
+      if (!circle) break;
+      const [a, b] = circle.diameterLine;
+      body = (
+        <>
+          <circle {...common} cx={circle.center.x} cy={circle.center.y} r={circle.radius} />
+          <path {...common} d={d([a, b])} />
+          <circle cx={circle.center.x} cy={circle.center.y} r={2.5} fill={m.color} />
+          <Label text={label} x={circle.center.x + circle.radius * 0.35} y={circle.center.y - circle.radius * 0.35 - 6} color={m.color} />
+        </>
+      );
+      break;
+    }
     case 'arrow': {
       const [a, b] = m.points;
       body = (
@@ -98,6 +113,17 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
       body = (
         <>
           <path {...common} d={d(m.points)} />
+          <Label text={label} x={mid.x + 4} y={mid.y - 6} color={m.color} />
+        </>
+      );
+      break;
+    }
+    case 'm-spline': {
+      const curve = splinePoints(m.points);
+      const mid = curve[Math.floor(curve.length / 2)] ?? curve[0];
+      body = (
+        <>
+          <path {...common} d={d(curve)} />
           <Label text={label} x={mid.x + 4} y={mid.y - 6} color={m.color} />
         </>
       );

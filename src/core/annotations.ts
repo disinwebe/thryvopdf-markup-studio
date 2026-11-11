@@ -20,10 +20,11 @@ import {
   boxOf,
   cloudPointsFromPath,
   rectPoly,
+  splinePoints,
   wrapText,
 } from './geometry';
 import { countNumbers, DEFAULT_CAL, measureLabel } from './measurement';
-import { Bookmark, Calibration, Markup, Pt, Rect, SheetMeta, uid } from './types';
+import { Bookmark, Calibration, Markup, measurementCircle, Pt, Rect, SheetMeta, uid } from './types';
 import { isReviewMarkup, numberMarkups } from './numbering';
 import { calloutLayout, calloutTextRuns } from './callout';
 import { measurementArrowheads } from './snapping';
@@ -129,6 +130,9 @@ const SUBTYPE: Record<string, string> = {
   note: 'Text',
   'm-length': 'Line',
   'm-polylength': 'PolyLine',
+  'm-spline': 'PolyLine',
+  'm-radius': 'Circle',
+  'm-diameter': 'Circle',
   'm-area': 'Polygon',
   'm-perimeter': 'Polygon',
   'm-angle': 'PolyLine',
@@ -152,7 +156,7 @@ export function buildAppearance(
     const q = pts.map(cv);
     return q.map((p, i) => `${f(p.x)} ${f(p.y)} ${i ? 'l' : 'm'}`).join(' ') + (close ? ' h' : '');
   };
-  const circlePath = (point: Pt, radius: number) => {
+  const circlePath = (point: Pt, radius: number, fill = true) => {
     const c = 0.5523 * radius;
     const P = (x: number, y: number) => cv({ x, y });
     const q0 = P(point.x + radius, point.y), q1 = P(point.x + radius, point.y + c), q2 = P(point.x + c, point.y + radius), q3 = P(point.x, point.y + radius);
@@ -162,7 +166,7 @@ export function buildAppearance(
     return `${f(q0.x)} ${f(q0.y)} m ${f(q1.x)} ${f(q1.y)} ${f(q2.x)} ${f(q2.y)} ${f(q3.x)} ${f(q3.y)} c ` +
       `${f(q4.x)} ${f(q4.y)} ${f(q5.x)} ${f(q5.y)} ${f(q6.x)} ${f(q6.y)} c ` +
       `${f(q7.x)} ${f(q7.y)} ${f(q8.x)} ${f(q8.y)} ${f(q9.x)} ${f(q9.y)} c ` +
-      `${f(q10.x)} ${f(q10.y)} ${f(q11.x)} ${f(q11.y)} ${f(q0.x)} ${f(q0.y)} c f`;
+      `${f(q10.x)} ${f(q10.y)} ${f(q11.x)} ${f(q11.y)} ${f(q0.x)} ${f(q0.y)} c ${fill ? 'f' : 'S'}`;
   };
   const textAngle = (g.rotation * Math.PI) / 180;
   const tm = (p: Pt) => {
@@ -295,18 +299,38 @@ export function buildAppearance(
       extra.L = [...[a, b].map(cv)].flatMap((p) => [f(p.x), f(p.y)]);
       break;
     }
+    case 'm-radius':
+    case 'm-diameter': {
+      const circle = measurementCircle(m.type, m.points)!;
+      const [a, b] = circle.diameterLine;
+      const text = measureLabel(m, cal);
+      const labelPoint = { x: circle.center.x + circle.radius * 0.35, y: circle.center.y - circle.radius * 0.35 };
+      includeLabel(text, labelPoint.x, labelPoint.y - 6);
+      ops = `${stroke} ${circlePath(circle.center, circle.radius, false)} ${path([a, b])} S ${col.join(' ')} rg ${circlePath(circle.center, 2.5)}`;
+      ops += labelAt(text, labelPoint.x, labelPoint.y - 6);
+      viewPts = [
+        { x: circle.center.x - circle.radius, y: circle.center.y - circle.radius },
+        { x: circle.center.x + circle.radius, y: circle.center.y + circle.radius },
+        a,
+        b,
+      ];
+      extra.Vertices = [a, b].map(cv).flatMap((point) => [f(point.x), f(point.y)]);
+      break;
+    }
     case 'polyline':
     case 'm-polylength':
+    case 'm-spline':
     case 'm-angle': {
-      ops = `${stroke} ${path(m.points)} S`;
+      const points = m.type === 'm-spline' ? splinePoints(m.points) : m.points;
+      ops = `${stroke} ${path(points)} S`;
       if (m.type !== 'polyline') {
-        const anchor = m.points[Math.floor(m.points.length / 2)] ?? m.points[0];
+        const anchor = points[Math.floor(points.length / 2)] ?? points[0];
         const dx = m.type === 'm-angle' ? 6 : 4;
         const text = measureLabel(m, cal);
         includeLabel(text, anchor.x + dx, anchor.y - 6);
         ops += label(anchor, dx, -6);
       }
-      extra.Vertices = m.points.map(cv).flatMap((p) => [f(p.x), f(p.y)]);
+      extra.Vertices = points.map(cv).flatMap((p) => [f(p.x), f(p.y)]);
       break;
     }
     case 'pen': {

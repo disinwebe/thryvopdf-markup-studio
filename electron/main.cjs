@@ -38,7 +38,44 @@ function createWindow() {
     currentMenuState = state;
     const iconForAction = (name) => {
       const theme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
-      const image = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'menu', `${name}-${theme}.png`));
+      const graphics = {
+        open: '<path d="M3 7h7l2 2h9v10H3z"/><path d="M3 10h18l-2 9H5z"/>',
+        save: '<path d="M5 3h12l4 4v14H5z"/><path d="M8 3v6h9V3M8 21v-8h10v8"/>',
+        saveAs: '<path d="M5 3h12l4 4v14H5z"/><path d="M8 3v6h9V3M8 21v-8h10v8"/><path d="M18 5v5m-2.5-2.5h5"/>',
+        export: '<path d="M4 13v7h16v-7M12 16V3m-5 5 5-5 5 5"/>',
+        close: '<path d="M5 5l14 14M19 5 5 19"/>',
+        key: '<circle cx="8" cy="12" r="5"/><path d="M13 12h8m-3 0v3m-3-3v2"/>',
+        exit: '<path d="M10 4H5v16h5M14 8l4 4-4 4m4-4H9"/>',
+        undo: '<path d="M9 8 4 12l5 4v-3h5c4 0 6 2 6 6 2-2 2-5 1-7-1-3-4-4-7-4H9z"/>',
+        redo: '<path d="m15 8 5 4-5 4v-3h-5c-4 0-6 2-6 6-2-2-2-5-1-7 1-3 4-4 7-4h5z"/>',
+        select: '<path d="m5 3 14 11-7 1-3 6L5 3z"/>',
+        pan: '<path d="M7 12V6a2 2 0 0 1 4 0v5-7a2 2 0 0 1 4 0v7-5a2 2 0 0 1 4 0v6-3a2 2 0 0 1 4 0v6a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-4-5a2 2 0 0 1 3-2l2 2"/>',
+        delete: '<path d="M5 7h14l-1 14H6zM3 4h18M9 4V2h6v2"/><path d="M9 10v7m6-7v7"/>',
+        users: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2z"/><path d="M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v1h-4"/>',
+        license: '<path d="M5 3h14v18H5z"/><path d="M8 7h8m-8 4h8m-8 4h5"/>',
+        settings: '<circle cx="12" cy="12" r="3"/><path d="m19 13 2 1-2 4-2-1-2 2v2H9v-2l-2-2-2 1-2-4 2-1v-3l-2-1 2-4 2 1 2-2V2h6v2l2 2 2-1 2 4-2 1z"/>',
+        group: '<rect x="3" y="4" width="9" height="9" rx="1.5"/><rect x="12" y="11" width="9" height="9" rx="1.5"/>',
+        ungroup: '<rect x="3" y="4" width="8" height="8" rx="1.5"/><rect x="14" y="13" width="7" height="7" rx="1.5"/><path d="M12 7h7m-3-3 3 3-3 3M12 17H5m3-3-3 3 3 3"/>',
+        zoomIn: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6m-11-14v6m-3-3h6"/>',
+        zoomOut: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6"/>',
+        page: '<path d="M5 3h10l4 4v14H5z"/><path d="M14 3v5h5M8 12h8m-8 4h8"/>',
+        help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 4.3 1.8c-1.2 1.1-1.8 1.4-1.8 3m0 3v.1"/>',
+        measure: '<path d="m4 17 12-12 5 5L9 22H4z"/><path d="m12 9 2 2m1-5 2 2m-9 9 2 2"/>',
+      }[name];
+      if (!graphics) return undefined;
+      const palette = ['group', 'ungroup', 'compare', 'undo'].includes(name)
+        ? ['#c1a8ff', '#8c68ec', '#6547c5', '#563aa9']
+        : ['pan', 'redo'].includes(name)
+          ? ['#8ee5b6', '#48bd81', '#23945d', '#17794b']
+          : ['measure', 'open'].includes(name)
+            ? ['#ffd18a', '#f5a33e', '#d47a20', '#ad6117']
+            : ['delete', 'close', 'exit'].includes(name)
+              ? ['#ffa1a1', '#ed6269', '#c73946', '#a82e3b']
+              : ['key', 'license'].includes(name)
+                ? ['#82e6e5', '#37babb', '#19898e', '#116e74']
+                : ['#73b8ff', '#3989ed', '#2563c5', '#1d4e9a'];
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop stop-color="${palette[0]}"/><stop offset=".48" stop-color="${palette[1]}"/><stop offset="1" stop-color="${palette[2]}"/></linearGradient><filter id="s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="1" stdDeviation=".8" flood-color="#25364b" flood-opacity=".34"/></filter></defs><g fill="url(#g)" stroke="${palette[3]}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" filter="url(#s)">${graphics}</g><path d="M5 5h4" fill="none" stroke="#fff" stroke-width="1.15" stroke-linecap="round" opacity=".76"/></svg>`;
+      const image = nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
       return image.isEmpty() ? undefined : image.resize({ width: 16, height: 16 });
     };
     const menu = Menu.buildFromTemplate(menuTemplate(state, (action) => {

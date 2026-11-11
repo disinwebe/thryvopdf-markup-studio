@@ -215,7 +215,7 @@ describe('saved PDF annotation appearances', () => {
 
   const types: MarkupType[] = [
         'highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'note',
-        'm-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count',
+        'm-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count',
       ];
       for (const rotation of [0, 90, 180, 270]) {
         it(`renders review callouts and independent measurements after save and reopen (${rotation} degrees)`, async () => {
@@ -233,7 +233,9 @@ describe('saved PDF annotation appearances', () => {
             subject: type === 'm-count' ? 'Door' : undefined,
             points: type === 'note' || type === 'm-count'
               ? [{ x: 40, y: 40 }]
-              : type === 'callout' || type === 'm-angle' || type === 'm-area' || type === 'm-perimeter'
+              : type === 'm-radius'
+                ? [{ x: 70, y: 70 }, { x: 95, y: 70 }]
+                : type === 'callout' || type === 'm-angle' || type === 'm-spline' || type === 'm-area' || type === 'm-perimeter'
                 ? [{ x: 40, y: 40 }, { x: 100, y: 65 }, { x: 80, y: 70 }]
                 : review.points,
             text: type === 'text' || type === 'callout' ? 'Markup text' : undefined,

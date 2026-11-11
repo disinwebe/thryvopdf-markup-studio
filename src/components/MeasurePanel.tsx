@@ -45,7 +45,7 @@ export function MeasurePanel(p: MeasurePanelProps) {
   const summary = takeoffSummary(doc.markups, (pg) => doc.calibrations[pg] ?? DEFAULT_CAL, outUnit);
 
   return (
-    <div className="panel-body">
+    <div className="panel-body measurement-controls">
       <h4>Scale - page {doc.page + 1}</h4>
       <div className={cal.calibrated ? 'ok' : 'warn'}>
         {cal.calibrated

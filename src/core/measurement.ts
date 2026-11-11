@@ -1,4 +1,4 @@
-import { dist } from './geometry';
+import { dist, splinePoints } from './geometry';
 import { Calibration, Markup, Pt, Unit } from './types';
 
 export const UNIT_TO_M: Record<Unit, number> = { ft: 0.3048, in: 0.0254, m: 1, mm: 0.001 };
@@ -49,7 +49,7 @@ export function calibrateFromScale(paperInches: number, real: number, unit: Unit
   return { unit, unitsPerPoint: real / (paperInches * 72), calibrated: true };
 }
 
-export type MeasureKind = 'length' | 'area' | 'perimeter' | 'angle' | 'count';
+export type MeasureKind = 'length' | 'radius' | 'diameter' | 'area' | 'perimeter' | 'angle' | 'count';
 
 export interface Measurement {
   kind: MeasureKind;
@@ -78,6 +78,12 @@ export function measure(m: Markup, cal: Calibration = DEFAULT_CAL): Measurement 
     case 'm-length':
     case 'm-polylength':
       return { kind: 'length', value: pathLength(m.points) * k, unit: cal.unit };
+    case 'm-spline':
+      return { kind: 'length', value: pathLength(splinePoints(m.points)) * k, unit: cal.unit };
+    case 'm-radius':
+      return { kind: 'radius', value: pathLength(m.points) * k, unit: cal.unit };
+    case 'm-diameter':
+      return { kind: 'diameter', value: pathLength(m.points) * k, unit: cal.unit };
     case 'm-perimeter':
       return { kind: 'perimeter', value: pathLength(m.points, true) * k, unit: cal.unit };
     case 'm-area':
@@ -115,7 +121,8 @@ export function formatFeetInches(feet: number): string {
 export function measureLabel(m: Markup, cal: Calibration = DEFAULT_CAL): string {
   const r = measure(m, cal);
   if (!r || r.kind === 'count') return '';
-  const base = formatValue(r.value, r.unit);
+  const formatted = formatValue(r.value, r.unit);
+  const base = r.kind === 'radius' ? `R ${formatted}` : r.kind === 'diameter' ? `Ø ${formatted}` : formatted;
   return cal.calibrated || r.kind === 'angle' ? base : base + ' (uncal.)';
 }
 
@@ -140,7 +147,7 @@ export function takeoffSummary(
     if (!r) continue;
     let value = r.value;
     let unit = r.unit;
-    if (r.kind === 'length' || r.kind === 'perimeter') {
+    if (r.kind === 'length' || r.kind === 'radius' || r.kind === 'diameter' || r.kind === 'perimeter') {
       value = convertLength(r.value, cal.unit, outUnit);
       unit = outUnit;
     } else if (r.kind === 'area') {
@@ -163,6 +170,12 @@ export function defaultSubject(m: Pick<Markup, 'type'>): string {
       return 'Length';
     case 'm-polylength':
       return 'Polylength';
+    case 'm-spline':
+      return 'Spline';
+    case 'm-radius':
+      return 'Radius';
+    case 'm-diameter':
+      return 'Diameter';
     case 'm-area':
       return 'Area';
     case 'm-perimeter':

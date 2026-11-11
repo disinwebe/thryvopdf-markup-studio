@@ -18,6 +18,7 @@ function mapPoint(point: Pt, matrix: number[]): Pt {
 export function snapGeometryFromOperatorList(operatorList: OperatorList, viewportTransform: number[]): SnapGeometry {
   const segments: SnapSegment[] = [];
   const endpoints: Pt[] = [];
+  const centers: Pt[] = [];
   let transform: Matrix = [1, 0, 0, 1, 0, 0];
   const transforms: Matrix[] = [];
   const ops = OPS as typeof OPS & Record<string, number>;
@@ -26,17 +27,29 @@ export function snapGeometryFromOperatorList(operatorList: OperatorList, viewpor
     let offset = 0;
     let current: Pt | null = null;
     let start: Pt | null = null;
+    let pathPoints: Pt[] = [];
+    let centerAdded = false;
+    const addCenter = () => {
+      if (centerAdded || pathPoints.length < 3) return;
+      const xs = pathPoints.map((point) => point.x);
+      const ys = pathPoints.map((point) => point.y);
+      centers.push({ x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
+      centerAdded = true;
+    };
     const toPage = (x: number, y: number) => mapPoint({ x, y }, Util.transform(viewportTransform, transform));
     const addLine = (next: Pt, isEndpoint = true) => {
       if (current) segments.push({ a: current, b: next });
       if (isEndpoint) endpoints.push(next);
       current = next;
+      pathPoints.push(next);
     };
 
     for (const op of pathOps) {
       if (op === OPS.moveTo) {
         current = toPage(coordinates[offset++], coordinates[offset++]);
         start = current;
+        pathPoints = [current];
+        centerAdded = false;
         endpoints.push(current);
       } else if (op === OPS.lineTo) {
         addLine(toPage(coordinates[offset++], coordinates[offset++]));
@@ -75,13 +88,20 @@ export function snapGeometryFromOperatorList(operatorList: OperatorList, viewpor
         const corners = [
           toPage(x, y), toPage(x + w, y), toPage(x + w, y + h), toPage(x, y + h),
         ];
+        centers.push({
+          x: (Math.min(...corners.map((point) => point.x)) + Math.max(...corners.map((point) => point.x))) / 2,
+          y: (Math.min(...corners.map((point) => point.y)) + Math.max(...corners.map((point) => point.y))) / 2,
+        });
+        centerAdded = true;
         current = null;
         start = null;
+        pathPoints = [];
         for (let i = 0; i < corners.length; i++) {
           const next = corners[i];
           if (current) segments.push({ a: current, b: next });
           endpoints.push(next);
           current = next;
+          pathPoints.push(next);
         }
         if (current && start) segments.push({ a: current, b: start });
         current = corners[0];
@@ -89,6 +109,7 @@ export function snapGeometryFromOperatorList(operatorList: OperatorList, viewpor
       } else if (op === OPS.closePath) {
         if (current && start) segments.push({ a: current, b: start });
         if (start) endpoints.push(start);
+        addCenter();
         current = start;
       }
     }
@@ -108,7 +129,7 @@ export function snapGeometryFromOperatorList(operatorList: OperatorList, viewpor
       parsePath(Array.from(args[0] as ArrayLike<number>), Array.from(args[1] as ArrayLike<number>));
     }
   }
-  return { segments, endpoints };
+  return { segments, endpoints, centers };
 }
 
 const cache = new WeakMap<PDFDocumentProxy, Map<number, Promise<SnapIndex>>>();

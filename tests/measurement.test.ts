@@ -14,6 +14,7 @@ import {
   takeoffCsv,
   takeoffSummary,
 } from '../src/core/measurement';
+import { splinePoints } from '../src/core/geometry';
 import { Markup } from '../src/core/types';
 
 const mk = (type: Markup['type'], points: [number, number][], extra: Partial<Markup> = {}): Markup => ({
@@ -41,6 +42,19 @@ describe('measurement math', () => {
     ];
     expect(pathLength(sq)).toBeCloseTo(30);
     expect(pathLength(sq, true)).toBeCloseTo(40);
+  });
+
+  it('samples a smooth spline through its control points and measures its curved length', () => {
+    const controls = [{ x: 0, y: 0 }, { x: 50, y: 50 }, { x: 100, y: 0 }];
+    const sampled = splinePoints(controls);
+    expect(sampled[0]).toEqual(controls[0]);
+    expect(sampled[sampled.length - 1]).toEqual(controls[2]);
+    expect(sampled).toHaveLength(25);
+    expect(sampled.some((point) => point.y > 0 && point.y < 50)).toBe(true);
+    expect(pathLength(sampled)).toBeGreaterThan(pathLength(controls));
+    const result = measure(mk('m-spline', [[0, 0], [50, 50], [100, 0]]), { unit: 'ft', unitsPerPoint: 1, calibrated: true });
+    expect(result?.kind).toBe('length');
+    expect(result!.value).toBeCloseTo(pathLength(sampled));
   });
 
   it('computes polygon area with shoelace regardless of winding', () => {
@@ -77,6 +91,12 @@ describe('measurement math', () => {
     expect(area.perimeter).toBeCloseTo(80);
   });
 
+  it('measures a radius from center-to-edge and a diameter from opposite endpoints', () => {
+    const cal = { unit: 'mm' as const, unitsPerPoint: 2, calibrated: true };
+    expect(measure(mk('m-radius', [[10, 10], [40, 10]]), cal)).toEqual({ kind: 'radius', value: 60, unit: 'mm' });
+    expect(measure(mk('m-diameter', [[0, 0], [60, 0]]), cal)).toEqual({ kind: 'diameter', value: 120, unit: 'mm' });
+  });
+
   it('calibrates from a drawing scale', () => {
     // 1 paper inch = 10 ft; 72 pt = 1 in
     const cal = calibrateFromScale(1, 10, 'ft');
@@ -96,7 +116,10 @@ describe('takeoff', () => {
   const cal = calibrateFromDistance({ x: 0, y: 0 }, { x: 100, y: 0 }, 100, 'ft'); // 1 pt = 1 ft
   const items = [
     mk('m-length', [[0, 0], [10, 0]], { subject: 'Wall' }),
+    mk('m-spline', [[0, 0], [5, 6], [10, 0]], { subject: 'Curved wall' }),
     mk('m-length', [[0, 0], [0, 5]], { subject: 'Wall' }),
+    mk('m-radius', [[0, 0], [3, 0]], { subject: 'Pipe' }),
+    mk('m-diameter', [[0, -4], [0, 4]], { subject: 'Pipe' }),
     mk('m-area', [[0, 0], [10, 0], [10, 10], [0, 10]], { subject: 'Slab' }),
     mk('m-count', [[1, 1]], { subject: 'Door' }),
     mk('m-count', [[2, 2]], { subject: 'Door' }),
@@ -108,6 +131,10 @@ describe('takeoff', () => {
     const wall = rows.find((r) => r.subject === 'Wall')!;
     expect(wall.count).toBe(2);
     expect(wall.total).toBeCloseTo(15);
+    expect(rows.find((r) => r.subject === 'Curved wall' && r.kind === 'length')!.total)
+      .toBeCloseTo(pathLength(splinePoints([{ x: 0, y: 0 }, { x: 5, y: 6 }, { x: 10, y: 0 }])));
+    expect(rows.find((r) => r.subject === 'Pipe' && r.kind === 'radius')!.total).toBeCloseTo(3);
+    expect(rows.find((r) => r.subject === 'Pipe' && r.kind === 'diameter')!.total).toBeCloseTo(8);
     expect(rows.find((r) => r.subject === 'Slab')!.total).toBeCloseTo(100);
     expect(rows.find((r) => r.subject === 'Door')!.count).toBe(2);
     expect(rows.some((r) => r.subject === 'rect')).toBe(false);

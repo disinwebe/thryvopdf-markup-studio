@@ -22,6 +22,7 @@ export interface Doc {
   page: number;
   /** 0 = fit page on first display */
   zoom: number;
+  viewport: { left: number; top: number };
   textCache: Map<number, string>;
   /** Present when this tab is a copy of a document hosted on the server. */
   shared?: SharedInfo;
@@ -78,6 +79,7 @@ export async function createDoc(name: string, bytes: Uint8Array, path?: string, 
     dirty,
     page: 0,
     zoom: 0,
+    viewport: { left: 0, top: 0 },
     textCache: new Map(),
   };
 }
@@ -126,6 +128,9 @@ export function defaultStyle(tool: Tool): Style {
       return { ...base, color: '#00897b', opacity: 0.35 };
     case 'm-length':
     case 'm-polylength':
+    case 'm-spline':
+    case 'm-radius':
+    case 'm-diameter':
     case 'm-perimeter':
     case 'm-angle':
     case 'm-count':
@@ -201,6 +206,9 @@ export const TOOL_LABEL: Record<string, string> = {
   note: 'Note',
   'm-length': 'Length',
   'm-polylength': 'Polylength',
+  'm-spline': 'Spline',
+  'm-radius': 'Radius',
+  'm-diameter': 'Diameter',
   'm-area': 'Area',
   'm-perimeter': 'Perimeter',
   'm-angle': 'Angle',

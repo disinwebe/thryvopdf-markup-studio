@@ -76,10 +76,10 @@ Enter your email and password on the sign-in screen. If an administrator issued 
 
 The main workspace has:
 
-- **Top toolbar:** Open and save PDFs, undo/redo, switch Viewer or Compare, place PDF text and symbols, manage signatures, open shared documents, check notifications, and sign out.
+- **Toolbars:** The workspace has four independent groups: **File management** (file actions, clockwise/counter-clockwise rotation of the current page, Viewer, and Compare), **Content tools** (Select, Pan, Undo, Redo, Text, Symbol, and Signatures), **Markup tools**, and **Measurement tools**. Toolbars appear only when a PDF is open. Use **View > Toolbars** in the native application menu to show or hide them; the former inline restore buttons are not displayed. Each toolbar has a named header; hold and drag anywhere in the header to move it, and use the close button to hide it. Right-click a toolbar header to lock or unlock its position; a locked toolbar cannot be moved. Drag near a window edge or another toolbar to snap it there; there is no docking dropdown. Commands wrap onto additional rows when narrowed. When a toolbar is made taller, its buttons switch to icon-only mode with command-name tooltips, a minimum 35 × 35-pixel button size, and a maximum of two icons per row. Drag the lower-right resize handle to adjust width and height. Top/bottom docking reserves vertical viewer space, while left/right docking reserves horizontal viewer space independently; the PDF tab strip follows the same left/right reservation as the viewer. Toolbars attached to one another move as a group and reserve space together. Freely moved toolbars do not reserve space. Each group can be restored independently; its position, size, docking, attachment, visibility, and locked state are saved on this device across launches.
 - **Tabs:** Each open PDF has a tab. A dot indicates unsaved changes. Double-click a local PDF tab name to rename it; shared-document names cannot be renamed here.
-- **Markup toolbar:** Select and Pan tools plus markup tools.
-- **Measure toolbar:** A separate row directly below Markup. Choose Length, PolyLength, Area, Perimeter, Angle, or Count here. Choosing a measurement tool does not open the Measurements window.
+- **Markup toolbar:** Markup tools such as Line, Cloud, Rectangle, and Stamp.
+- **Measure toolbar:** Choose Length, PolyLength, Spline, Radius, Diameter, Area, Perimeter, Angle, or Count here. Choosing a measurement tool does not open the Measurements window.
 - **Left panel:** Project, Pages, and Bookmarks tabs.
 - **Right panel:** Markups and comment properties. The **Measurements...** button opens calibration and takeoff controls when you want them.
 - **Floating controls:** Select/Pan, page navigation, zoom, Fit Width, and Fit Page at the bottom of the viewer.
@@ -87,7 +87,7 @@ The main workspace has:
 
 The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**, show or hide the left and right panels.
 
-![Main workspace showing document controls, drawing canvas, project/pages navigation, and the Markups panel](user-manual-assets/workspace.png)
+![Current ThryvoPDF workspace showing grouped toolbars, drawing canvas, project navigation, markup properties, and review notifications](user-manual-assets/workspace.png)
 
 *Figure 1. Main workspace: document navigation at left, the drawing canvas in the center, and markup properties at right.*
 
@@ -147,7 +147,7 @@ For shared documents, you can select markups by any author from the Markups list
 
 The red numbered comment ID appears beside the comment box and in the Markups panel. It is not drawn at the corner of the markup. Stamps and drawing-only Line markups are not assigned review numbers.
 
-![Selected review markup with its comment callout and editing properties](user-manual-assets/markups-and-comments.png)
+![Current markup workspace with a selected review cloud, linked comment callout, and editable review properties](user-manual-assets/markups-and-comments.png)
 
 *Figure 2. Select a markup to see its properties and associated comments.*
 
@@ -183,7 +183,7 @@ With the **Select** tool active, hold **Ctrl** (or **Command** on macOS) and cli
 
 ### Text, symbols, and signatures
 
-The **Text**, **Symbol**, and **Signatures** buttons are in the top toolbar immediately after **Compare**. These tools write to PDF page content rather than creating markup annotations, so they do not appear in the Markups list or markup count. Use them on local PDFs; live shared documents do not support these page-content edits.
+The **Text**, **Symbol**, and **Signatures** buttons are in the **Content tools** toolbar group, alongside Select and Pan. These tools write to PDF page content rather than creating markup annotations, so they do not appear in the Markups list or markup count. Use them on local PDFs; live shared documents do not support these page-content edits.
 
 - **Text:** Choose its size and color, then click the page to create a text object and enter its content. Press **Enter** to apply it; use **Shift+Enter** for a new line. Select and drag it to move, drag its corner to resize, and double-click to edit. It is regular PDF text content, not a text-box annotation, and can be searched or edited with a PDF editor that supports editing page content.
 - **Symbol:** Choose a check, X, star, circle, plus/minus, question mark, or exclamation mark, set its size and color, then click the page. Select and drag the symbol to move or drag its corner to resize it. Symbols are flattened into page graphics when saved.
@@ -196,7 +196,7 @@ Save the PDF after placing page content to keep the changes in the output file. 
 
 Calibrate each page before relying on measurement values. Uncalibrated values represent paper size, not real-world dimensions.
 
-Measurement tools are available in the **Measure** toolbar directly below **Markup**, and from **View > Measurements**. You can start a measurement from the toolbar without opening the Measurements window. The separate **Measurements...** toolbar button or **View > Open measurements panel...** opens calibration and takeoff controls.
+Measurement tools are available in the **Measurement tools** toolbar group and from **View > Measurements**. You can start a measurement from the toolbar without opening the Measurements window. The separate **Measurements...** toolbar button or **View > Open measurements panel...** opens calibration and takeoff controls.
 
 Measurements are drawing checks, not review comments: placing one does not open a comment dialog, and measurements are excluded from the markup-comment CSV. The calibration and appearance are saved with the PDF so the displayed and reopened saved measurements use the same value and unit formatting.
 
@@ -217,8 +217,8 @@ Measurements are drawing checks, not review comments: placing one does not open 
 ### Create takeoffs
 
 1. In Measurements, enter a **New measurement subject**, such as `Exterior wall` or `Doors`.
-2. Choose a measurement tool: Length, PolyLength, Area, Perimeter, Angle, or Count.
-3. Draw the measurement on the page. Multi-point tools are finished with **Enter**, double-click, or right-click; Angle finishes after its third point.
+2. Choose a measurement tool: Length, PolyLength, Spline, Radius, Diameter, Area, Perimeter, Angle, or Count.
+3. Draw the measurement on the page. Multi-point tools are finished with **Enter**, double-click, or right-click; Angle finishes after its third point. For Spline, click at least three points along the curve.
 4. The measurement appears on the drawing. The Measurements panel stays closed unless you open it; the tool remains active for another measurement.
 5. Open **Measurements...** to review entries and totals in the **Takeoff** table, choose an output unit, or export the takeoff.
 6. Choose **Export CSV** to save the takeoff. The date column uses local time in `M/D/YYYY HH:mm` format.
@@ -227,7 +227,7 @@ The Takeoff table is separate from the Markups panel. Measurement entries are no
 
 The subject remains the default while you continue using the same measurement tool, so repeated Count placements can share a subject such as `D2`. Choosing a different measurement tool clears the subject for the new takeoff type.
 
-For Length, PolyLength, Area, Perimeter, Angle, and calibration, clicks snap to nearby vector line endpoints or intersections. The snap marker shows the target before you click. Snapping works on vector drawing geometry; scanned or image-only pages do not contain line endpoints to snap to.
+For Length, PolyLength, Spline, Area, Perimeter, Angle, and calibration, clicks snap to nearby vector line endpoints or intersections. The snap marker shows the target before you click. Snapping works on vector drawing geometry; scanned or image-only pages do not contain line endpoints to snap to.
 
 To add arrowheads to a Length measurement, select it and choose **Start**, **End**, or **Both** under **Endpoint arrowheads** in the properties panel. Adjust **Arrow size** there as needed. The arrows appear in the viewer and saved PDF.
 
@@ -235,8 +235,11 @@ To add arrowheads to a Length measurement, select it and choose **Start**, **End
 
 - **Length** shows the calibrated distance between the two picked points.
 - **PolyLength** totals the connected segments you draw.
+- **Spline** draws a smooth curve through the control points and reports its calibrated length. Add at least three points, then press **Enter**, double-click, or right-click to finish.
 - **Area** reports the enclosed area, using a squared unit (for example, `mm²`).
 - **Perimeter** reports the total boundary length of a closed shape.
+- **Radius**: click the circle center, then a point on its edge. The displayed value is the calibrated center-to-edge distance.
+- **Diameter**: click two opposite points on the circle edge. The displayed value is the calibrated distance across the circle.
 - **Angle** reports the angle formed by three points.
 - **Count** places a numbered marker. The Takeoff table groups counts by subject.
 
@@ -297,7 +300,7 @@ Text search is available in unlicensed viewer mode as well as licensed mode. It 
 
 Shared documents are available when the app is connected in server mode. A signed-in, licensed user can upload, collaborate on, and update their assigned review status. In unlicensed viewer mode, shared content is read-only.
 
-![Shared Documents list with project groups, reviewers, and review status](user-manual-assets/shared-documents.png)
+![Current Shared Documents window showing project groups, reviewers, assignments, and review status](user-manual-assets/shared-documents.png)
 
 *Figure 4. Shared-document groups and reviewer status are visible in the library.*
 
@@ -412,6 +415,8 @@ The manager saves email credentials in the server data folder's `notify.json`; l
 | `Ctrl+O` | Open PDF |
 | `Ctrl+S` | Save |
 | `Ctrl+Shift+S` | Save As |
+| `Ctrl+Shift+Right` | Rotate the current page clockwise |
+| `Ctrl+Shift+Left` | Rotate the current page counter-clockwise |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Y` or `Ctrl+Shift+Z` | Redo |
 | `Delete` | Delete selected markup |

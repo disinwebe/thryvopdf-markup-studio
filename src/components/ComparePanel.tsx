@@ -5,6 +5,8 @@ import { CompareStats, Raster, autoAlign, compareRasters, COLOR_ADDED, COLOR_REM
 import { prepareComparisonPdf } from '../core/comparePdf';
 import { loadPdfForCompare, pageSize, renderRaster } from '../pdf/pdfjs';
 import { ContextMenuIcon } from './ContextMenuIcon';
+import { FloatingTools } from './FloatingTools';
+import { ActionIcon } from './ActionIcon';
 
 const BOX_W = 1800,
   BOX_H = 1300;
@@ -39,11 +41,13 @@ export function ComparePanel({
   activeId,
   onOpenRevision,
   onMessage,
+  theme,
 }: {
   docs: Doc[];
   activeId: string;
   onOpenRevision(): void;
   onMessage(msg: string): void;
+  theme: 'light' | 'dark';
 }) {
   const [aId, setAId] = useState(activeId);
   const [bId, setBId] = useState(docs.find((d) => d.id !== activeId)?.id ?? activeId);
@@ -60,6 +64,7 @@ export function ComparePanel({
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [panEnabled, setPanEnabled] = useState(false);
+  const [spacePan, setSpacePan] = useState(false);
   const [panning, setPanning] = useState(false);
   const cOver = useRef<HTMLCanvasElement>(null);
   const cA = useRef<HTMLCanvasElement>(null);
@@ -67,9 +72,22 @@ export function ComparePanel({
   const compareView = useRef<HTMLDivElement>(null);
   const compareMenu = useRef<HTMLDivElement>(null);
   const panDrag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const panActive = panEnabled || spacePan;
 
   const docA = docs.find((d) => d.id === aId);
   const docB = docs.find((d) => d.id === bId);
+  const fitZoom = (fit: 'width' | 'page', dimensions = size) => {
+    const viewport = compareView.current;
+    if (!viewport || !dimensions) return;
+    const contentWidth = dimensions.w * (mode === 'side' ? 2 : 1) + (mode === 'side' ? 10 : 0);
+    const availableWidth = Math.max(1, viewport.clientWidth - 40);
+    const availableHeight = Math.max(1, viewport.clientHeight - 70);
+    const scale = fit === 'width'
+      ? availableWidth / contentWidth
+      : Math.min(availableWidth / contentWidth, availableHeight / dimensions.h);
+    setZoom(Math.max(0.05, Math.min(3, scale)));
+    viewport.scrollTo({ left: 0, top: 0 });
+  };
 
   useEffect(() => {
     if (!docs.find((d) => d.id === aId)) setAId(docs[0]?.id ?? '');
@@ -91,6 +109,47 @@ export function ComparePanel({
       window.removeEventListener('keydown', closeOnEscape);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      const key = event.key.toLowerCase();
+      if (!event.ctrlKey && !event.metaKey && key === 'v') {
+        event.preventDefault();
+        setPanEnabled(false);
+        setSpacePan(false);
+      } else if (!event.ctrlKey && !event.metaKey && key === 'h') {
+        event.preventDefault();
+        setSpacePan(false);
+        setPanEnabled((enabled) => !enabled);
+      } else if (event.code === 'Space' && !event.ctrlKey && !event.metaKey && !event.repeat) {
+        event.preventDefault();
+        setSpacePan(true);
+      } else if ((event.ctrlKey || event.metaKey) && (key === '+' || key === '=')) {
+        event.preventDefault();
+        setZoom((value) => Math.min(3, value * 1.25));
+      } else if ((event.ctrlKey || event.metaKey) && (key === '-' || key === '_')) {
+        event.preventDefault();
+        setZoom((value) => Math.max(0.05, value / 1.25));
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') setSpacePan(false);
+    };
+    const handleMenuZoom = (event: Event) => {
+      const factor = (event as CustomEvent<number>).detail;
+      if (typeof factor === 'number' && factor > 0) setZoom((value) => Math.max(0.05, Math.min(3, value * factor)));
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('compare-zoom', handleMenuZoom);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('compare-zoom', handleMenuZoom);
+    };
+  }, []);
 
   const recompute = (t = tol, s = shift) => {
     const r = rasters.current;
@@ -157,6 +216,7 @@ export function ComparePanel({
       const zero = { dx: 0, dy: 0 };
       setShift(zero);
       recompute(tol, zero);
+      requestAnimationFrame(() => fitZoom('page', { w, h }));
     } catch (e) {
       onMessage('Compare failed: ' + (e as Error).message);
     }
@@ -244,14 +304,12 @@ export function ComparePanel({
         </label>
         <button onClick={align} disabled={!size}>Auto-align</button>
         <span className="nudge">
-          <button onClick={() => nudge(-1, 0)}>◀</button>
-          <button onClick={() => nudge(0, -1)}>▲</button>
-          <button onClick={() => nudge(0, 1)}>▼</button>
-          <button onClick={() => nudge(1, 0)}>▶</button>
+          <button onClick={() => nudge(-1, 0)} aria-label="Nudge left"><ActionIcon name="left" className="tool-icon" /></button>
+          <button onClick={() => nudge(0, -1)} aria-label="Nudge up"><ActionIcon name="up" className="tool-icon" /></button>
+          <button onClick={() => nudge(0, 1)} aria-label="Nudge down"><ActionIcon name="down" className="tool-icon" /></button>
+          <button onClick={() => nudge(1, 0)} aria-label="Nudge right"><ActionIcon name="right" className="tool-icon" /></button>
           <span className="muted small"> {shift.dx},{shift.dy}</span>
         </span>
-        <button onClick={() => setZoom((z) => Math.min(3, z * 1.25))}>＋</button>
-        <button onClick={() => setZoom((z) => Math.max(0.1, z / 1.25))}>－</button>
         <button onClick={exportPng}>Export PNG</button>
         <button onClick={exportPdf}>Export PDF</button>
       </div>
@@ -263,8 +321,9 @@ export function ComparePanel({
           <span>Changed: {(stats.changeRatio * 100).toFixed(1)}%</span>
         </div>
       )}
+      <div className="compare-canvas-area">
       <div
-        className={'compare-view' + (panEnabled ? ' pan-enabled' : '') + (panning ? ' panning' : '')}
+        className={'compare-view' + (panActive ? ' pan-enabled' : '') + (panning ? ' panning' : '')}
         ref={compareView}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -274,7 +333,8 @@ export function ComparePanel({
           });
         }}
         onPointerDown={(event) => {
-          if (!panEnabled || event.button !== 0 || !compareView.current) return;
+          if (event.target instanceof Element && event.target.closest('.compare-controls')) return;
+          if (!panActive || event.button !== 0 || !compareView.current) return;
           panDrag.current = { x: event.clientX, y: event.clientY, left: compareView.current.scrollLeft, top: compareView.current.scrollTop };
           setPanning(true);
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -288,21 +348,43 @@ export function ComparePanel({
         }}
         onPointerUp={() => { panDrag.current = null; setPanning(false); }}
         onPointerCancel={() => { panDrag.current = null; setPanning(false); }}
+        onWheel={(event) => {
+          if (!event.ctrlKey && !event.metaKey) return;
+          event.preventDefault();
+          const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+          setZoom((value) => Math.max(0.05, Math.min(3, value * factor)));
+        }}
       >
         {!size && <p className="muted pad">Pick two documents/pages and press Compare. Open a new revision with “Open revision…”.</p>}
-        {size && mode !== 'side' && <canvas ref={cOver} style={{ width: size.w * zoom, height: size.h * zoom }} />}
-        {size && mode === 'side' && (
-          <div className="compare-side-by-side">
-            <div>
-              <div className="cap">A · {docA?.name} p{aPage + 1}</div>
-              <canvas ref={cA} className="compare-page" style={{ width: size.w * zoom, height: size.h * zoom }} />
-            </div>
-            <div>
-              <div className="cap">B · {docB?.name} p{bPage + 1}</div>
-              <canvas ref={cB} className="compare-page" style={{ width: size.w * zoom, height: size.h * zoom }} />
-            </div>
+        {size && (
+          <div className="compare-stage">
+            {mode !== 'side' && <canvas ref={cOver} style={{ width: size.w * zoom, height: size.h * zoom }} />}
+            {mode === 'side' && (
+              <div className="compare-side-by-side">
+                <div>
+                  <div className="cap">A · {docA?.name} p{aPage + 1}</div>
+                  <canvas ref={cA} className="compare-page" style={{ width: size.w * zoom, height: size.h * zoom }} />
+                </div>
+                <div>
+                  <div className="cap">B · {docB?.name} p{bPage + 1}</div>
+                  <canvas ref={cB} className="compare-page" style={{ width: size.w * zoom, height: size.h * zoom }} />
+                </div>
+              </div>
+            )}
           </div>
         )}
+      </div>
+      {size && (
+        <div className="compare-controls viewer-controls" aria-label="Compare view controls">
+          <FloatingTools tool={panActive ? 'hand' : 'select'} theme={theme} onTool={(selectedTool) => { setSpacePan(false); setPanEnabled(selectedTool === 'hand'); }} />
+          <span className="sep" />
+          <button title="Zoom out" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(0.05, value / 1.25))}><ActionIcon name="zoom-out" className="tool-icon" /></button>
+          <span>{Math.round(zoom * 100)}%</span>
+          <button title="Zoom in" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(3, value * 1.25))}><ActionIcon name="zoom-in" className="tool-icon" /></button>
+          <button onClick={() => fitZoom('width')} title="Fit width"><ActionIcon name="fit-width" className="tool-icon" />Width</button>
+          <button onClick={() => fitZoom('page')} title="Fit page"><ActionIcon name="page" className="tool-icon" />Page</button>
+        </div>
+      )}
       </div>
       {contextMenu && (
         <div
@@ -313,8 +395,8 @@ export function ComparePanel({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onContextMenu={(event) => event.preventDefault()}
         >
-          <button role="menuitem" onClick={() => { setPanEnabled((enabled) => !enabled); setContextMenu(null); }}>
-            <ContextMenuIcon action="pan" />{panEnabled ? 'Stop panning' : 'Pan'}
+          <button role="menuitem" onClick={() => { setPanEnabled((enabled) => !enabled); setSpacePan(false); setContextMenu(null); }}>
+            <ContextMenuIcon action="pan" />{panActive ? 'Stop panning' : 'Pan'}
           </button>
           <button role="menuitem" onClick={() => { setZoom((value) => Math.min(3, value * 1.25)); setContextMenu(null); }}>
             <ContextMenuIcon action="zoom-in" />Zoom In

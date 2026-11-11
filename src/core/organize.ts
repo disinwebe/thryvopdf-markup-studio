@@ -30,6 +30,14 @@ export async function pageCount(bytes: Uint8Array): Promise<number> {
   return (await PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount();
 }
 
+export async function rotatePage(bytes: Uint8Array, pageIndex: number, rotation: number): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const page = doc.getPage(pageIndex);
+  const current = page.getRotation().angle;
+  page.setRotation(degrees((((current + rotation) % 360) + 360) % 360));
+  return doc.save();
+}
+
 export async function mergePdfs(list: Uint8Array[]): Promise<Uint8Array> {
   const plan: PagePlan[] = [];
   for (let s = 0; s < list.length; s++) {
