@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Doc, Style, Tool, makeMarkup } from '../app/model';
-import { applyHandle, boxOf, dist, handlesOf, hitMarkup, pickTop, simplify, translate, HandleKey } from '../core/geometry';
+import { applyHandle, boxOf, dist, handlesOf, hitMarkup, pickTop, simplify, splinePoints, translate, HandleKey } from '../core/geometry';
 import { countNumbers, DEFAULT_CAL } from '../core/measurement';
 import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas } from '../pdf/pdfjs';
@@ -15,10 +15,10 @@ import { SnapIndex, SnapTarget, snapPoint } from '../core/snapping';
 import { pageSnapIndex } from '../pdf/snapping';
 import { expandGroupedSelection } from '../core/grouping';
 
-const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'calibrate'];
+const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'm-radius', 'm-diameter', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count', 'image'];
-const MULTI: Tool[] = ['cloud', 'polyline', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
-const SNAP_TOOLS: Tool[] = ['calibrate', 'm-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle'];
+const MULTI: Tool[] = ['cloud', 'polyline', 'm-polylength', 'm-spline', 'm-area', 'm-perimeter', 'm-angle'];
+const SNAP_TOOLS: Tool[] = ['calibrate', 'm-length', 'm-polylength', 'm-radius', 'm-diameter', 'm-spline', 'm-area', 'm-perimeter', 'm-angle'];
 
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; sl: number; st: number }
@@ -47,6 +47,7 @@ export interface PageViewProps {
   onBeginEdit(): void;
   onLive(markups: Markup[]): void;
   onZoom(z: number): void;
+  onViewportChange(docId: string, left: number, top: number): void;
   onCalibrate(a: Pt, b: Pt): void;
   onContextMenu(event: React.MouseEvent<HTMLDivElement>, markupId: string | null, pageObjectId: string | null, point: Pt, calloutOnly?: boolean): void;
   onMessage(msg: string): void;
@@ -66,6 +67,9 @@ export function PageView(p: PageViewProps) {
   const pageEl = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const taskRef = useRef<{ cancel(): void; promise: Promise<unknown> } | null>(null);
+  const viewportFrame = useRef<number | null>(null);
+  const viewportCallback = useRef(p.onViewportChange);
+  viewportCallback.current = p.onViewportChange;
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [draft, setDraftState] = useState<Pt[] | null>(null);
   const draftRef = useRef<Pt[] | null>(null);
@@ -120,6 +124,24 @@ export function PageView(p: PageViewProps) {
   const fitDone = useRef({ n: p.fit.n, id: '', viewport: 0 });
   const [viewportRevision, setViewportRevision] = useState(0);
   const fittedZoom = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (!size || !scroller.current || doc.zoom === 0) return;
+    scroller.current.scrollLeft = doc.viewport?.left ?? 0;
+    scroller.current.scrollTop = doc.viewport?.top ?? 0;
+  }, [doc.id, size]);
+  useEffect(() => () => {
+    if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
+    const element = scroller.current;
+    if (element) viewportCallback.current(doc.id, element.scrollLeft, element.scrollTop);
+  }, [doc.id]);
+  const saveViewport = () => {
+    if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
+    viewportFrame.current = requestAnimationFrame(() => {
+      viewportFrame.current = null;
+      const element = scroller.current;
+      if (element) viewportCallback.current(doc.id, element.scrollLeft, element.scrollTop);
+    });
+  };
   useEffect(() => {
     if (!scroller.current) return;
     const observer = new ResizeObserver(() => setViewportRevision((revision) => revision + 1));
@@ -204,6 +226,7 @@ export function PageView(p: PageViewProps) {
     const type = tool as MarkupType;
     let ok = true;
     if (tool === 'polyline' || tool === 'm-polylength') ok = points.length >= 2;
+    if (tool === 'm-spline') ok = points.length >= 3;
     if (tool === 'cloud') ok = points.length >= 3;
     if (tool === 'm-area' || tool === 'm-perimeter') ok = points.length >= 3;
     if (tool === 'm-angle') ok = points.length === 3;
@@ -652,7 +675,9 @@ export function PageView(p: PageViewProps) {
   let preview: Markup | null = null;
   if (draft && cur) {
     const type = (tool === 'calibrate' ? 'line' : tool) as MarkupType;
-    const pts = TWO_POINT.includes(tool) ? [draft[0], cur] : MULTI.includes(tool) ? [...draft, cur] : draft;
+    const pts = tool === 'm-spline'
+      ? splinePoints([...draft, cur])
+      : TWO_POINT.includes(tool) ? [draft[0], cur] : MULTI.includes(tool) ? [...draft, cur] : draft;
     if (pts.length >= (tool === 'cloud' ? 3 : 2) && type !== ('select' as string))
       preview = makeMarkup(tool === 'calibrate' ? 'line' : type, doc.page, pts, tool === 'calibrate' ? { ...style, color: '#ff6d00', width: 2 } : style, p.author);
     if (preview && tool === 'callout') preview.points = [...pts, { x: pts[0].x - 40, y: pts[1].y + 40 }];
@@ -667,7 +692,7 @@ export function PageView(p: PageViewProps) {
   const selectedCallout = selected && tool === 'select' && canMoveCallout(selected) ? calloutLayout(selected) : null;
 
   return (
-    <div className="scroller" ref={scroller}>
+    <div className="scroller" ref={scroller} onScroll={saveViewport}>
       {size && (
         <div
           className="page"
@@ -706,6 +731,13 @@ export function PageView(p: PageViewProps) {
                     <path d={`M${snapTarget.point.x - 6 / zoom} ${snapTarget.point.y} L${snapTarget.point.x + 6 / zoom} ${snapTarget.point.y} M${snapTarget.point.x} ${snapTarget.point.y - 6 / zoom} L${snapTarget.point.x} ${snapTarget.point.y + 6 / zoom}`} />
                     <circle cx={snapTarget.point.x} cy={snapTarget.point.y} r={3 / zoom} fill="#fff" />
                   </>
+                ) : snapTarget.kind === 'center' ? (
+                  <>
+                    <circle cx={snapTarget.point.x} cy={snapTarget.point.y} r={5 / zoom} fill="#fff" />
+                    <path d={`M${snapTarget.point.x - 3 / zoom} ${snapTarget.point.y}h${6 / zoom}m${-3 / zoom} ${-3 / zoom}v${6 / zoom}`} />
+                  </>
+                ) : snapTarget.kind === 'midpoint' ? (
+                  <rect x={snapTarget.point.x - 3 / zoom} y={snapTarget.point.y - 3 / zoom} width={6 / zoom} height={6 / zoom} fill="#fff" />
                 ) : <circle cx={snapTarget.point.x} cy={snapTarget.point.y} r={4 / zoom} fill="#fff" />}
               </g>
             )}

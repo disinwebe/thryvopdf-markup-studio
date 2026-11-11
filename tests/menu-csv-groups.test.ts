@@ -74,7 +74,7 @@ describe('native menu wiring', () => {
   });
   it('disables document and server actions when unavailable and sends selected actions', () => {
     const send = vi.fn();
-    const menu = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: true, selected: true, canFlattenSelected: true, canUndo: true, serverMode: true, admin: true, passwordAvailable: true }, send, 'win32');
+    const menu = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: true, selected: true, canGroupSelected: true, canUngroupSelected: true, canFlattenSelected: true, canUndo: true, serverMode: true, admin: true, passwordAvailable: true }, send, 'win32', (name: string) => `icon:${name}`);
     expect(menu.map((m: { label: string }) => m.label)).toEqual(['&File', '&Edit', '&Option', '&View', '&Help']);
     const file = menu[0].submenu;
     expect(file.find((m: { label: string }) => m.label === '&Save').enabled).toBe(true);
@@ -83,6 +83,16 @@ describe('native menu wiring', () => {
     file.find((m: { label: string }) => m.label === '&Logout').click();
     expect(send).toHaveBeenCalledWith('logout');
     const edit = menu[1].submenu;
+    const group = edit.find((entry: { label: string }) => entry.label === '&Group selected');
+    const ungroup = edit.find((entry: { label: string }) => entry.label === 'Ungroup se&lected');
+    expect(group.enabled).toBe(true);
+    expect(group.icon).toBe('icon:group');
+    expect(ungroup.enabled).toBe(true);
+    expect(ungroup.icon).toBe('icon:ungroup');
+    group.click();
+    ungroup.click();
+    expect(send).toHaveBeenCalledWith('group');
+    expect(send).toHaveBeenCalledWith('ungroup');
     const flatten = edit.find((entry: { label: string }) => entry.label === '&Flatten').submenu;
     const flattenSelected = flatten.find((entry: { label: string }) => entry.label === 'Flatten &selected markup');
     expect(flattenSelected.enabled).toBe(true);
@@ -103,10 +113,31 @@ describe('native menu wiring', () => {
       expect(send).toHaveBeenCalledWith(action);
     }
     const view = menu[3].submenu;
+    const toolbars = view.find((entry: { label?: string }) => entry.label === '&Toolbars').submenu;
+    const fileToolbar = toolbars.find((entry: { label?: string }) => entry.label === '&File management');
+    const contentToolbar = toolbars.find((entry: { label?: string }) => entry.label === '&Content tools');
+    expect(fileToolbar.type).toBe('checkbox');
+    expect(fileToolbar.checked).toBe(true);
+    expect(contentToolbar.checked).toBe(true);
+    const hiddenMarkupToolbar = menuTemplate({ signedIn: true, viewerActive: true, toolbars: { markup: false } }, send, 'win32')[3].submenu
+      .find((entry: { label?: string }) => entry.label === '&Toolbars').submenu
+      .find((entry: { label?: string }) => entry.label === '&Markup tools');
+    expect(hiddenMarkupToolbar.checked).toBe(false);
+    expect(hiddenMarkupToolbar.visible).toBe(true);
+    fileToolbar.click();
+    expect(send).toHaveBeenCalledWith('toolbar:file:hide');
+    expect(toolbars.find((entry: { label?: string }) => entry.label === '&Markup tools').visible).toBe(true);
+    expect(toolbars.find((entry: { label?: string }) => entry.label === 'Measurem&ent tools').visible).toBe(true);
     const measurements = view.find((entry: { label?: string }) => entry.label === '&Measurements').submenu;
     expect(measurements.find((entry: { label?: string }) => entry.label === '&Open measurements panel...').enabled).toBe(true);
     measurements.find((entry: { label?: string }) => entry.label === '&Area').click();
     expect(send).toHaveBeenCalledWith('measureArea');
+    measurements.find((entry: { label?: string }) => entry.label === '&Spline').click();
+    expect(send).toHaveBeenCalledWith('measureSpline');
+    measurements.find((entry: { label?: string }) => entry.label === 'Rad&ius').click();
+    expect(send).toHaveBeenCalledWith('measureRadius');
+    measurements.find((entry: { label?: string }) => entry.label === 'Dia&meter').click();
+    expect(send).toHaveBeenCalledWith('measureDiameter');
     for (const action of ['toggleLeftPanel', 'toggleRightPanel']) {
       view.find((entry: { click?: () => void; label?: string }) => entry.label?.toLowerCase().includes(action === 'toggleLeftPanel' ? 'left panel' : 'right panel')).click();
       expect(send).toHaveBeenCalledWith(action);
@@ -131,7 +162,19 @@ describe('native menu wiring', () => {
     const compare = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: false, admin: false }, send, 'win32');
     expect(compare[3].submenu[0].enabled).toBe(false);
     expect(compare[3].submenu.find((entry: { label?: string }) => entry.label === '&Measurements').enabled).toBe(false);
+    const compareToolbars = compare[3].submenu.find((entry: { label?: string }) => entry.label === '&Toolbars').submenu;
+    expect(compareToolbars.find((entry: { label?: string }) => entry.label === '&Markup tools').visible).toBe(false);
+    expect(compareToolbars.find((entry: { label?: string }) => entry.label === 'Measurem&ent tools').visible).toBe(false);
     expect(compare[2].submenu[0].visible).toBe(false);
+    const compareZoom = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: false, compareActive: true }, send, 'win32');
+    const zoomIn = compareZoom[3].submenu.find((entry: { label?: string }) => entry.label === 'Zoom &In');
+    const zoomOut = compareZoom[3].submenu.find((entry: { label?: string }) => entry.label === 'Zoom &Out');
+    expect(zoomIn.enabled).toBe(true);
+    expect(zoomOut.enabled).toBe(true);
+    zoomIn.click();
+    zoomOut.click();
+    expect(send).toHaveBeenCalledWith('zoomIn');
+    expect(send).toHaveBeenCalledWith('zoomOut');
   });
 
   it('assigns unique Windows menu and item access keys', () => {

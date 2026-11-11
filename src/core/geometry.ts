@@ -1,6 +1,30 @@
-import { BOX_TYPES, Markup, Pt, Rect } from './types';
+import { BOX_TYPES, Markup, measurementCircle, Pt, Rect } from './types';
 
 export const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/** Sample a Catmull-Rom spline through its control points for drawing and length calculation. */
+export function splinePoints(points: Pt[], stepsPerSegment = 12): Pt[] {
+  if (points.length < 3) return points.slice();
+  const steps = Math.max(2, Math.floor(stepsPerSegment));
+  const sampled: Pt[] = [points[0]];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const c1 = { x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 };
+    const c2 = { x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 };
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      const u = 1 - t;
+      sampled.push({
+        x: u ** 3 * p1.x + 3 * u ** 2 * t * c1.x + 3 * u * t ** 2 * c2.x + t ** 3 * p2.x,
+        y: u ** 3 * p1.y + 3 * u ** 2 * t * c1.y + 3 * u * t ** 2 * c2.y + t ** 3 * p2.y,
+      });
+    }
+  }
+  return sampled;
+}
 
 export function bbox(pts: Pt[]): Rect {
   if (!pts.length) return { x: 0, y: 0, w: 0, h: 0 };
@@ -19,6 +43,10 @@ export function bbox(pts: Pt[]): Rect {
 
 /** Rectangle for box-style markups (uses first two points). */
 export function boxOf(m: Pick<Markup, 'points'> & Partial<Pick<Markup, 'type'>>): Rect {
+  if (m.type && m.type.startsWith('m-')) {
+    const circle = measurementCircle(m.type as Markup['type'], m.points);
+    if (circle) return { x: circle.center.x - circle.radius, y: circle.center.y - circle.radius, w: circle.radius * 2, h: circle.radius * 2 };
+  }
   return bbox(m.type === 'cloud' ? m.points : m.points.slice(0, 2));
 }
 
@@ -182,6 +210,16 @@ export function hitMarkup(m: Markup, p: Pt, tol: number): boolean {
       if (m.fill) return d <= 1 + tol / Math.min(rx, ry);
       return Math.abs(d - 1) * Math.min(rx, ry) <= t;
     }
+    case 'm-radius':
+    case 'm-diameter': {
+      const circle = measurementCircle(m.type, m.points);
+      if (!circle) return false;
+      const radialDistance = Math.abs(dist(p, circle.center) - circle.radius);
+      const lineDistance = distToSegment(p, ...circle.diameterLine);
+      return radialDistance <= t || lineDistance <= t;
+    }
+    case 'm-spline':
+      return distToPath(p, splinePoints(m.points)) <= t;
     case 'note':
     case 'm-count':
       return dist(p, m.points[0]) <= 12 + tol;

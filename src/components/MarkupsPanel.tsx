@@ -22,16 +22,19 @@ export interface MarkupsPanelProps {
   readOnly?: boolean;
   focusCommentId?: string | null;
   onCommentFocused?(): void;
+  mode?: 'markups' | 'measurements';
 }
 
 export function MarkupsPanel(p: MarkupsPanelProps) {
   const { doc } = p;
+  const measurementsOnly = p.mode === 'measurements';
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<string>('All');
   const [scope, setScope] = useState<'all' | 'page'>('all');
   const rows = useMemo(
     () =>
       doc.markups
+        .filter((m) => isMeasure(m.type) === measurementsOnly)
         .filter((m) => (scope === 'all' ? true : m.page === doc.page))
         .filter((m) => status === 'All' || m.status === status)
         .filter((m) => {
@@ -40,20 +43,20 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           return hay.includes(q.toLowerCase());
         })
         .sort((a, b) => a.page - b.page || (a.date ?? '').localeCompare(b.date ?? '')),
-    [doc.markups, q, status, scope, doc.page],
+    [doc.markups, q, status, scope, doc.page, measurementsOnly],
   );
   const nums = numberMarkups(doc.markups);
-  const sel = doc.markups.find((m) => m.id === p.selectedId) ?? null;
+  const sel = doc.markups.find((m) => m.id === p.selectedId && isMeasure(m.type) === measurementsOnly) ?? null;
 
   const exportCsv = () => {
     p.onExport(markupCsv(doc.markups, doc.path || doc.name));
   };
 
   return (
-    <div className="panel-body">
-      <PdfComments pdf={doc.pdf} page={doc.page} />
+    <div className={'panel-body' + (measurementsOnly ? ' measurement-markups' : '')}>
+      {!measurementsOnly && <PdfComments pdf={doc.pdf} page={doc.page} />}
       <div className="row">
-        <input placeholder="Search markups" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder={measurementsOnly ? 'Search measurements' : 'Search markups'} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <div className="row">
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -66,10 +69,10 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
           <option value="all">All pages</option>
           <option value="page">This page</option>
         </select>
-        <button onClick={exportCsv} disabled={p.readOnly} title="Export markup list as CSV">CSV</button>
+        {!measurementsOnly && <button onClick={exportCsv} disabled={p.readOnly} title="Export markup list as CSV">CSV</button>}
       </div>
       <div className="list">
-        {rows.length === 0 && <p className="muted">No markups.</p>}
+        {rows.length === 0 && <p className="muted">No {measurementsOnly ? 'measurements' : 'markups'}.</p>}
         {rows.map((m) => (
           <div key={m.id} className={'item' + (m.id === p.selectedId ? ' active' : '')} onClick={() => p.onSelect(m.id)}>
             <span className="swatch" style={{ background: m.color }} />

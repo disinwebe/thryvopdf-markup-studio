@@ -4,19 +4,34 @@ const actionIcons = {
   close: 'close', logout: 'key', quit: 'exit', undo: 'undo', redo: 'redo',
   select: 'select', pan: 'pan', delete: 'delete', users: 'users', password: 'license',
   theme: 'settings', toolDefaults: 'settings',
+  group: 'group', ungroup: 'ungroup',
+  measurePanel: 'page', measureLength: 'measure', measurePolylength: 'measure',
+  measureSpline: 'measure',
+  measureRadius: 'measure', measureDiameter: 'measure', measureArea: 'measure',
+  measurePerimeter: 'measure', measureAngle: 'measure', measureCount: 'measure',
+  searchPanel: 'help',
   zoomIn: 'zoomIn', zoomOut: 'zoomOut', fitWidth: 'page', fitPage: 'page',
   organizePanel: 'page', toggleLeftPanel: 'page', toggleRightPanel: 'page',
   shortcuts: 'help', about: 'help', license: 'license',
 };
 
 function menuTemplate(state, send, platform = process.platform, iconForAction = () => undefined) {
-  const { signedIn = false, licensed = true, documentOpen = false, viewerActive = false, canUndo = false, canRedo = false, selected = false, canFlattenSelected = false, canFlattenAll = false, serverMode = false, admin = false, passwordAvailable = false, blocked = false, viewOnly = false } = state;
+  const { signedIn = false, licensed = true, documentOpen = false, viewerActive = false, compareActive = false, canUndo = false, canRedo = false, selected = false, canGroupSelected = false, canUngroupSelected = false, canFlattenSelected = false, canFlattenAll = false, serverMode = false, admin = false, passwordAvailable = false, blocked = false, viewOnly = false, toolbars = {} } = state;
   const usable = (signedIn || viewOnly) && !blocked;
   const doc = usable && documentOpen;
   const writable = licensed && !viewOnly;
   const item = (label, action, enabled, accelerator) => ({
     label, enabled, ...(accelerator ? { accelerator } : {}), ...(actionIcons[action] ? { icon: iconForAction(actionIcons[action]) } : {}), click: () => send(action),
   });
+  const toolbarItem = (label, id) => {
+    const checked = toolbars[id] !== false;
+    return {
+      label,
+      type: 'checkbox',
+      checked,
+      click: () => send(`toolbar:${id}:${checked ? 'hide' : 'show'}`),
+    };
+  };
   const menu = [
     { label: '&File', submenu: [
       item('&Open PDF...', 'open', usable, 'CmdOrCtrl+O'),
@@ -39,6 +54,8 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
       item('&Select tool (V)', 'select', doc && licensed),
       item('Pa&n tool (H; hold Space)', 'pan', doc),
       item('&Delete selected markup', 'delete', doc && writable && selected),
+      item('&Group selected', 'group', doc && writable && canGroupSelected),
+      item('Ungroup se&lected', 'ungroup', doc && writable && canUngroupSelected),
       { label: '&Flatten', enabled: doc && writable, submenu: [
         item('Flatten &selected markup', 'flatten', doc && writable && canFlattenSelected),
         item('Flatten &All', 'flattenAll', doc && writable && canFlattenAll),
@@ -51,17 +68,27 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
       item('Tool &defaults...', 'toolDefaults', doc && writable),
     ] },
     { label: '&View', submenu: [
-      item('Zoom &In', 'zoomIn', doc && viewerActive, 'CmdOrCtrl+='),
-      item('Zoom &Out', 'zoomOut', doc && viewerActive, 'CmdOrCtrl+-'),
+      item('Zoom &In', 'zoomIn', doc && (viewerActive || compareActive), 'CmdOrCtrl+='),
+      item('Zoom &Out', 'zoomOut', doc && (viewerActive || compareActive), 'CmdOrCtrl+-'),
       { type: 'separator' },
       item('Fit &Width', 'fitWidth', doc && viewerActive),
       item('Fit &Page', 'fitPage', doc && viewerActive),
+      { type: 'separator' },
+      { label: '&Toolbars', submenu: [
+        toolbarItem('&File management', 'file'),
+        toolbarItem('&Content tools', 'content'),
+        { ...toolbarItem('&Markup tools', 'markup'), visible: viewerActive },
+        { ...toolbarItem('Measurem&ent tools', 'measure'), visible: viewerActive },
+      ] },
       { type: 'separator' },
       { label: '&Measurements', enabled: doc && viewerActive && writable, submenu: [
         item('&Open measurements panel...', 'measurePanel', doc && viewerActive && writable),
         { type: 'separator' },
         item('&Length', 'measureLength', doc && viewerActive && writable),
         item('&Polylength', 'measurePolylength', doc && viewerActive && writable),
+        item('&Spline', 'measureSpline', doc && viewerActive && writable),
+        item('Rad&ius', 'measureRadius', doc && viewerActive && writable),
+        item('Dia&meter', 'measureDiameter', doc && viewerActive && writable),
         item('&Area', 'measureArea', doc && viewerActive && writable),
         item('Peri&meter', 'measurePerimeter', doc && viewerActive && writable),
         item('An&gle', 'measureAngle', doc && viewerActive && writable),

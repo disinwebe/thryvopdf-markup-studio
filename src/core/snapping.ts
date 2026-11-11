@@ -8,17 +8,21 @@ export interface SnapSegment {
 export interface SnapGeometry {
   segments: SnapSegment[];
   endpoints: Pt[];
+  centers?: Pt[];
 }
 
 export interface SnapIndex extends SnapGeometry {
   endpointCells: Map<string, number[]>;
   segmentCells: Map<string, number[]>;
+  midpointCells: Map<string, number[]>;
+  centerCells: Map<string, number[]>;
+  midpoints: Pt[];
   cellSize: number;
 }
 
 export interface SnapTarget {
   point: Pt;
-  kind: 'endpoint' | 'intersection';
+  kind: 'endpoint' | 'midpoint' | 'center' | 'intersection';
 }
 
 const cellKey = (x: number, y: number) => `${x},${y}`;
@@ -30,15 +34,23 @@ const cellRange = (min: number, max: number, size: number) => [
 export function createSnapIndex(geometry: SnapGeometry, cellSize = 48): SnapIndex {
   const endpointCells = new Map<string, number[]>();
   const segmentCells = new Map<string, number[]>();
+  const midpointCells = new Map<string, number[]>();
+  const centerCells = new Map<string, number[]>();
   const add = (cells: Map<string, number[]>, key: string, index: number) => {
     const items = cells.get(key);
     if (items) items.push(index);
     else cells.set(key, [index]);
   };
+  const addPoints = (points: Pt[], cells: Map<string, number[]>) => {
+    points.forEach((point, index) => {
+      add(cells, cellKey(Math.floor(point.x / cellSize), Math.floor(point.y / cellSize)), index);
+    });
+  };
 
-  geometry.endpoints.forEach((point, index) => {
-    add(endpointCells, cellKey(Math.floor(point.x / cellSize), Math.floor(point.y / cellSize)), index);
-  });
+  const midpoints = geometry.segments.map(({ a, b }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }));
+  addPoints(geometry.endpoints, endpointCells);
+  addPoints(midpoints, midpointCells);
+  addPoints(geometry.centers ?? [], centerCells);
   geometry.segments.forEach((segment, index) => {
     const [minX, maxX] = cellRange(Math.min(segment.a.x, segment.b.x), Math.max(segment.a.x, segment.b.x), cellSize);
     const [minY, maxY] = cellRange(Math.min(segment.a.y, segment.b.y), Math.max(segment.a.y, segment.b.y), cellSize);
@@ -46,7 +58,7 @@ export function createSnapIndex(geometry: SnapGeometry, cellSize = 48): SnapInde
       for (let y = minY; y <= maxY; y++) add(segmentCells, cellKey(x, y), index);
     }
   });
-  return { ...geometry, endpointCells, segmentCells, cellSize };
+  return { ...geometry, midpoints, endpointCells, segmentCells, midpointCells, centerCells, cellSize };
 }
 
 function intersection(a: SnapSegment, b: SnapSegment): Pt | null {
@@ -72,22 +84,31 @@ export function snapPoint(point: Pt, index: SnapIndex, tolerance: number): SnapT
   let bestDistance = tolerance;
 
   const endpointIds = new Set<number>();
+  const midpointIds = new Set<number>();
+  const centerIds = new Set<number>();
   const segmentIds = new Set<number>();
   for (let x = minX; x <= maxX; x++) {
     for (let y = minY; y <= maxY; y++) {
       for (const id of index.endpointCells.get(cellKey(x, y)) ?? []) endpointIds.add(id);
+      for (const id of index.midpointCells.get(cellKey(x, y)) ?? []) midpointIds.add(id);
+      for (const id of index.centerCells.get(cellKey(x, y)) ?? []) centerIds.add(id);
       for (const id of index.segmentCells.get(cellKey(x, y)) ?? []) segmentIds.add(id);
     }
   }
 
-  for (const id of endpointIds) {
-    const candidate = index.endpoints[id];
-    const distance = Math.hypot(candidate.x - point.x, candidate.y - point.y);
-    if (distance <= bestDistance) {
-      best = { point: candidate, kind: 'endpoint' };
-      bestDistance = distance;
+  const considerPoints = (ids: Set<number>, points: Pt[], kind: SnapTarget['kind']) => {
+    for (const id of ids) {
+      const candidate = points[id];
+      const distance = Math.hypot(candidate.x - point.x, candidate.y - point.y);
+      if (distance <= bestDistance) {
+        best = { point: candidate, kind };
+        bestDistance = distance;
+      }
     }
-  }
+  };
+  considerPoints(endpointIds, index.endpoints, 'endpoint');
+  considerPoints(midpointIds, index.midpoints, 'midpoint');
+  considerPoints(centerIds, index.centers ?? [], 'center');
 
   const nearbySegments = [...segmentIds].filter((id) => {
     const segment = index.segments[id];

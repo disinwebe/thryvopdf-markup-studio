@@ -47,7 +47,8 @@ describe('visible review comments', () => {
       { id: 'two', author: 'B', date: '2026-01-02', text: 'second', fontSize: 18 },
     ] };
     const panel = renderToStaticMarkup(<MarkupsPanel
-      doc={{ id: 'doc', name: 'file.pdf', bytes: new Uint8Array(), pdf: {} as any, numPages: 1, markups: [markup], pageObjects: [], undo: [], redo: [], calibrations: {}, sheets: {}, bookmarks: [], dirty: false, page: 0, zoom: 1, textCache: new Map() }}
+      doc={{ id: 'doc', name: 'file.pdf', bytes: new Uint8Array(), pdf: {} as any, numPages: 1, markups: [markup], pageObjects: [], undo: [], redo: [], calibrations: {}, sheets: {}, bookmarks: [], dirty: false, page: 0,       zoom: 1,
+      viewport: { left: 0, top: 0 }, textCache: new Map() }}
       selectedId={markup.id}
       author="A"
       user={{ name: 'A', email: 'a@example.test', role: 'user' }}

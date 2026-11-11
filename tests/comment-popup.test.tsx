@@ -16,7 +16,7 @@ describe('new markup comment popup', () => {
   it('keeps plain lines, stamps, and measurements out of comment numbering and popup eligibility', () => {
     expect(isReviewMarkup({ type: 'line' })).toBe(false);
     expect(isReviewMarkup({ type: 'stamp' })).toBe(false);
-    for (const type of ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'] as const)
+    for (const type of ['m-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count'] as const)
       expect(isReviewMarkup({ type })).toBe(false);
     expect(isReviewMarkup({ type: 'cloud' })).toBe(true);
   });

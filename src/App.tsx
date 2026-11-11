@@ -5,7 +5,7 @@ import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure, uid 
 import { translate } from './core/geometry';
 import { loadPdf } from './pdf/pdfjs';
 import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups';
-import { PagePlan, buildFromPlan, mergePdfs, parseRanges, splitPdf } from './core/organize';
+import { PagePlan, buildFromPlan, mergePdfs, parseRanges, rotatePage, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
 import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, downloadName, makeMarkup, pickFiles, saveBytes, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
@@ -35,7 +35,6 @@ import { isReviewMarkup } from './core/numbering';
 import { NotificationBell, type NotificationsApi } from './components/Notifications';
 import { TabNameEditor } from './components/TabNameEditor';
 import { loadMarkupStyleDefaults, saveMarkupStyleDefaults } from './app/styleDefaults';
-import { KeyIcon } from './components/KeyIcon';
 import { CommentPopup } from './components/CommentPopup';
 import { SelectIcon } from './components/SelectIcon';
 import { ContextMenuIcon } from './components/ContextMenuIcon';
@@ -46,19 +45,24 @@ import { markupSelectionBounds } from './core/selection';
 import { groupItems, ungroupItems, expandGroupedSelection } from './core/grouping';
 import { canEditComment } from './core/comments';
 import { EditCommentsPopup } from './components/EditCommentsPopup';
+import { ActionIcon, type ActionIconName } from './components/ActionIcon';
+import { MovableToolbar, toolbarDockReservations, type ToolbarLayout } from './components/MovableToolbar';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'image', 'note'];
-const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
-const TOOL_ICONS: Partial<Record<Tool, string>> = {
-  hand: '✋', line: '╱', highlight: '▰', text: 'T', cloud: '☁', rect: '□',
-  ellipse: '○', arrow: '↗', polyline: '⌁', pen: '✎', stamp: '▣', image: '▧', note: '▤',
-  'm-length': '↔', 'm-polylength': '⌁', 'm-area': '▱', 'm-perimeter': '□', 'm-angle': '∠', 'm-count': '#',
+const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
+const TOOL_ICONS: Partial<Record<Tool, ActionIconName>> = {
+  hand: 'pan', line: 'line', highlight: 'highlight', text: 'text', cloud: 'cloud', rect: 'rect',
+  ellipse: 'ellipse', arrow: 'arrow', polyline: 'polyline', pen: 'pen', stamp: 'stamp', image: 'image', note: 'note',
+  'm-length': 'm-length', 'm-polylength': 'm-polylength', 'm-spline': 'm-spline', 'm-radius': 'm-radius', 'm-diameter': 'm-diameter',
+  'm-area': 'm-area', 'm-perimeter': 'm-perimeter', 'm-angle': 'm-angle', 'm-count': 'm-count',
 };
 const TOOL_HINT: Partial<Record<Tool, string>> = {
   select: 'Select (V)',
   hand: 'Pan (H to toggle, or hold Space while using another tool)',
   line: 'Drawing-only line (not a comment)',
   cloud: 'Click to add cloud vertices; press Enter, double-click, or right-click to finish',
+  'm-radius': 'Click the circle center, then a point on its edge',
+  'm-diameter': 'Click two opposite points on the circle edge',
 };
 const HISTORY_LIMIT = 100;
 
@@ -68,16 +72,6 @@ type ViewerContextMenu = { x: number; y: number; markupId: string | null; callou
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-function ImageToolIcon() {
-  return (
-    <svg className="tool-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-      <rect x="2.5" y="3" width="15" height="14" rx="1.5" />
-      <circle cx="7" cy="7.5" r="1.5" />
-      <path d="m3.5 15 4.5-4 3 2 2.5-3 3 4" />
-    </svg>
-  );
-}
-
 export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; notifications?: NotificationsApi | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
   const readOnly = viewOnly;
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -85,6 +79,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
   const [tool, setTool] = useState<Tool>('select');
+  const [toolbarLayouts, setToolbarLayouts] = useState<Record<string, ToolbarLayout>>({});
   const [styles, setStyles] = useState<Record<string, Style>>({});
   const [styleDefaults, setStyleDefaults] = useState(loadMarkupStyleDefaults);
   const [subject, setSubject] = useState('');
@@ -140,10 +135,54 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const signatureListRef = useRef(signatures);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<HTMLDivElement>(null);
+  const toolbarGroupsRef = useRef<HTMLDivElement>(null);
+  const [toolbarAppWidth, setToolbarAppWidth] = useState(0);
+  const [toolbarAppHeight, setToolbarAppHeight] = useState(0);
+  const [toolbarBaseHeight, setToolbarBaseHeight] = useState(0);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
   const pendingMarkupSelection = useRef<{ docId: string; markupId: string } | null>(null);
   const docsRef = useRef(docs);
   docsRef.current = docs;
+  const toolbarLayoutList = useMemo(() => Object.values(toolbarLayouts), [toolbarLayouts]);
+  const reportToolbarLayout = useCallback((id: string, layout: ToolbarLayout | null) => {
+    setToolbarLayouts((current) => {
+      if (!layout) {
+        if (!(id in current)) return current;
+        const next = { ...current };
+        delete next[id];
+        return next;
+      }
+      const previous = current[id];
+      if (previous && previous.edge === layout.edge && previous.corner === layout.corner && previous.width === layout.width &&
+        previous.height === layout.height && previous.visible === layout.visible && previous.moved === layout.moved &&
+        previous.position.x === layout.position.x && previous.position.y === layout.position.y &&
+        previous.attachedTo?.id === layout.attachedTo?.id && previous.attachedTo?.side === layout.attachedTo?.side) return current;
+      return { ...current, [id]: { ...layout, id } };
+    });
+  }, []);
+  const toolbarReservations = useMemo(
+    () => toolbarDockReservations(toolbarLayoutList, toolbarAppWidth, toolbarAppHeight, toolbarBaseHeight),
+    [toolbarAppHeight, toolbarAppWidth, toolbarBaseHeight, toolbarLayoutList],
+  );
+
+  useEffect(() => {
+    const app = appRef.current;
+    const toolbarGroups = toolbarGroupsRef.current;
+    if (!app || !toolbarGroups) return;
+    const updateSize = () => {
+      const width = app.clientWidth;
+      const height = app.clientHeight;
+      const baseHeight = toolbarGroups.offsetHeight;
+      setToolbarAppWidth((current) => current === width ? current : width);
+      setToolbarAppHeight((current) => current === height ? current : height);
+      setToolbarBaseHeight((current) => current === baseHeight ? current : baseHeight);
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(app);
+    observer.observe(toolbarGroups);
+    return () => observer.disconnect();
+  }, []);
 
   const active = docs.find((d) => d.id === activeId) ?? null;
   const updateSelection = (markupIds: string[], pageObjectIds: string[], calloutIds: string[] = []) => {
@@ -295,6 +334,10 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     if (!active || viewOnly) return;
     commit(active.id, [...active.markups, { ...m, authorEmail: user.email }]);
     updateSelection([m.id], []);
+    if (isMeasure(m.type)) {
+      setRightTab('measure');
+      setRightPanelVisible(true);
+    }
     if (isReviewMarkup(m)) {
       setCommentTarget({ docId: active.id, markupId: m.id });
       setRightTab('markups');
@@ -403,6 +446,42 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     updateDoc(active.id, () => ({ pageObjects: ungrouped.pageObjects, dirty: true }));
     updateSelection(selection.markupIds, selection.pageObjectIds);
     setContextMenu(null);
+  };
+  const selectedGroupMembers = () => expandGroupedSelection(active?.markups ?? [], active?.pageObjects ?? [], active?.page ?? 0, selectedMarkupIds, selectedPageObjectIds);
+  const canGroupSelected = () => {
+    if (!active || readOnly) return false;
+    const selection = selectedGroupMembers();
+    const markups = active.markups.filter((markup) => selection.markupIds.includes(markup.id));
+    const objects = active.pageObjects.filter((object) => selection.pageObjectIds.includes(object.id));
+    return markups.length + objects.length >= 2 &&
+      markups.every((markup) => canDeleteMarkup(markup, user)) &&
+      (!active.shared || objects.length === 0);
+  };
+  const canUngroupSelected = () => {
+    if (!active || readOnly) return false;
+    const selection = selectedGroupMembers();
+    if (active.shared && selection.pageObjectIds.length > 0) return false;
+    const markups = active.markups.filter((markup) => selection.markupIds.includes(markup.id));
+    if (markups.some((markup) => !canDeleteMarkup(markup, user))) return false;
+    return markups.some((markup) => !!markup.groupId) ||
+      active.pageObjects.some((object) => selection.pageObjectIds.includes(object.id) && !!object.groupId);
+  };
+  const groupSelected = () => {
+    if (!active || !canGroupSelected()) return;
+    const selection = selectedGroupMembers();
+    const grouped = groupItems(active.markups, active.pageObjects, selection.markupIds, selection.pageObjectIds, uid());
+    commit(active.id, grouped.markups);
+    updateDoc(active.id, () => ({ pageObjects: grouped.pageObjects, dirty: true }));
+    updateSelection(selection.markupIds, selection.pageObjectIds);
+  };
+  const ungroupSelected = () => {
+    if (!active || !canUngroupSelected()) return;
+    const selection = selectedGroupMembers();
+    const ungrouped = ungroupItems(active.markups, active.pageObjects, selection.markupIds, selection.pageObjectIds);
+    if (!ungrouped.changed) return;
+    commit(active.id, ungrouped.markups);
+    updateDoc(active.id, () => ({ pageObjects: ungrouped.pageObjects, dirty: true }));
+    updateSelection(selection.markupIds, selection.pageObjectIds);
   };
   const canCutSelection = () => {
     if (!active || readOnly || (active.shared && selectedPageObjectIds.length > 0)) return false;
@@ -771,6 +850,19 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     }
   };
 
+  const rotateCurrentPage = async (rotation: 90 | -90) => {
+    if (!active || active.shared || readOnly || view !== 'viewer') return;
+    try {
+      const rotated = await rotatePage(active.bytes, active.page, rotation);
+      const bytes = await saveWithState(rotated, stateOf(active));
+      const pdf = await loadPdf(bytes);
+      updateDoc(active.id, () => ({ bytes, pdf, dirty: true }));
+      say(`Rotated page ${active.page + 1} ${rotation > 0 ? 'clockwise' : 'counter-clockwise'}`);
+    } catch (error) {
+      say(`Could not rotate page: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const openNew = async (name: string, bytes: Uint8Array) => {
     const nd = await createDoc(name, bytes, undefined, true);
     setDocs((all) => [...all, nd]);
@@ -849,6 +941,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     if (commentTarget || defaultsOpen || licenseInfo || library || actions.uiBlocked || isTypingTarget(e.target)) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
+    if (view === 'compare' && !mod && (key === 'v' || key === 'h' || e.code === 'Space')) return;
     const next = active && !readOnly ? toolForKey(e, tool) : null;
     const history = active && !readOnly ? historyShortcut(e) : null;
     if (mod && key === 'c' && (selectedMarkupIds.length || selectedPageObjectIds.length)) {
@@ -864,6 +957,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       e.preventDefault();
       chooseTool(next);
       setPending(null);
+    } else if (mod && e.shiftKey && key === 'arrowright' && active && !readOnly && !active.shared && view === 'viewer') {
+      e.preventDefault();
+      void rotateCurrentPage(90);
+    } else if (mod && e.shiftKey && key === 'arrowleft' && active && !readOnly && !active.shared && view === 'viewer') {
+      e.preventDefault();
+      void rotateCurrentPage(-90);
     } else if (history) {
       e.preventDefault();
       history === 'redo' ? redo() : undo();
@@ -890,6 +989,13 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const menuRef = useRef<(action: string) => void>(() => {});
   menuRef.current = (action) => {
+    if (action.startsWith('toolbar:')) {
+      const [, id, command] = action.split(':');
+      if (['file', 'content', 'markup', 'measure'].includes(id) && (command === 'show' || command === 'hide')) {
+        window.dispatchEvent(new CustomEvent('toolbar-visibility', { detail: { id, visible: command === 'show' } }));
+      }
+      return;
+    }
     if (action === 'quit') {
       if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Quit anyway?')) return;
       void leaveAll().finally(() => window.api?.quitApp());
@@ -913,6 +1019,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'select': setTool('select'); setPending(null); break;
       case 'pan': setTool('hand'); setPending(null); break;
       case 'delete': if (selectedId) deleteMarkup(selectedId); break;
+      case 'group': groupSelected(); break;
+      case 'ungroup': ungroupSelected(); break;
       case 'flatten':
         if (selectedId) void flattenContextMarkups([selectedId]);
         break;
@@ -924,20 +1032,29 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'toggleRightPanel': setRightPanelVisible((visible) => !visible); break;
       case 'toolDefaults': setDefaultsOpen(true); break;
       case 'measurePanel': setRightTab('measure'); break;
-      case 'measureLength': chooseTool('m-length'); setPending(null); setRightTab('markups'); break;
-      case 'measurePolylength': chooseTool('m-polylength'); setPending(null); setRightTab('markups'); break;
-      case 'measureArea': chooseTool('m-area'); setPending(null); setRightTab('markups'); break;
-      case 'measurePerimeter': chooseTool('m-perimeter'); setPending(null); setRightTab('markups'); break;
-      case 'measureAngle': chooseTool('m-angle'); setPending(null); setRightTab('markups'); break;
-      case 'measureCount': chooseTool('m-count'); setPending(null); setRightTab('markups'); break;
+      case 'measureLength': chooseTool('m-length'); setPending(null); setRightTab('measure'); break;
+      case 'measurePolylength': chooseTool('m-polylength'); setPending(null); setRightTab('measure'); break;
+      case 'measureSpline': chooseTool('m-spline'); setPending(null); setRightTab('measure'); break;
+      case 'measureRadius': chooseTool('m-radius'); setPending(null); setRightTab('measure'); break;
+      case 'measureDiameter': chooseTool('m-diameter'); setPending(null); setRightTab('measure'); break;
+      case 'measureArea': chooseTool('m-area'); setPending(null); setRightTab('measure'); break;
+      case 'measurePerimeter': chooseTool('m-perimeter'); setPending(null); setRightTab('measure'); break;
+      case 'measureAngle': chooseTool('m-angle'); setPending(null); setRightTab('measure'); break;
+      case 'measureCount': chooseTool('m-count'); setPending(null); setRightTab('measure'); break;
       case 'organizePanel': setRightTab('organize'); break;
       case 'sheetsPanel': setRightTab('sheets'); break;
       case 'searchPanel': setRightTab('search'); break;
-      case 'zoomIn': if (view === 'viewer') zoomBy(1.25); break;
-      case 'zoomOut': if (view === 'viewer') zoomBy(1 / 1.25); break;
+      case 'zoomIn':
+        if (view === 'viewer') zoomBy(1.25);
+        else if (view === 'compare') window.dispatchEvent(new CustomEvent('compare-zoom', { detail: 1.25 }));
+        break;
+      case 'zoomOut':
+        if (view === 'viewer') zoomBy(1 / 1.25);
+        else if (view === 'compare') window.dispatchEvent(new CustomEvent('compare-zoom', { detail: 1 / 1.25 }));
+        break;
       case 'fitWidth': if (active && view === 'viewer') setFit((f) => ({ mode: 'width', n: f.n + 1 })); break;
       case 'fitPage': if (active && view === 'viewer') setFit((f) => ({ mode: 'page', n: f.n + 1 })); break;
-      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Alt+L / Ctrl+Alt+R: toggle left / right panel\nCtrl+Z: Undo; Ctrl+Y or Ctrl+Shift+Z: Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
+      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+Shift+Right: Rotate page clockwise\nCtrl+Shift+Left: Rotate page counter-clockwise\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Alt+L / Ctrl+Alt+R: toggle left / right panel\nCtrl+Z: Undo; Ctrl+Y or Ctrl+Shift+Z: Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
       case 'about': void window.api?.showAbout(); break;
       case 'license':
         if (licenseStatus) setLicenseInfo(licenseStatus);
@@ -950,13 +1067,21 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     const api = window.api;
     if (!api) return;
     api.setMenuState({
-      signedIn: true, documentOpen: !!active, viewerActive: view === 'viewer', canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
+      signedIn: true, documentOpen: !!active, viewerActive: view === 'viewer', compareActive: view === 'compare', canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
       selected: !viewOnly && !!active && !!selectedId && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
+      canGroupSelected: canGroupSelected(),
+      canUngroupSelected: canUngroupSelected(),
       canFlattenSelected: !viewOnly && !!active && !active.shared && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
       canFlattenAll: !viewOnly && !!active && !active.shared && active.markups.some((markup) => canDeleteMarkup(markup, user)),
       serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || !!licenseInfo, viewOnly,
+      toolbars: {
+        file: toolbarLayouts.file?.visible ?? true,
+        content: toolbarLayouts.content?.visible ?? true,
+        markup: toolbarLayouts.markup?.visible ?? true,
+        measure: toolbarLayouts.measure?.visible ?? true,
+      },
     });
-  }, [active, selectedId, user, view, actions.serverMode, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, licenseInfo]);
+  }, [active, selectedId, selectedMarkupIds, selectedPageObjectIds, user, view, actions.serverMode, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, licenseInfo, toolbarLayouts]);
   useEffect(() => () => window.api?.setMenuState({
     signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, canFlattenSelected: false, canFlattenAll: false, serverMode: false, blocked: false, viewOnly: false,
   }), []);
@@ -1048,7 +1173,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     }
   };
 
-  const countOf = useMemo(() => active?.markups.length ?? 0, [active?.markups]);
+  const countOf = useMemo(() => active?.markups.filter((markup) => !isMeasure(markup.type)).length ?? 0, [active?.markups]);
+  const measurementCount = useMemo(() => active?.markups.filter((markup) => isMeasure(markup.type)).length ?? 0, [active?.markups]);
   const contextMarkup = contextMenu && active?.markups.find((markup) => markup.id === contextMenu.markupId && markup.page === active.page);
   const contextStackable = !!contextMenu?.stackId;
   const contextSelection = contextMenu ? contextGroupSelection() : { markupIds: [], pageObjectIds: [] };
@@ -1058,84 +1184,84 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const flattenableCount = active?.markups.filter((markup) => canDeleteMarkup(markup, user)).length ?? 0;
 
   const toolBtn = (t: Tool) => (
-    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { chooseTool(t); setPending(null); if (t === 'stamp') setDefaultsOpen(true); if (t === 'cloud') say('Click to add cloud vertices. Press Enter, double-click, or right-click to finish.'); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
-      {t === 'select' ? <SelectIcon theme={theme} /> : t === 'image' ? <ImageToolIcon /> : <span className="tool-icon" aria-hidden="true">{TOOL_ICONS[t]}</span>}{TOOL_LABEL[t]}
+    <button key={t} title={TOOL_HINT[t] || TOOL_LABEL[t]} className={tool === t ? 'on' : ''} onClick={() => { chooseTool(t); setPending(null); if (MEASURE_TOOLS.includes(t)) setRightTab('measure'); if (t === 'stamp') setDefaultsOpen(true); if (t === 'cloud') say('Click to add cloud vertices. Press Enter, double-click, or right-click to finish.'); if (t === 'm-radius') say('Click the circle center, then a point on its edge.'); if (t === 'm-diameter') say('Click two opposite points on the circle edge.'); }} disabled={!active || (viewOnly && t !== 'select' && t !== 'hand')}>
+      {t === 'select' ? <SelectIcon theme={theme} /> : <ActionIcon name={TOOL_ICONS[t] ?? 'line'} className="tool-icon" />}<span className="toolbar-command-label">{TOOL_LABEL[t]}</span>
     </button>
   );
 
   return (
     <div className="app" ref={appRef} tabIndex={-1} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-      <div className="bar">
-        <button onClick={open} title="Ctrl+O"><FolderIcon />Open…</button>
-        <button onClick={() => setLibrary(true)} disabled={!actions.serverMode} title={actions.serverMode ? 'Open Shared Documents' : 'Shared documents require server mode'}><FolderIcon />Open Shared...</button>
-        <button onClick={() => save(false)} disabled={!active || viewOnly} title="Ctrl+S"><SaveIcon />Save</button>
-        <button onClick={() => save(true)} disabled={!active || viewOnly}><SaveIcon inverted />Save as…</button>
-        <span className="sep" />
-        <button onClick={undo} disabled={viewOnly || !active?.undo.length} title="Ctrl+Z">↶ Undo</button>
-        <button onClick={redo} disabled={viewOnly || !active?.redo.length} title="Ctrl+Y">↷ Redo</button>
-        <span className="sep" />
-        <button className={view === 'viewer' ? 'on' : ''} onClick={() => setView('viewer')}><span className="tool-icon" aria-hidden="true">▤</span>Viewer</button>
-        <button className={view === 'compare' ? 'on' : ''} onClick={() => setView('compare')} disabled={readOnly || docs.length === 0}><span className="tool-icon" aria-hidden="true">◫</span>Compare</button>
-        <button className={contentMode === 'text' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'text' ? null : 'text'); }} disabled={!active || readOnly || !!active.shared} title="Click the page to add editable PDF text"><span className="tool-icon" aria-hidden="true">T</span>Text</button>
-        <button className={contentMode === 'symbol' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'symbol' ? null : 'symbol'); }} disabled={!active || readOnly || !!active.shared} title="Place a flattened symbol"><span className="tool-icon" aria-hidden="true">✓</span>Symbol</button>
-        <button className={contentMode === 'signature' ? 'on' : ''} onClick={() => setSignatureManagerOpen(true)} disabled={!active || readOnly || !!active.shared} title="Manage and place transparent PNG signatures"><span className="tool-icon" aria-hidden="true">✍</span>Signatures</button>
-        {contentMode === 'text' && (
-          <span className="toolbar-content-controls">
-            <input aria-label="PDF text size" type="number" min={6} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(6, Math.min(96, +e.target.value || 24)))} />
-            <input aria-label="PDF text color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
-            <span className="muted small">Click page, then type</span>
-          </span>
-        )}
-        {contentMode === 'symbol' && (
-          <span className="toolbar-content-controls">
-            <select aria-label="Symbol" value={contentSymbol} onChange={(e) => setContentSymbol(e.target.value as PdfSymbol)}>
-              {SYMBOLS.map((symbol) => <option key={symbol.value} value={symbol.value}>{symbol.glyph} {symbol.label}</option>)}
-            </select>
-            <input aria-label="Symbol size" type="number" min={12} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(12, Math.min(96, +e.target.value || 24)))} />
-            <input aria-label="Symbol color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
-            <span className="muted small">Click page to place</span>
-          </span>
-        )}
-        <span className="grow" />
-        {viewOnly && <><span className="muted">Unlicensed viewing — editing is disabled.</span><button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>License information…</button><button onClick={onImportLicense}>Import license…</button></>}
-        <span className="who" title={user.email}>{viewOnly ? <><b>Guest viewer</b></> : <>Signed in: <b>{user.name}</b>{user.discipline ? ` - ${user.discipline}` : ""}{user.role === "admin" ? " (Administrator)" : ""}</>}</span>
-        <NotificationBell api={actions.notifications ?? null} onOpenShared={() => setLibrary(true)} onOpenNotification={(notification) => {
-          if (notification.type === 'registration') actions.manageUsers?.();
-          else setLibrary(true);
-        }} />
-        {!viewOnly && <button className="toolbar-logout" onClick={() => void logout()} title="Logout"><KeyIcon />Logout</button>}
+      <NotificationBell api={actions.notifications ?? null} onOpenShared={() => setLibrary(true)} onOpenNotification={(notification) => {
+        if (notification.type === 'registration') actions.manageUsers?.();
+        else setLibrary(true);
+      }} />
+      <div className="toolbar-groups" ref={toolbarGroupsRef} hidden={!active}>
+        <MovableToolbar id="file" label="File management" boundsRef={appRef} layouts={toolbarLayoutList} onLayoutChange={reportToolbarLayout}>
+          <div className="bar">
+            <button onClick={open} title="Open PDF (Ctrl+O)"><FolderIcon /><span className="toolbar-command-label">Open…</span></button>
+            <button onClick={() => setLibrary(true)} disabled={!actions.serverMode} title={actions.serverMode ? 'Open Shared Documents' : 'Shared documents require server mode'}><FolderIcon /><span className="toolbar-command-label">Open Shared...</span></button>
+            <button onClick={() => save(false)} disabled={!active || viewOnly} title="Save (Ctrl+S)"><SaveIcon /><span className="toolbar-command-label">Save</span></button>
+            <button onClick={() => save(true)} disabled={!active || viewOnly} title="Save as"><SaveIcon inverted /><span className="toolbar-command-label">Save as…</span></button>
+            <span className="sep" />
+            <button onClick={() => void rotateCurrentPage(90)} disabled={!active || viewOnly || !!active.shared || view !== 'viewer'} title="Rotate current page clockwise (Ctrl+Shift+Right)" aria-label="Rotate current page clockwise"><ActionIcon name="rotate-cw" className="tool-icon" /><span className="toolbar-command-label">Rotate clockwise</span></button>
+            <button onClick={() => void rotateCurrentPage(-90)} disabled={!active || viewOnly || !!active.shared || view !== 'viewer'} title="Rotate current page counter-clockwise (Ctrl+Shift+Left)" aria-label="Rotate current page counter-clockwise"><ActionIcon name="rotate-ccw" className="tool-icon" /><span className="toolbar-command-label">Rotate counter-clockwise</span></button>
+            <span className="sep" />
+            <button className={view === 'viewer' ? 'on' : ''} onClick={() => setView('viewer')} title="Viewer"><ActionIcon name="page" className="tool-icon" /><span className="toolbar-command-label">Viewer</span></button>
+            <button className={view === 'compare' ? 'on' : ''} onClick={() => setView('compare')} disabled={readOnly || docs.length === 0} title="Compare"><ActionIcon name="compare" className="tool-icon" /><span className="toolbar-command-label">Compare</span></button>
+            {viewOnly && <><span className="muted">Unlicensed viewing — editing is disabled.</span><button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)} title="License information"><ActionIcon name="key" className="tool-icon" /><span className="toolbar-command-label">License information…</span></button><button onClick={onImportLicense} title="Import license"><ActionIcon name="open" className="tool-icon" /><span className="toolbar-command-label">Import license…</span></button></>}
+          </div>
+        </MovableToolbar>
+        <MovableToolbar id="content" label="Content tools" boundsRef={appRef} layouts={toolbarLayoutList} onLayoutChange={reportToolbarLayout}>
+          <div className="bar tools">
+            {view === 'viewer' && <>{toolBtn('select')} {toolBtn('hand')} <span className="sep" /></>}
+            <button onClick={undo} disabled={viewOnly || !active?.undo.length} title="Undo (Ctrl+Z)"><ActionIcon name="undo" className="tool-icon" /><span className="toolbar-command-label">Undo</span></button>
+            <button onClick={redo} disabled={viewOnly || !active?.redo.length} title="Redo (Ctrl+Y)"><ActionIcon name="redo" className="tool-icon" /><span className="toolbar-command-label">Redo</span></button>
+            <span className="sep" />
+            <button className={contentMode === 'text' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'text' ? null : 'text'); }} disabled={!active || readOnly || !!active.shared} title="Text: click the page to add editable PDF text"><ActionIcon name="text" className="tool-icon" /><span className="toolbar-command-label">Text</span></button>
+            <button className={contentMode === 'symbol' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'symbol' ? null : 'symbol'); }} disabled={!active || readOnly || !!active.shared} title="Symbol: place a flattened symbol"><ActionIcon name="symbol" className="tool-icon" /><span className="toolbar-command-label">Symbol</span></button>
+            <button className={contentMode === 'signature' ? 'on' : ''} onClick={() => setSignatureManagerOpen(true)} disabled={!active || readOnly || !!active.shared} title="Signatures: manage and place transparent PNG signatures"><ActionIcon name="signature" className="tool-icon" /><span className="toolbar-command-label">Signatures</span></button>
+            {contentMode === 'text' && (
+              <span className="toolbar-content-controls">
+                <input aria-label="PDF text size" type="number" min={6} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(6, Math.min(96, +e.target.value || 24)))} />
+                <input aria-label="PDF text color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+                <span className="muted small">Click page, then type</span>
+              </span>
+            )}
+            {contentMode === 'symbol' && (
+              <span className="toolbar-content-controls">
+                <select aria-label="Symbol" value={contentSymbol} onChange={(e) => setContentSymbol(e.target.value as PdfSymbol)}>
+                  {SYMBOLS.map((symbol) => <option key={symbol.value} value={symbol.value}>{symbol.glyph} {symbol.label}</option>)}
+                </select>
+                <input aria-label="Symbol size" type="number" min={12} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(12, Math.min(96, +e.target.value || 24)))} />
+                <input aria-label="Symbol color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+                <span className="muted small">Click page to place</span>
+              </span>
+            )}
+          </div>
+        </MovableToolbar>
+        {view === 'viewer' && <>
+          <MovableToolbar id="markup" label="Markup tools" boundsRef={appRef} layouts={toolbarLayoutList} onLayoutChange={reportToolbarLayout}>
+            <div className="bar tools">{MARKUP_TOOLS.map(toolBtn)}</div>
+          </MovableToolbar>
+          <MovableToolbar id="measure" label="Measurement tools" boundsRef={appRef} layouts={toolbarLayoutList} onLayoutChange={reportToolbarLayout}>
+            <div className="bar tools measurement-tools">
+              {MEASURE_TOOLS.map(toolBtn)}
+              <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')} disabled={!active || readOnly} title="Open measurements panel"><ActionIcon name="m-length" className="tool-icon" /><span className="toolbar-command-label">Measurements ({measurementCount})</span></button>
+            </div>
+          </MovableToolbar>
+        </>}
       </div>
+      <div className="toolbar-dock-reserve toolbar-dock-reserve-top" style={{ height: active ? toolbarReservations.top : 0 }} aria-hidden="true" />
       {readOnly && <div className="collab warn" role="status">Read-only viewer mode - a license is required to edit or save. <button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>Activate...</button></div>}
 
-      {view === 'viewer' && (
-        <>
-          <div className="bar tools">
-            {(['select', 'hand'] as Tool[]).map(toolBtn)}
-            <span className="sep" />
-            <span className="lbl">Markup</span>
-            {MARKUP_TOOLS.map(toolBtn)}
-          </div>
-          <div className="bar tools measurement-tools">
-            <span className="measurement-toolbar-prefix" aria-hidden="true">
-              <button tabIndex={-1}><SelectIcon theme={theme} />Select</button>
-              <button tabIndex={-1}><span className="tool-icon" aria-hidden="true">✋</span>Pan</button>
-              <span className="sep" />
-            </span>
-            <span className="lbl">Measure</span>
-            {MEASURE_TOOLS.map(toolBtn)}
-            <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')} disabled={!active || readOnly}>Measurements...</button>
-          </div>
-        </>
-      )}
-
-      <div className="tabs">
+      <div className="tabs" style={{ marginLeft: toolbarReservations.left, marginRight: toolbarReservations.right }}>
         {docs.map((d) => (
           <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); updateSelection([], []); }} onDoubleClick={() => promptRename(d)} title={d.shared ? 'Shared document names cannot be changed here' : 'Double-click to rename this tab'}>
             {renamingId === d.id && !d.shared ? (
               <TabNameEditor key={d.id} name={d.name} onSave={(name) => { void renameDocument(d.id, name); setRenamingId(null); }} onCancel={() => setRenamingId(null)} />
             ) : <>
               {d.shared && <span title="Shared document on the server">☁ </span>}
-              {d.name}
+              <span className="tab-document-name" style={{ fontSize: `${Math.max(8, Math.min(12, 300 / Math.max(d.name.length, 1)))}px` }}>{d.name}</span>
               {d.dirty ? ' •' : ''}
               {!d.shared && !readOnly && <button className="x" aria-label={`Rename ${d.name} tab`} title="Rename tab" onClick={(e) => { e.stopPropagation(); promptRename(d); }}>✎</button>}
             </>}
@@ -1163,7 +1289,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         </div>
       )}
 
-      <div className="main">
+      <div className="main" style={{ marginLeft: active ? toolbarReservations.left : 0, marginRight: active ? toolbarReservations.right : 0 }}>
         {!active ? (
           <div className="empty">
             <h1>ThryvoPDF Markup Studio</h1>
@@ -1173,7 +1299,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <p className="muted">or drag PDF files onto this window</p>
           </div>
         ) : view === 'compare' ? (
-          <ComparePanel docs={docs} activeId={active.id} onOpenRevision={async () => addDocs(await pickFiles(), false)} onMessage={say} />
+          <ComparePanel docs={docs} activeId={active.id} onOpenRevision={async () => addDocs(await pickFiles(), false)} onMessage={say} theme={theme} />
         ) : (
           <>
             <div className="side left" id="left-panel" hidden={!leftPanelVisible}>
@@ -1232,7 +1358,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 onCreatePageObject={createPageObject}
                 onSelectionChange={(markupIds, pageObjectIds, calloutIds) => {
                   updateSelection(markupIds, pageObjectIds, calloutIds);
-                  if (markupIds.length) setRightTab((tab) => (tab === 'measure' || tab === 'markups' ? tab : 'markups'));
+                  const selectedMarkup = active.markups.find((markup) => markup.id === markupIds[markupIds.length - 1]);
+                  if (selectedMarkup) setRightTab(isMeasure(selectedMarkup.type) ? 'measure' : 'markups');
                 }}
                 onPageObjectsChange={updatePageObjects}
                 onEditPageObject={editPageObject}
@@ -1242,6 +1369,13 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 onBeginEdit={beginEdit}
                 onLive={live}
                 onZoom={setZoom}
+                onViewportChange={(docId, left, top) => {
+                  setDocs((all) => {
+                    const document = all.find((item) => item.id === docId);
+                    if (!document || (Math.abs((document.viewport?.left ?? 0) - left) <= 1 && Math.abs((document.viewport?.top ?? 0) - top) <= 1)) return all;
+                    return all.map((item) => item.id === docId ? { ...item, viewport: { left, top } } : item);
+                  });
+                }}
                 onContextMenu={(event, markupId, pageObjectId, point, calloutOnly = false) => {
                   const currentSelection = active.markups.find((markup) => markup.id === selectedId && markup.page === active.page)?.id ?? null;
                   const clickedMarkup = active.markups.find((markup) => markup.id === markupId && markup.page === active.page);
@@ -1266,23 +1400,26 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
               <div className="viewer-controls" aria-label="Page and zoom controls">
                 <FloatingTools tool={tool} theme={theme} onTool={(t) => { chooseTool(t); setPending(null); }} />
                 <span className="sep" />
-                <button onClick={() => goto(active.page - 1)} title="Previous page" aria-label="Previous page">◀</button>
+                <button onClick={() => goto(active.page - 1)} title="Previous page" aria-label="Previous page"><ActionIcon name="left" className="tool-icon" /></button>
                 <input className="pg" type="number" aria-label="Page number" min={1} max={active.numPages} value={active.page + 1} onChange={(e) => goto((+e.target.value || 1) - 1)} />
                 <span>/ {active.numPages}</span>
-                <button onClick={() => goto(active.page + 1)} title="Next page" aria-label="Next page">▶</button>
+                <button onClick={() => goto(active.page + 1)} title="Next page" aria-label="Next page"><ActionIcon name="right" className="tool-icon" /></button>
                 <span className="sep" />
-                <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out (Ctrl+-)" aria-label="Zoom out">−</button>
+                <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out (Ctrl+-)" aria-label="Zoom out"><ActionIcon name="zoom-out" className="tool-icon" /></button>
                 <span>{Math.round((active.zoom || 1) * 100)}%</span>
-                <button onClick={() => zoomBy(1.25)} title="Zoom in (Ctrl+=)" aria-label="Zoom in">＋</button>
-                <button onClick={() => setFit((f) => ({ mode: 'width', n: f.n + 1 }))} title="Fit width"><span aria-hidden="true">↔</span> Width</button>
-                <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))} title="Fit page"><span aria-hidden="true">▣</span> Page</button>
+                <button onClick={() => zoomBy(1.25)} title="Zoom in (Ctrl+=)" aria-label="Zoom in"><ActionIcon name="zoom-in" className="tool-icon" /></button>
+                <button onClick={() => setFit((f) => ({ mode: 'width', n: f.n + 1 }))} title="Fit width"><ActionIcon name="fit-width" className="tool-icon" />Width</button>
+                <button onClick={() => setFit((f) => ({ mode: 'page', n: f.n + 1 }))} title="Fit page"><ActionIcon name="page" className="tool-icon" />Page</button>
               </div>
             </div>
             <div className="side right" id="right-panel" hidden={!rightPanelVisible}>
               <div className="ptabs">
-                <button className="on">Markups ({countOf})</button>
+                <button className={rightTab === 'markups' ? 'on' : ''} onClick={() => setRightTab('markups')}>Markups ({countOf})</button>
+                <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')}>Measurements ({measurementCount})</button>
               </div>
+              {rightTab === 'markups' && (
                 <MarkupsPanel
+                  mode="markups"
                   doc={active}
                   readOnly={readOnly}
                   selectedId={selectedId}
@@ -1307,29 +1444,52 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   onDelete={deleteMarkup}
                   onExport={(csv) => exportCsv(csv, downloadName(active.name, '-markups', 'csv'))}
                 />
+              )}
+              {rightTab === 'measure' && (
+                <div className="measurement-tab-content">
+                  <MeasurePanel
+                    doc={active}
+                    pending={pending}
+                    subject={subject}
+                    onSubject={setSubject}
+                    onTool={(t) => { setTool(t); setRightTab('measure'); say('Click two points of a known length on the drawing'); }}
+                    onSetCal={setCal}
+                    onClearPending={() => setPending(null)}
+                    onExport={(csv) => exportCsv(csv, downloadName(active.name, '-takeoff', 'csv'))}
+                    onMessage={say}
+                  />
+                  <MarkupsPanel
+                    mode="measurements"
+                    doc={active}
+                    readOnly={readOnly}
+                    selectedId={selectedId}
+                    author={author}
+                    user={user}
+                    commentSize={commentSize}
+                    onCommentSize={changeCommentSize}
+                    onSelect={(id) => {
+                      const measurement = active.markups.find((markup) => markup.id === id);
+                      if (!measurement) return;
+                      setTool('select');
+                      if (measurement.page === active.page) {
+                        pendingMarkupSelection.current = null;
+                        updateSelection([id], []);
+                      } else {
+                        pendingMarkupSelection.current = { docId: active.id, markupId: id };
+                        goto(measurement.page);
+                      }
+                    }}
+                    onUpdate={updateMarkup}
+                    onDelete={deleteMarkup}
+                    onExport={() => undefined}
+                  />
+                </div>
+              )}
             </div>
-            {rightTab !== 'markups' && (
+            {rightTab !== 'markups' && rightTab !== 'measure' && (
               <div className="modal" role="dialog" aria-modal="true" aria-label="Document tools">
                 <div className="usermgmt tool-dialog">
-                  <div className="row between"><b>{rightTab === 'measure' ? 'Measurements' : rightTab === 'organize' ? 'Organize pages' : rightTab === 'sheets' ? 'Sheet index' : 'Search documents'}</b><button onClick={() => setRightTab('markups')}>Close</button></div>
-              {rightTab === 'measure' && (
-                <>
-                <div className="row pad">{MEASURE_TOOLS.map((t) => (
-                  <button key={t} onClick={() => { chooseTool(t); setRightTab('markups'); }}>{TOOL_LABEL[t]}</button>
-                ))}</div>
-                <MeasurePanel
-                  doc={active}
-                  pending={pending}
-                  subject={subject}
-                  onSubject={setSubject}
-                  onTool={(t) => { setTool(t); setRightTab('markups'); say('Click two points of a known length on the drawing'); }}
-                  onSetCal={setCal}
-                  onClearPending={() => setPending(null)}
-                  onExport={(csv) => exportCsv(csv, downloadName(active.name, '-takeoff', 'csv'))}
-                  onMessage={say}
-                />
-                </>
-              )}
+                  <div className="row between"><b>{rightTab === 'organize' ? 'Organize pages' : rightTab === 'sheets' ? 'Sheet index' : 'Search documents'}</b><button onClick={() => setRightTab('markups')}>Close</button></div>
               {rightTab === 'organize' && (
                 <OrganizePanel
                   doc={active}
@@ -1372,6 +1532,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         )}
       </div>
       <div className="status">{msg}{savedPdfPath && <button className="status-link" onClick={() => void window.api?.openSavedPdf(savedPdfPath).catch((error) => say('Could not open the saved PDF: ' + (error instanceof Error ? error.message : String(error))))}>Open saved PDF</button>}</div>
+      <div className="toolbar-dock-reserve toolbar-dock-reserve-bottom" style={{ height: active ? toolbarReservations.bottom : 0 }} aria-hidden="true" />
       {contextMenu && active && (
         <div
           className="viewer-context-menu"
