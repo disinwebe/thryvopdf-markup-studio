@@ -130,6 +130,8 @@ Select **Stamp**, then **Import stamp...** to use a PNG, JPEG, WebP, GIF, BMP or
 
 Without a license, open local PDFs in the **read-only viewer** without signing in. Editing, saving and shared documents require a signed **perpetual license for each device**. Activation and subsequent checks work offline. Open **Activate** or **Help > License**, copy the device request (a SHA-256 fingerprint of the Windows MachineGuid, not the raw identifier) and send it to the software owner, who returns a license file. Click **Import license file**; it is saved in this PC's application data and verified on each start. The company-server account remains separate.
 
+Commercial customer terms are provided as a [draft for legal review](docs/CUSTOMER-TERMS-DRAFT.md). The project package metadata currently identifies the package as MIT, and these draft terms do not override open-source or third-party license rights. Confirm ownership and contributor permissions, complete the legal placeholders, and have counsel review the terms before commercial distribution.
+
 **Owner setup on a trusted machine:** generate an Ed25519 keypair outside the repository. Keep the private key confidential, restrict access using Windows ACLs and maintain a secure backup. A replacement private key cannot issue licenses for installers built with a different public key.
 
 ```powershell
