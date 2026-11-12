@@ -185,11 +185,13 @@ const polyOf = (m: Markup): Pt[] => m.points;
 
 /** Returns true if point hits the markup within tol (page points). */
 export function hitMarkup(m: Markup, p: Pt, tol: number): boolean {
+  if (m.watermark && m.rotation) p = rotateAround(p, boxCenter(m), -m.rotation);
   const t = tol + m.width / 2;
   switch (m.type) {
     case 'highlight':
     case 'text':
     case 'stamp':
+    case 'image':
       return inRect(p, boxOf(m), tol);
     case 'callout':
       return inRect(p, boxOf(m), tol) || (m.points[2] ? distToSegment(p, m.points[2], boxCenter(m)) <= t : false);
@@ -254,7 +256,8 @@ export interface Handle {
 export function handlesOf(m: Markup): Handle[] {
   if (m.type === 'note' || m.type === 'm-count') return [];
   if (isBox(m)) {
-    const hs: Handle[] = rectPoly(boxOf(m)).map((p, i) => ({ key: i, p }));
+    const center = boxCenter(m);
+    const hs: Handle[] = rectPoly(boxOf(m)).map((p, i) => ({ key: i, p: m.watermark ? rotateAround(p, center, m.rotation ?? 0) : p }));
     if (m.type === 'callout' && m.points[2]) hs.push({ key: 'tip', p: m.points[2] });
     return hs;
   }
@@ -262,6 +265,7 @@ export function handlesOf(m: Markup): Handle[] {
 }
 
 export function applyHandle(m: Markup, key: HandleKey, p: Pt): Markup {
+  if (m.watermark && m.rotation) p = rotateAround(p, boxCenter(m), -m.rotation);
   if (key === 'tip') {
     const pts = m.points.slice();
     pts[2] = p;
@@ -274,7 +278,7 @@ export function applyHandle(m: Markup, key: HandleKey, p: Pt): Markup {
     if ((m.type === 'stamp' && m.stampImage && m.stampLockAspectRatio !== false) ||
         (m.type === 'image' && m.image && m.imageLockAspectRatio !== false)) {
       const box = boxOf(m);
-      if (box.w <= 0 || box.h <= 0) return { ...m, points: [opposite, p] };
+      if (box.w <= 0 || box.h <= 0) return resizeWatermarkText(m, [opposite, p]);
       const targetWidth = Math.abs(p.x - opposite.x);
       const targetHeight = Math.abs(p.y - opposite.y);
       const ratio = m.type === 'image' ? m.image!.width / m.image!.height : box.w / box.h;
@@ -285,13 +289,32 @@ export function applyHandle(m: Markup, key: HandleKey, p: Pt): Markup {
       const target = { x: opposite.x + (right ? fitWidth : -fitWidth), y: opposite.y + (bottom ? fitHeight : -fitHeight) };
       pts[0] = key === 0 || key === 3 ? target : opposite;
       pts[1] = key === 1 || key === 2 ? target : opposite;
-      return { ...m, points: pts };
+      return resizeWatermarkText(m, pts);
     }
     pts[0] = opposite;
     pts[1] = p;
-    return { ...m, points: pts };
+    return resizeWatermarkText(m, pts);
   }
   const pts = m.points.slice();
   pts[key] = p;
   return { ...m, points: pts };
+}
+
+function resizeWatermarkText(markup: Markup, points: Pt[]): Markup {
+  const updated = { ...markup, points };
+  if (markup.watermarkKind !== 'text') return updated;
+  const previous = boxOf(markup);
+  const next = boxOf(updated);
+  if (!previous.w || !previous.h) return updated;
+  const scale = Math.min(next.w / previous.w, next.h / previous.h);
+  return { ...updated, fontSize: Math.max(6, (markup.fontSize ?? 12) * scale) };
+}
+
+export function rotateAround(point: Pt, center: Pt, degrees: number): Pt {
+  const angle = degrees * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const x = point.x - center.x;
+  const y = point.y - center.y;
+  return { x: center.x + x * cos - y * sin, y: center.y + x * sin + y * cos };
 }

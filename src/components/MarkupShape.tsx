@@ -1,4 +1,4 @@
-import { arrowHead, boxCenter, boxOf, cloudPointsFromPath, rectPoly, splinePoints, wrapText, approxTextWidth } from '../core/geometry';
+import { arrowHead, boxCenter, boxOf, cloudPointsFromPath, rectPoly, splinePoints, wrapText, approxTextWidth, rotateAround } from '../core/geometry';
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, measurementCircle, Pt } from '../core/types';
 import { calloutLayout, calloutTextRuns } from '../core/callout';
@@ -201,16 +201,18 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
         body = <image href={m.stampImage.data} x={r.x} y={r.y} width={r.w} height={r.h} preserveAspectRatio="none" />;
         break;
       }
-      const t = (m.stamp ?? 'STAMP').toUpperCase();
+      const t = m.watermarkKind === 'text' ? (m.stamp ?? '') : (m.stamp ?? 'STAMP').toUpperCase();
       const size = Math.max(6, Math.min(r.h * 0.5, (r.w - 10) / Math.max(1, t.length * 0.62)));
-      body = (
-        <>
-          <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none" stroke={m.color} strokeWidth={Math.max(2, m.width)} rx={3} />
-          <text x={r.x + r.w / 2} y={r.y + r.h / 2 + size * 0.35} textAnchor="middle" fontSize={size} fontWeight={700} fill={m.color} fontFamily="Helvetica, Arial, sans-serif">
-            {t}
-          </text>
-        </>
-      );
+      body = m.watermarkKind === 'text'
+        ? <text x={r.x + r.w / 2} y={r.y + r.h / 2 + size * 0.35} textAnchor="middle" fontSize={Math.max(6, Math.min(m.fontSize ?? size, r.h * 0.8, (r.w - 8) / Math.max(1, t.length * 0.62)))} fontWeight={700} fill={m.color} fontFamily="Helvetica, Arial, sans-serif">{t}</text>
+        : (
+          <>
+            <rect x={r.x} y={r.y} width={r.w} height={r.h} fill="none" stroke={m.color} strokeWidth={Math.max(2, m.width)} rx={3} />
+            <text x={r.x + r.w / 2} y={r.y + r.h / 2 + size * 0.35} textAnchor="middle" fontSize={size} fontWeight={700} fill={m.color} fontFamily="Helvetica, Arial, sans-serif">
+              {t}
+            </text>
+          </>
+        );
       break;
     }
     case 'image': {
@@ -232,7 +234,10 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
   const co = calloutLayout(m);
   return (
     <g>
-      <g opacity={m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}>{body}</g>
+      <g
+        opacity={m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}
+        transform={m.watermark && m.rotation ? `rotate(${m.rotation} ${boxCenter(m).x} ${boxCenter(m).y})` : undefined}
+      >{body}</g>
       {co && (
         <g className="callout-box">
           <line x1={co.edge.x} y1={co.edge.y} x2={co.anchor.x} y2={co.anchor.y} stroke="#e11d48" strokeWidth={1.2} />

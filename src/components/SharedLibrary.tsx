@@ -273,7 +273,7 @@ export function SharedLibrary({
             {groupSel === NEW && <input placeholder="New group name" value={newGroup} onChange={(e) => setNewGroup(e.target.value)} maxLength={80} />}
             <label>
               Description (stored with each uploaded document)
-              <textarea rows={2} maxLength={500} placeholder="e.g. Issued for construction, Rev B" value={desc} onChange={(e) => setDesc(e.target.value)} />
+              <textarea spellCheck rows={2} maxLength={500} placeholder="e.g. Issued for construction, Rev B" value={desc} onChange={(e) => setDesc(e.target.value)} />
             </label>
             {!desc.trim() && <div className="muted">No description yet. Adding one helps others identify these files.</div>}
             <fieldset>

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveWithState } from './core/annotations';
 import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure, uid } from './core/types';
 import { translate } from './core/geometry';
-import { loadPdf } from './pdf/pdfjs';
+import { loadPdf, nextSearchHitIndex, scanPdfSpelling, searchTextMatches, type PdfSpellingIssue, type PdfSpellingMatch, type PdfTextMatch } from './pdf/pdfjs';
 import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups';
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, rotatePage, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
@@ -47,6 +47,10 @@ import { canEditComment } from './core/comments';
 import { EditCommentsPopup } from './components/EditCommentsPopup';
 import { ActionIcon, type ActionIconName } from './components/ActionIcon';
 import { MovableToolbar, toolbarDockReservations, type ToolbarLayout } from './components/MovableToolbar';
+import { StandardColorPicker } from './components/StandardColorPicker';
+import { parseWatermarkPages } from './core/watermarks';
+import { WatermarksManager } from './components/WatermarksManager';
+import { groupWatermarks } from './core/watermarks';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'image', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
@@ -66,13 +70,13 @@ const TOOL_HINT: Partial<Record<Tool, string>> = {
 };
 const HISTORY_LIMIT = 100;
 
-type RightTab = 'markups' | 'measure' | 'organize' | 'sheets' | 'search';
+type RightTab = 'markups' | 'measure' | 'watermarks' | 'organize' | 'sheets' | 'search';
 type LeftTab = 'pages' | 'bookmarks' | 'project';
 type ViewerContextMenu = { x: number; y: number; markupId: string | null; calloutId: string | null; pageObjectId: string | null; stackId: string | null; point: Pt; calloutOnly: boolean };
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
-export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; notifications?: NotificationsApi | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
+export default function App({ user, actions, viewOnly = false, licenseStatus, onImportLicense }: { user: AuthUser; actions: { serverMode?: boolean; signedIn?: boolean; uiBlocked?: boolean; logout: () => void; changePassword: () => void; manageUsers?: () => void; requestSignIn?: (onSignedIn?: () => void) => void; notifications?: NotificationsApi | null }; viewOnly?: boolean; licenseStatus?: LicenseInfoStatus; onImportLicense?: () => void }) {
   const readOnly = viewOnly;
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -93,6 +97,30 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     setTool(next);
   };
   const [theme, setTheme] = useTheme();
+  const [spellcheckLanguage, setSpellcheckLanguage] = useState<'en-US' | 'en-GB'>('en-US');
+  const [spellReviewOpen, setSpellReviewOpen] = useState(false);
+  const [spellReviewBusy, setSpellReviewBusy] = useState(false);
+  const [spellReviewProgress, setSpellReviewProgress] = useState(0);
+  const [spellReviewResults, setSpellReviewResults] = useState<PdfSpellingIssue[]>([]);
+  const [spellReviewMatches, setSpellReviewMatches] = useState<PdfSpellingMatch[]>([]);
+  const [spellReviewDocId, setSpellReviewDocId] = useState('');
+  const [spellReviewDocName, setSpellReviewDocName] = useState('');
+  const [spellReviewPagesWithText, setSpellReviewPagesWithText] = useState(0);
+  const [spellReviewWordsChecked, setSpellReviewWordsChecked] = useState(0);
+  const [spellReviewError, setSpellReviewError] = useState('');
+  const spellReviewRun = useRef(0);
+  useEffect(() => {
+    let mounted = true;
+    const api = window.api;
+    if (api) {
+      void api.spellCheckerLanguage()
+        .then((language) => { if (mounted) setSpellcheckLanguage(language); })
+        .catch((error: unknown) => {
+          if (mounted) setMsg(`Spell checker unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        });
+    }
+    return () => { mounted = false; };
+  }, []);
   const [commentSize, setCommentSizeState] = useState(getCommentSize);
   const changeCommentSize = (n: number) => {
     setCommentSize(n);
@@ -105,7 +133,18 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
   const [defaultsOpen, setDefaultsOpen] = useState(false);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfoStatus | null>(null);
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
+  const [closePromptBusy, setClosePromptBusy] = useState(false);
+  const [closePromptError, setClosePromptError] = useState('');
   const [fit, setFit] = useState<{ mode: 'width' | 'page'; n: number }>({ mode: 'page', n: 0 });
+  const [continuousScroll, setContinuousScroll] = useState(true);
+  const [searchText, setSearchText] = useState('');
+  const [searchMatches, setSearchMatches] = useState<PdfTextMatch[]>([]);
+  const [searchHitIndex, setSearchHitIndex] = useState(-1);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [searchDocumentId, setSearchDocumentId] = useState('');
+  const [searchNavigation, setSearchNavigation] = useState<{ docId: string; page: number; y: number; token: number } | null>(null);
   const [msg, setMsg] = useState('Ready. Open a PDF to begin.');
   const [savedPdfPath, setSavedPdfPath] = useState<string | null>(null);
   const [pending, setPending] = useState<{ a: Pt; b: Pt } | null>(null);
@@ -125,6 +164,14 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [signatureId, setSignatureId] = useState<string | null>(signatureStore.items[0]?.id ?? null);
   const [removeSignatureBackground, setRemoveSignatureBackground] = useState(false);
   const [signatureManagerOpen, setSignatureManagerOpen] = useState(false);
+  const [watermarkDialogOpen, setWatermarkDialogOpen] = useState(false);
+  const [watermarkKind, setWatermarkKind] = useState<'text' | 'image' | 'pdf'>('text');
+  const [watermarkText, setWatermarkText] = useState('CONFIDENTIAL');
+  const [watermarkPages, setWatermarkPages] = useState('');
+  const [watermarkColor, setWatermarkColor] = useState('#c00000');
+  const [watermarkOpacity, setWatermarkOpacity] = useState(0.25);
+  const [watermarkRotation, setWatermarkRotation] = useState(-45);
+  const [watermarkFile, setWatermarkFile] = useState<PickedFile | null>(null);
   const [selectedMarkupIds, setSelectedMarkupIds] = useState<string[]>([]);
   const [selectedCalloutIds, setSelectedCalloutIds] = useState<string[]>([]);
   const [selectedPageObjectIds, setSelectedPageObjectIds] = useState<string[]>([]);
@@ -140,9 +187,14 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [toolbarAppHeight, setToolbarAppHeight] = useState(0);
   const [toolbarBaseHeight, setToolbarBaseHeight] = useState(0);
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
+  const searchRun = useRef(0);
+  const searchNavigationToken = useRef(0);
   const pendingMarkupSelection = useRef<{ docId: string; markupId: string } | null>(null);
+  const closeRequestHandlerRef = useRef<() => void>(() => {});
   const docsRef = useRef(docs);
   docsRef.current = docs;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
   const toolbarLayoutList = useMemo(() => Object.values(toolbarLayouts), [toolbarLayouts]);
   const reportToolbarLayout = useCallback((id: string, layout: ToolbarLayout | null) => {
     setToolbarLayouts((current) => {
@@ -155,8 +207,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       const previous = current[id];
       if (previous && previous.edge === layout.edge && previous.corner === layout.corner && previous.width === layout.width &&
         previous.height === layout.height && previous.visible === layout.visible && previous.moved === layout.moved &&
-        previous.position.x === layout.position.x && previous.position.y === layout.position.y &&
-        previous.attachedTo?.id === layout.attachedTo?.id && previous.attachedTo?.side === layout.attachedTo?.side) return current;
+        previous.position.x === layout.position.x && previous.position.y === layout.position.y) return current;
       return { ...current, [id]: { ...layout, id } };
     });
   }, []);
@@ -195,6 +246,15 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     updateSelection([], []);
   }, [activeId, active?.page]);
   useEffect(() => {
+    searchRun.current += 1;
+    setSearchMatches([]);
+    setSearchHitIndex(-1);
+    setSearchDocumentId('');
+    setSearchBusy(false);
+    setSearchError('');
+    setSearchNavigation(null);
+  }, [active?.id]);
+  useEffect(() => {
     const pending = pendingMarkupSelection.current;
     if (!pending) return;
     if (!active || active.id !== pending.docId) {
@@ -220,9 +280,16 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         ? { kind: 'signature', signature: selectedSignature }
         : null;
   const logout = async () => {
-    if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Log out anyway?')) return;
     await leaveAll();
-    actions.logout();
+    const localDocs = docs.filter((d) => !d.shared);
+    setDocs(localDocs);
+    if (active?.shared) setActiveId(localDocs.at(-1)?.id ?? '');
+    await actions.logout();
+  };
+  const openSharedLibrary = () => {
+    if (actions.signedIn) setLibrary(true);
+    else if (actions.requestSignIn) actions.requestSignIn(() => setLibrary(true));
+    else setLibrary(true);
   };
   const say = useCallback((m: string) => { setMsg(m); setSavedPdfPath(null); }, []);
   const setSavedSignatures = (next: SavedSignature[]) => {
@@ -277,10 +344,10 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const { cid, leaveAll } = useSharedSync(docs, docsRef, updateDoc, readOnly);
 
-  const addDocs = useCallback(async (files: PickedFile[], activate = true) => {
+  const addDocs = useCallback(async (files: PickedFile[], activate = true, fitPage = false) => {
     for (const f of files) {
       try {
-        const d = await createDoc(f.name, f.data, f.path);
+        const d = await createDoc(f.name, f.data, f.path, false, { fitPage });
         setDocs((all) => [...all, d]);
         if (activate) setActiveId(d.id);
         setMsg(`Opened ${f.name} (${d.numPages} pages, ${d.markups.length} markups)`);
@@ -293,8 +360,19 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const open = async () => addDocs(await pickFiles());
 
   useEffect(() => {
-    window.api?.startupFiles().then((f) => { if (f.length) void addDocs(f); });
-  }, [addDocs]);
+    const api = window.api;
+    if (!api) return;
+    let active = true;
+    const onFiles = (files: PickedFile[], error?: string) => {
+      if (!active) return;
+      if (error) return say(`Could not open the requested PDF: ${error}`);
+      if (files.length) void addDocs(files, true, true);
+    };
+    const unsubscribe = api.onOpenFiles(onFiles);
+    void api.startupFiles().then((files) => onFiles(files)).catch((error) => onFiles([], error instanceof Error ? error.message : String(error)));
+    void api.consumeOpenFiles().then((files) => onFiles(files)).catch((error) => onFiles([], error instanceof Error ? error.message : String(error)));
+    return () => { active = false; unsubscribe(); };
+  }, [addDocs, say]);
 
   // ---- markup history -----
   const commit = (id: string, markups: Markup[], key?: string) =>
@@ -350,7 +428,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
 
   const updateMarkup = (id: string, patch: Partial<Markup>, key?: string) =>
-    !viewOnly && active && commit(active.id, active.markups.map((m) => (m.id === id ? { ...m, ...patch } : m)), key);
+    !viewOnly && active && (() => {
+      const target = active.markups.find((markup) => markup.id === id);
+      const watermarkId = target?.watermarkId;
+      return commit(active.id, active.markups.map((markup) =>
+        markup.id === id || (!!watermarkId && markup.watermarkId === watermarkId) ? { ...markup, ...patch } : markup), key);
+    })();
 
   const closeCommentPopup = () => {
     setCommentTarget(null);
@@ -389,12 +472,102 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const deleteMarkup = (id: string) => {
     if (!active || viewOnly) return;
     const target = active.markups.find((m) => m.id === id);
-    if (target && !canDeleteMarkup(target, user)) {
+    const targets = target?.watermarkId
+      ? active.markups.filter((markup) => markup.watermarkId === target.watermarkId)
+      : target ? [target] : [];
+    if (targets.some((markup) => !canDeleteMarkup(markup, user))) {
       window.alert('Only the author of a markup can delete it.');
       return;
     }
-    commit(active.id, active.markups.filter((m) => m.id !== id));
+    const ids = new Set(targets.map((markup) => markup.id));
+    commit(active.id, active.markups.filter((m) => !ids.has(m.id)));
     updateSelection([], []);
+  };
+
+  const openWatermarkDialog = () => {
+    if (!active || readOnly) return;
+    setWatermarkPages(`1-${active.numPages}`);
+    setWatermarkFile(null);
+    setWatermarkDialogOpen(true);
+  };
+  const chooseWatermarkFile = async () => {
+    if (!window.api) {
+      window.alert('File import is unavailable.');
+      return;
+    }
+    try {
+      const filters = watermarkKind === 'pdf'
+        ? [{ name: 'PDF documents', extensions: ['pdf'] }]
+        : [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }];
+      const [file] = await window.api.openFiles({ multi: false, filters });
+      if (file) setWatermarkFile(file);
+    } catch (error) {
+      window.alert(`Could not choose watermark source: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const addWatermark = async () => {
+    if (!active || readOnly) return;
+    const doc = active;
+    try {
+      const pages = parseWatermarkPages(watermarkPages, doc.numPages);
+      if (watermarkKind === 'text' && !watermarkText.trim()) throw new Error('Enter watermark text.');
+      if (watermarkKind !== 'text' && !watermarkFile) throw new Error('Choose an image or PDF source.');
+      const image = watermarkKind === 'text' ? undefined : await importStamp(watermarkFile!, (total) => {
+        const answer = window.prompt(`Choose a PDF page from 1 to ${total}:`, '1');
+        return answer === null ? null : Number(answer);
+      });
+      if (watermarkKind !== 'text' && !image) return;
+      if (active?.id !== doc.id) return;
+      const watermarkId = uid();
+      const markups: Markup[] = [];
+      for (const pageIndex of pages) {
+        const page = await doc.pdf.getPage(pageIndex + 1);
+        const viewport = page.getViewport({ scale: 1 });
+        const maxWidth = viewport.width * 0.78;
+        const maxHeight = viewport.height * (watermarkKind === 'text' ? 0.18 : 0.4);
+        const fontSize = Math.max(12, Math.min(viewport.height * 0.14, maxWidth / Math.max(1, watermarkText.trim().length * 0.62)));
+        const width = watermarkKind === 'text'
+          ? Math.min(maxWidth, Math.max(fontSize * 2, watermarkText.trim().length * fontSize * 0.62))
+          : Math.min(maxWidth, maxHeight * (image!.width / image!.height));
+        const height = watermarkKind === 'text' ? Math.min(maxHeight, fontSize * 1.5) : width / (image!.width / image!.height);
+        const extra: Partial<Markup> = {
+          watermark: true,
+          watermarkKind,
+          watermarkId,
+          watermarkName: watermarkKind === 'text' ? watermarkText.trim() : watermarkFile!.name,
+          rotation: watermarkRotation,
+          opacity: watermarkOpacity,
+          ...(image ? { image, imageLockAspectRatio: true } : { stamp: watermarkText.trim(), fontSize }),
+        };
+        markups.push(makeMarkup(
+          watermarkKind === 'text' ? 'stamp' : 'image',
+          pageIndex,
+          [
+            { x: (viewport.width - width) / 2, y: (viewport.height - height) / 2 },
+            { x: (viewport.width + width) / 2, y: (viewport.height + height) / 2 },
+          ],
+          {
+            ...defaultStyle(watermarkKind === 'text' ? 'stamp' : 'image'),
+            color: watermarkColor,
+            opacity: watermarkOpacity,
+            ...(watermarkKind === 'text' ? { stamp: watermarkText.trim(), fontSize } : {}),
+          },
+          author,
+          extra,
+        ));
+      }
+      if (active?.id !== doc.id) return;
+      commit(doc.id, [...doc.markups, ...markups.map((markup) => ({ ...markup, authorEmail: user.email }))]);
+      const selectedMarkup = markups.find((markup) => markup.page === doc.page) ?? markups[0];
+      updateSelection([selectedMarkup.id], []);
+      setTool('select');
+      setWatermarkDialogOpen(false);
+      setRightTab('watermarks');
+      setRightPanelVisible(true);
+      say(`Watermark added to ${pages.length} page${pages.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      window.alert(`Could not add watermark: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const contextSelectionIds = () => {
@@ -711,20 +884,76 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     setEditingPageObjectIsNew(false);
   };
 
-  const save = async (as = false) => {
-    if (!active || viewOnly) return;
+  const saveDocument = async (document: Doc, as = false): Promise<boolean> => {
+    if (viewOnly || document.shared) return false;
     try {
-      const bytes = await bake(active);
-      const path = await saveBytes(active.name, bytes, 'pdf', as ? undefined : active.path);
-      if (!path) return;
-      updateDoc(active.id, () => ({ path, name: baseName(path), dirty: false }));
-      setMsg(`Saved ${baseName(path)} with ${active.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)`);
+      const bytes = await bake(document);
+      const path = await saveBytes(document.name, bytes, 'pdf', as ? undefined : document.path);
+      if (!path) return false;
+      updateDoc(document.id, () => ({ path, name: baseName(path), dirty: false }));
+      setMsg(`Saved ${baseName(path)} with ${document.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)`);
       setSavedPdfPath(path);
+      return true;
     } catch (e) {
       const message = 'Save failed: ' + (e instanceof Error ? e.message : String(e));
       say(message);
       window.alert(message);
+      return false;
     }
+  };
+  const save = async (as = false) => {
+    if (active) await saveDocument(active, as);
+  };
+
+  const finishAppClose = async () => {
+    setClosePromptBusy(true);
+    try {
+      await leaveAll();
+    } catch (error) {
+      say('Could not notify all shared-document sessions before closing: ' + (error instanceof Error ? error.message : String(error)));
+    }
+    setClosePromptOpen(false);
+    setClosePromptBusy(false);
+    window.api?.respondToAppClose(true);
+  };
+
+  const requestAppClose = () => {
+    setClosePromptError('');
+    if (docsRef.current.some((document) => document.dirty && !document.shared)) {
+      setClosePromptOpen(true);
+      return;
+    }
+    void finishAppClose();
+  };
+  closeRequestHandlerRef.current = requestAppClose;
+
+  useEffect(() => {
+    const api = window.api;
+    if (!api) return;
+    const unsubscribe = api.onAppCloseRequested(() => closeRequestHandlerRef.current());
+    api.markCloseGuardReady();
+    return unsubscribe;
+  }, []);
+
+  const cancelAppClose = () => {
+    setClosePromptOpen(false);
+    setClosePromptError('');
+    window.api?.respondToAppClose(false);
+  };
+
+  const saveAllAndClose = async () => {
+    if (closePromptBusy) return;
+    setClosePromptBusy(true);
+    setClosePromptError('');
+    for (const document of docsRef.current.filter((item) => item.dirty && !item.shared)) {
+      const saved = await saveDocument(document);
+      if (!saved) {
+        setClosePromptError(`Could not save ${document.name}. You can retry, discard the changes, or cancel closing.`);
+        setClosePromptBusy(false);
+        return;
+      }
+    }
+    await finishAppClose();
   };
 
   const openShared = async (info: SharedListing) => {
@@ -933,6 +1162,142 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const goto = (i: number) =>
     active && updateDoc(active.id, (d) => ({ page: Math.max(0, Math.min(d.numPages - 1, i)) }));
+  const changeSearchText = (text: string) => {
+    searchRun.current += 1;
+    setSearchText(text);
+    setSearchMatches([]);
+    setSearchHitIndex(-1);
+    setSearchDocumentId('');
+    setSearchBusy(false);
+    setSearchError('');
+    setSearchNavigation(null);
+  };
+  const setSearchNavigationTo = (docId: string, match: PdfTextMatch) => {
+    setSearchNavigation({
+      docId,
+      page: match.page,
+      y: (match.points[0].y + match.points[3].y) / 2,
+      token: ++searchNavigationToken.current,
+    });
+  };
+  const runTextSearch = async () => {
+    if (!active) return;
+    const query = searchText.trim();
+    if (!query) {
+      changeSearchText('');
+      return;
+    }
+    const doc = active;
+    const request = ++searchRun.current;
+    setSearchMatches([]);
+    setSearchHitIndex(-1);
+    setSearchDocumentId(doc.id);
+    setSearchBusy(true);
+    setSearchError('');
+    try {
+      const matches = await searchTextMatches(doc.pdf, query);
+      if (request !== searchRun.current || activeIdRef.current !== doc.id) return;
+      setSearchMatches(matches);
+      if (matches.length) {
+        setSearchHitIndex(0);
+        goto(matches[0].page);
+        setSearchNavigationTo(doc.id, matches[0]);
+      }
+    } catch (error) {
+      if (request === searchRun.current && activeIdRef.current === doc.id) {
+        const message = `Text search failed: ${error instanceof Error ? error.message : String(error)}`;
+        setSearchError(message);
+        say(message);
+      }
+    } finally {
+      if (request === searchRun.current) setSearchBusy(false);
+    }
+  };
+  const navigateSearchHit = (direction: -1 | 1) => {
+    if (!active || searchDocumentId !== active.id || searchMatches.length === 0) return;
+    const index = nextSearchHitIndex(searchHitIndex, searchMatches.length, direction);
+    const match = searchMatches[index];
+    setSearchHitIndex(index);
+    goto(match.page);
+    setSearchNavigationTo(active.id, match);
+  };
+  const closeSpellReview = () => {
+    spellReviewRun.current++;
+    setSpellReviewOpen(false);
+    setSpellReviewBusy(false);
+  };
+  const runPdfSpellCheck = async () => {
+    if (!active) return;
+    const doc = active;
+    const request = ++spellReviewRun.current;
+    const api = window.api;
+    setSpellReviewDocId(doc.id);
+    setSpellReviewDocName(doc.name);
+    setSpellReviewOpen(true);
+    setSpellReviewBusy(true);
+    setSpellReviewProgress(0);
+    setSpellReviewResults([]);
+    setSpellReviewMatches([]);
+    setSpellReviewPagesWithText(0);
+    setSpellReviewWordsChecked(0);
+    setSpellReviewError('');
+    try {
+      if (!api) throw new Error('The spell checker is unavailable.');
+      const result = await scanPdfSpelling(
+        doc.pdf,
+        (words) => api.checkSpellWords(words),
+        (completed, total) => {
+          if (spellReviewRun.current === request) setSpellReviewProgress(total ? Math.round(completed / total * 100) : 100);
+        },
+      );
+      if (spellReviewRun.current !== request) return;
+      setSpellReviewResults(result.issues);
+      setSpellReviewMatches(result.issues.flatMap((issue) => issue.matches));
+      setSpellReviewPagesWithText(result.pagesWithText);
+      setSpellReviewWordsChecked(result.wordsChecked);
+      say(result.issues.length
+        ? `Found ${result.issues.length} possible spelling issue${result.issues.length === 1 ? '' : 's'} in ${doc.name}.`
+        : 'No spelling issues found in searchable PDF text.');
+    } catch (error) {
+      if (spellReviewRun.current === request) {
+        setSpellReviewError(`PDF spell check failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } finally {
+      if (spellReviewRun.current === request) setSpellReviewBusy(false);
+    }
+  };
+  const navigateToSpellReviewPage = (page: number) => {
+    if (!docs.some((doc) => doc.id === spellReviewDocId)) return;
+    setView('viewer');
+    setActiveId(spellReviewDocId);
+    updateDoc(spellReviewDocId, () => ({ page: page - 1 }));
+    closeSpellReview();
+  };
+  const addSpellReviewWord = async (word: string) => {
+    const api = window.api;
+    if (!api) return;
+    try {
+      await api.addSpellCheckerWord(word);
+      setSpellReviewResults((issues) => issues.filter((issue) => issue.word.toLocaleLowerCase('en') !== word.toLocaleLowerCase('en')));
+      setSpellReviewMatches((matches) => matches.filter((match) => match.word.toLocaleLowerCase('en') !== word.toLocaleLowerCase('en')));
+      say(`“${word}” added to your personal dictionary.`);
+    } catch (error) {
+      setSpellReviewError(`Could not add “${word}” to the dictionary: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const clearSpellReviewHighlights = () => {
+    spellReviewRun.current++;
+    setSpellReviewOpen(false);
+    setSpellReviewBusy(false);
+    setSpellReviewResults([]);
+    setSpellReviewMatches([]);
+    setSpellReviewDocId('');
+    setSpellReviewDocName('');
+    setSpellReviewPagesWithText(0);
+    setSpellReviewWordsChecked(0);
+    setSpellReviewError('');
+    say('Spelling highlights cleared.');
+  };
   const setZoom = (z: number) => {
     if (!active) return;
     updateDoc(active.id, () => ({ zoom: z }));
@@ -943,6 +1308,13 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   // ---- keyboard -----
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyRef.current = (e) => {
+    if (spellReviewOpen) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSpellReview();
+      }
+      return;
+    }
     if (commentTarget || defaultsOpen || licenseInfo || library || actions.uiBlocked || isTypingTarget(e.target)) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
@@ -980,6 +1352,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
       if (selectedMarkupIds.length || selectedPageObjectIds.length) deleteSelection();
     } else if (e.key === 'Escape') {
+      if (watermarkDialogOpen) setWatermarkDialogOpen(false);
       setTool('select');
       setPending(null);
       setContentMode(null);
@@ -1001,9 +1374,19 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       }
       return;
     }
+    if (action.startsWith('spellcheck-language:')) {
+      const language = action.slice('spellcheck-language:'.length);
+      if (language !== 'en-US' && language !== 'en-GB') return;
+      void window.api?.setSpellCheckerLanguage(language)
+        .then((selected) => {
+          setSpellcheckLanguage(selected);
+          setMsg(`Spell check language: English (${selected === 'en-US' ? 'US' : 'UK'}).`);
+        })
+        .catch((error: unknown) => setMsg(`Could not change spell check language: ${error instanceof Error ? error.message : String(error)}`));
+      return;
+    }
     if (action === 'quit') {
-      if (docs.some((d) => d.dirty && !d.shared) && !window.confirm('There are unsaved changes. Quit anyway?')) return;
-      void leaveAll().finally(() => window.api?.quitApp());
+      void window.api?.quitApp();
       return;
     }
     if (library || actions.uiBlocked || commentTarget || defaultsOpen || licenseInfo) return;
@@ -1014,7 +1397,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'save': void save(false); break;
       case 'saveAs': void save(true); break;
       case 'csv': if (active) void exportCsv(markupCsv(active.markups, active.path || active.name), downloadName(active.name, '-markups', 'csv')); break;
-      case 'shared': if (actions.serverMode) setLibrary(true); break;
+      case 'shared': openSharedLibrary(); break;
       case 'logout': void logout(); break;
       case 'users': actions.manageUsers?.(); break;
       case 'password': actions.changePassword(); break;
@@ -1049,6 +1432,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'organizePanel': setRightTab('organize'); break;
       case 'sheetsPanel': setRightTab('sheets'); break;
       case 'searchPanel': setRightTab('search'); break;
+      case 'spellcheckPdf': void runPdfSpellCheck(); break;
       case 'zoomIn':
         if (view === 'viewer') zoomBy(1.25);
         else if (view === 'compare') window.dispatchEvent(new CustomEvent('compare-zoom', { detail: 1.25 }));
@@ -1059,7 +1443,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         break;
       case 'fitWidth': if (active && view === 'viewer') setFit((f) => ({ mode: 'width', n: f.n + 1 })); break;
       case 'fitPage': if (active && view === 'viewer') setFit((f) => ({ mode: 'page', n: f.n + 1 })); break;
-      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+Shift+Right: Rotate page clockwise\nCtrl+Shift+Left: Rotate page counter-clockwise\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Alt+L / Ctrl+Alt+R: toggle left / right panel\nCtrl+Z: Undo; Ctrl+Y or Ctrl+Shift+Z: Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
+      case 'shortcuts': window.alert('V: Select\nH: toggle Pan\nHold Space: temporary Pan\nCtrl+O: Open\nCtrl+S: Save\nCtrl+Shift+S: Save As\nCtrl+Shift+K: Check spelling in PDF\nCtrl+Shift+Right: Rotate page clockwise\nCtrl+Shift+Left: Rotate page counter-clockwise\nCtrl+= / Ctrl+-: Zoom in / out\nCtrl+Alt+L / Ctrl+Alt+R: toggle left / right panel\nCtrl+Z: Undo; Ctrl+Y or Ctrl+Shift+Z: Redo\nDelete: delete selected markup\nAlt+F/E/O/V/H: open menus'); break;
       case 'about': void window.api?.showAbout(); break;
       case 'license':
         if (licenseStatus) setLicenseInfo(licenseStatus);
@@ -1072,13 +1456,14 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     const api = window.api;
     if (!api) return;
     api.setMenuState({
-      signedIn: true, documentOpen: !!active, viewerActive: view === 'viewer', compareActive: view === 'compare', canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
+      signedIn: !!actions.signedIn, documentOpen: !!active, viewerActive: view === 'viewer', compareActive: view === 'compare', canUndo: !!active?.undo.length, canRedo: !!active?.redo.length,
       selected: !viewOnly && !!active && !!selectedId && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
       canGroupSelected: canGroupSelected(),
       canUngroupSelected: canUngroupSelected(),
       canFlattenSelected: !viewOnly && !!active && !active.shared && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
       canFlattenAll: !viewOnly && !!active && !active.shared && active.markups.some((markup) => canDeleteMarkup(markup, user)),
-      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || !!licenseInfo, viewOnly,
+      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || watermarkDialogOpen || !!licenseInfo || spellReviewOpen, viewOnly,
+      spellcheckLanguage,
       toolbars: {
         file: toolbarLayouts.file?.visible ?? true,
         content: toolbarLayouts.content?.visible ?? true,
@@ -1086,7 +1471,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         measure: toolbarLayouts.measure?.visible ?? true,
       },
     });
-  }, [active, selectedId, selectedMarkupIds, selectedPageObjectIds, user, view, actions.serverMode, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, licenseInfo, toolbarLayouts]);
+  }, [active, selectedId, selectedMarkupIds, selectedPageObjectIds, user, view, actions.serverMode, actions.signedIn, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, watermarkDialogOpen, licenseInfo, toolbarLayouts, spellcheckLanguage, spellReviewOpen]);
   useEffect(() => () => window.api?.setMenuState({
     signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, canFlattenSelected: false, canFlattenAll: false, serverMode: false, blocked: false, viewOnly: false,
   }), []);
@@ -1178,7 +1563,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     }
   };
 
-  const countOf = useMemo(() => active?.markups.filter((markup) => !isMeasure(markup.type)).length ?? 0, [active?.markups]);
+  const countOf = useMemo(() => active?.markups.filter((markup) => !isMeasure(markup.type) && !markup.watermark).length ?? 0, [active?.markups]);
+  const watermarkCount = useMemo(() => groupWatermarks(active?.markups ?? []).length, [active?.markups]);
   const measurementCount = useMemo(() => active?.markups.filter((markup) => isMeasure(markup.type)).length ?? 0, [active?.markups]);
   const contextMarkup = contextMenu && active?.markups.find((markup) => markup.id === contextMenu.markupId && markup.page === active.page);
   const contextStackable = !!contextMenu?.stackId;
@@ -1196,15 +1582,15 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   return (
     <div className="app" ref={appRef} tabIndex={-1} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-      <NotificationBell api={actions.notifications ?? null} onOpenShared={() => setLibrary(true)} onOpenNotification={(notification) => {
+      <NotificationBell api={actions.notifications ?? null} onSignIn={() => actions.requestSignIn?.()} onOpenShared={openSharedLibrary} onOpenNotification={(notification) => {
         if (notification.type === 'registration') actions.manageUsers?.();
-        else setLibrary(true);
+        else openSharedLibrary();
       }} />
       <div className="toolbar-groups" ref={toolbarGroupsRef} hidden={!active}>
         <MovableToolbar id="file" label="File management" boundsRef={appRef} layouts={toolbarLayoutList} onLayoutChange={reportToolbarLayout}>
           <div className="bar">
             <button onClick={open} title="Open PDF (Ctrl+O)"><FolderIcon /><span className="toolbar-command-label">Open…</span></button>
-            <button onClick={() => setLibrary(true)} disabled={!actions.serverMode} title={actions.serverMode ? 'Open Shared Documents' : 'Shared documents require server mode'}><FolderIcon /><span className="toolbar-command-label">Open Shared...</span></button>
+            <button onClick={openSharedLibrary} title={actions.signedIn ? 'Open Shared Documents' : 'Sign in to open shared documents'}><FolderIcon /><span className="toolbar-command-label">Open Shared...</span></button>
             <button onClick={() => save(false)} disabled={!active || viewOnly} title="Save (Ctrl+S)"><SaveIcon /><span className="toolbar-command-label">Save</span></button>
             <button onClick={() => save(true)} disabled={!active || viewOnly} title="Save as"><SaveIcon inverted /><span className="toolbar-command-label">Save as…</span></button>
             <span className="sep" />
@@ -1225,10 +1611,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <button className={contentMode === 'text' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'text' ? null : 'text'); }} disabled={!active || readOnly || !!active.shared} title="Text: click the page to add editable PDF text"><ActionIcon name="text" className="tool-icon" /><span className="toolbar-command-label">Text</span></button>
             <button className={contentMode === 'symbol' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'symbol' ? null : 'symbol'); }} disabled={!active || readOnly || !!active.shared} title="Symbol: place a flattened symbol"><ActionIcon name="symbol" className="tool-icon" /><span className="toolbar-command-label">Symbol</span></button>
             <button className={contentMode === 'signature' ? 'on' : ''} onClick={() => setSignatureManagerOpen(true)} disabled={!active || readOnly || !!active.shared} title="Signatures: manage and place transparent PNG signatures"><ActionIcon name="signature" className="tool-icon" /><span className="toolbar-command-label">Signatures</span></button>
+            <button onClick={openWatermarkDialog} disabled={!active || readOnly} title="Add and manage text, image, or PDF watermarks"><ActionIcon name="stamp" className="tool-icon" /><span className="toolbar-command-label">Watermark</span></button>
             {contentMode === 'text' && (
               <span className="toolbar-content-controls">
                 <input aria-label="PDF text size" type="number" min={6} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(6, Math.min(96, +e.target.value || 24)))} />
-                <input aria-label="PDF text color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+                <StandardColorPicker ariaLabel="PDF text color" value={contentColor} onChange={setContentColor} />
                 <span className="muted small">Click page, then type</span>
               </span>
             )}
@@ -1238,7 +1625,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   {SYMBOLS.map((symbol) => <option key={symbol.value} value={symbol.value}>{symbol.glyph} {symbol.label}</option>)}
                 </select>
                 <input aria-label="Symbol size" type="number" min={12} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(12, Math.min(96, +e.target.value || 24)))} />
-                <input aria-label="Symbol color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+                <StandardColorPicker ariaLabel="Symbol color" value={contentColor} onChange={setContentColor} />
                 <span className="muted small">Click page to place</span>
               </span>
             )}
@@ -1259,28 +1646,61 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       <div className="toolbar-dock-reserve toolbar-dock-reserve-top" style={{ height: active ? toolbarReservations.top : 0 }} aria-hidden="true" />
       {readOnly && <div className="collab warn" role="status">Read-only viewer mode - a license is required to edit or save. <button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)}>Activate...</button></div>}
 
-      <div className="tabs" style={{ marginLeft: toolbarReservations.left, marginRight: toolbarReservations.right }}>
-        {docs.map((d) => (
-          <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); updateSelection([], []); }} onDoubleClick={() => promptRename(d)} title={d.shared ? 'Shared document names cannot be changed here' : 'Double-click to rename this tab'}>
-            {renamingId === d.id && !d.shared ? (
-              <TabNameEditor key={d.id} name={d.name} onSave={(name) => { void renameDocument(d.id, name); setRenamingId(null); }} onCancel={() => setRenamingId(null)} />
-            ) : <>
-              {d.shared && <span title="Shared document on the server">☁ </span>}
-              <span className="tab-document-name" style={{ fontSize: `${Math.max(8, Math.min(12, 300 / Math.max(d.name.length, 1)))}px` }}>{d.name}</span>
-              {d.dirty ? ' •' : ''}
-              {!d.shared && !readOnly && <button className="x" aria-label={`Rename ${d.name} tab`} title="Rename tab" onClick={(e) => { e.stopPropagation(); promptRename(d); }}>✎</button>}
-            </>}
-            <button
-              className="x"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeDoc(d.id);
+      <div className="tabs-row" style={{ marginLeft: toolbarReservations.left, marginRight: toolbarReservations.right }}>
+        <div className="tabs">
+          {docs.map((d) => (
+            <div key={d.id} className={'tab' + (d.id === activeId ? ' active' : '')} onClick={() => { setActiveId(d.id); updateSelection([], []); }} onDoubleClick={() => promptRename(d)} title={d.shared ? 'Shared document names cannot be changed here' : 'Double-click to rename this tab'}>
+              {renamingId === d.id && !d.shared ? (
+                <TabNameEditor key={d.id} name={d.name} onSave={(name) => { void renameDocument(d.id, name); setRenamingId(null); }} onCancel={() => setRenamingId(null)} />
+              ) : <>
+                {d.shared && <span title="Shared document on the server">☁ </span>}
+                <span className="tab-document-name" style={{ fontSize: `${Math.max(8, Math.min(12, 300 / Math.max(d.name.length, 1)))}px` }}>{d.name}</span>
+                {d.dirty ? ' •' : ''}
+                {!d.shared && !readOnly && <button className="x" aria-label={`Rename ${d.name} tab`} title="Rename tab" onClick={(e) => { e.stopPropagation(); promptRename(d); }}>✎</button>}
+              </>}
+              <button
+                className="x"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeDoc(d.id);
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+        {active && view === 'viewer' && (
+          <div className="pdf-text-search" role="search" aria-label="Search text in active PDF">
+            {spellReviewDocId === active.id && spellReviewMatches.length > 0 && (
+              <button onClick={clearSpellReviewHighlights} title="Clear misspelling highlights">Clear spelling marks</button>
+            )}
+            <label htmlFor="pdf-text-search-input"><ActionIcon name="search" className="pdf-search-icon" /><span>Search Text</span></label>
+            <input
+              id="pdf-text-search-input"
+              type="search"
+              aria-label="Search Text"
+              placeholder="Exact word"
+              value={searchText}
+              onChange={(event) => changeSearchText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                if (searchBusy) return;
+                if (searchDocumentId === active.id && searchMatches.length > 0) navigateSearchHit(1);
+                else void runTextSearch();
               }}
-            >
-              ×
-            </button>
+            />
+            <button onClick={() => void runTextSearch()} disabled={searchBusy || !searchText.trim()} title="Search exact words in this PDF">Find</button>
+            <span className={'pdf-search-count' + (searchError ? ' error' : '')} aria-live="polite" title={searchError || undefined}>
+              {searchBusy ? 'Searching…' : searchError || (searchDocumentId === active.id && searchText.trim()
+                ? searchMatches.length ? `${searchHitIndex + 1} of ${searchMatches.length}` : '0 matches'
+                : '')}
+            </span>
+            <button onClick={() => navigateSearchHit(-1)} disabled={searchDocumentId !== active.id || searchMatches.length === 0} title="Previous match" aria-label="Previous search match"><ActionIcon name="left" className="pdf-search-nav-icon" /></button>
+            <button onClick={() => navigateSearchHit(1)} disabled={searchDocumentId !== active.id || searchMatches.length === 0} title="Next match" aria-label="Next search match"><ActionIcon name="right" className="pdf-search-nav-icon" /></button>
           </div>
-        ))}
+        )}
       </div>
 
       {active?.shared && (
@@ -1300,7 +1720,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <h1>ThryvoPDF Markup Studio</h1>
             <p>Markups · Compare revisions · Organize drawing sets</p>
             <button className="primary big" onClick={open}>Open PDF…</button>
-            <button className="big" onClick={() => setLibrary(true)} disabled={!actions.serverMode} title={actions.serverMode ? 'Open shared documents' : 'Shared documents require server mode'}>Shared Documents…</button>
+            <button className="big" onClick={openSharedLibrary} title={actions.signedIn ? 'Open shared documents' : 'Sign in to open shared documents'}>Shared Documents…</button>
             <p className="muted">or drag PDF files onto this window</p>
           </div>
         ) : view === 'compare' ? (
@@ -1328,7 +1748,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   viewOnly={viewOnly}
                   onActivate={setActiveId}
                   onOpen={open}
-                  onOpenShared={actions.serverMode ? openShared : undefined}
+                  onOpenShared={actions.signedIn ? openShared : undefined}
                   onClose={closeDoc}
                   onRename={renameDocument}
                   onMove={(i, dir) =>
@@ -1359,12 +1779,18 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 selectedCalloutIds={selectedCalloutIds}
                 selectedPageObjectIds={selectedPageObjectIds}
                 fit={fit}
+                continuous={continuousScroll}
+                onPageChange={goto}
+                searchMatches={active.id === searchDocumentId ? searchMatches.map((match, index) => ({ ...match, index })) : []}
+                spellcheckMatches={active.id === spellReviewDocId ? spellReviewMatches : []}
+                activeSearchIndex={searchHitIndex}
+                searchNavigation={searchNavigation?.docId === active.id ? searchNavigation : null}
                 contentTool={contentTool}
                 onCreatePageObject={createPageObject}
                 onSelectionChange={(markupIds, pageObjectIds, calloutIds) => {
                   updateSelection(markupIds, pageObjectIds, calloutIds);
                   const selectedMarkup = active.markups.find((markup) => markup.id === markupIds[markupIds.length - 1]);
-                  if (selectedMarkup) setRightTab(isMeasure(selectedMarkup.type) ? 'measure' : 'markups');
+                  if (selectedMarkup) setRightTab(selectedMarkup.watermark ? 'watermarks' : isMeasure(selectedMarkup.type) ? 'measure' : 'markups');
                 }}
                 onPageObjectsChange={updatePageObjects}
                 onEditPageObject={editPageObject}
@@ -1410,6 +1836,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 <span>/ {active.numPages}</span>
                 <button onClick={() => goto(active.page + 1)} title="Next page" aria-label="Next page"><ActionIcon name="right" className="tool-icon" /></button>
                 <span className="sep" />
+                <button className={continuousScroll ? 'on' : ''} aria-pressed={continuousScroll} onClick={() => setContinuousScroll((enabled) => !enabled)} title="Toggle continuous scrolling">Continuous</button>
+                <span className="sep" />
                 <button onClick={() => zoomBy(1 / 1.25)} title="Zoom out (Ctrl+-)" aria-label="Zoom out"><ActionIcon name="zoom-out" className="tool-icon" /></button>
                 <span>{Math.round((active.zoom || 1) * 100)}%</span>
                 <button onClick={() => zoomBy(1.25)} title="Zoom in (Ctrl+=)" aria-label="Zoom in"><ActionIcon name="zoom-in" className="tool-icon" /></button>
@@ -1420,6 +1848,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <div className="side right" id="right-panel" hidden={!rightPanelVisible}>
               <div className="ptabs">
                 <button className={rightTab === 'markups' ? 'on' : ''} onClick={() => setRightTab('markups')}>Markups ({countOf})</button>
+                <button className={rightTab === 'watermarks' ? 'on' : ''} onClick={() => setRightTab('watermarks')}>Watermarks ({watermarkCount})</button>
                 <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')}>Measurements ({measurementCount})</button>
               </div>
               {rightTab === 'markups' && (
@@ -1490,8 +1919,32 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   />
                 </div>
               )}
+              {rightTab === 'watermarks' && (
+                <WatermarksManager
+                  doc={active}
+                  user={user}
+                  readOnly={readOnly}
+                  selectedId={selectedId}
+                  onSelect={(id) => {
+                    const markup = active.markups.find((item) => item.id === id);
+                    if (!markup) return;
+                    setTool('select');
+                    setRightTab('watermarks');
+                    setRightPanelVisible(true);
+                    if (markup.page === active.page) {
+                      pendingMarkupSelection.current = null;
+                      updateSelection([id], []);
+                    } else {
+                      pendingMarkupSelection.current = { docId: active.id, markupId: id };
+                      goto(markup.page);
+                    }
+                  }}
+                  onUpdate={updateMarkup}
+                  onDelete={deleteMarkup}
+                />
+              )}
             </div>
-            {rightTab !== 'markups' && rightTab !== 'measure' && (
+            {rightTab !== 'markups' && rightTab !== 'measure' && rightTab !== 'watermarks' && (
               <div className="modal" role="dialog" aria-modal="true" aria-label="Document tools">
                 <div className="usermgmt tool-dialog">
                   <div className="row between"><b>{rightTab === 'organize' ? 'Organize pages' : rightTab === 'sheets' ? 'Sheet index' : 'Search documents'}</b><button onClick={() => setRightTab('markups')}>Close</button></div>
@@ -1601,7 +2054,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           <div className="usermgmt page-text-editor">
             <div className="row between"><b>{editingPageObjectIsNew ? 'Add PDF text' : 'Edit PDF text'}</b><button onClick={cancelPageObjectText}>Cancel</button></div>
             <p className="muted">This is editable PDF page text, not a markup annotation. Double-click it on the page to edit it later.</p>
-            <textarea autoFocus aria-label="PDF text" rows={4} value={pageObjectTextDraft} onChange={(e) => setPageObjectTextDraft(e.target.value)} onKeyDown={(e) => {
+            <textarea autoFocus aria-label="PDF text" spellCheck rows={4} value={pageObjectTextDraft} onChange={(e) => setPageObjectTextDraft(e.target.value)} onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 e.preventDefault();
                 cancelPageObjectText();
@@ -1662,6 +2115,49 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           </div>
         </div>
       )}
+      {watermarkDialogOpen && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Add watermark">
+          <div className="usermgmt tool-dialog watermark-dialog">
+            <div className="row between"><b>Add watermark</b><button onClick={() => setWatermarkDialogOpen(false)}>Close</button></div>
+            <p className="muted">Watermarks are editable markups. Resize with the page handles; edit, replace, or delete them in the Watermarks Manager.</p>
+            <label>
+              Watermark type
+              <select value={watermarkKind} onChange={(event) => { setWatermarkKind(event.target.value as 'text' | 'image' | 'pdf'); setWatermarkFile(null); }}>
+                <option value="text">Text</option>
+                <option value="image">Image</option>
+                <option value="pdf">PDF page</option>
+              </select>
+            </label>
+            {watermarkKind === 'text' ? (
+              <>
+                <label>Text<textarea spellCheck rows={2} value={watermarkText} onChange={(event) => setWatermarkText(event.target.value)} /></label>
+                <label>Text color<StandardColorPicker value={watermarkColor} onChange={setWatermarkColor} /></label>
+              </>
+            ) : (
+              <div className="row">
+                <button onClick={() => void chooseWatermarkFile()}>{watermarkFile ? 'Choose another source...' : `Choose ${watermarkKind === 'pdf' ? 'PDF' : 'image'}...`}</button>
+                <span className="muted">{watermarkFile?.name ?? 'No source selected'}</span>
+              </div>
+            )}
+            <label>
+              Apply to pages
+              <input aria-label="Watermark pages" value={watermarkPages} onChange={(event) => setWatermarkPages(event.target.value)} placeholder="1-3, 5" />
+            </label>
+            <label>
+              Opacity ({Math.round(watermarkOpacity * 100)}%)
+              <input type="range" min={0.05} max={1} step={0.05} value={watermarkOpacity} onChange={(event) => setWatermarkOpacity(+event.target.value)} />
+            </label>
+            <label>
+              Rotation ({watermarkRotation}°)
+              <input type="range" min={-180} max={180} step={1} value={watermarkRotation} onChange={(event) => setWatermarkRotation(+event.target.value)} />
+            </label>
+            <div className="row">
+              <button className="primary" onClick={() => void addWatermark()}>Add watermark</button>
+              <button onClick={() => setWatermarkDialogOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {defaultsOpen && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Tool defaults">
           <div className="usermgmt tool-dialog">
@@ -1669,7 +2165,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <p>Select a markup tool to set defaults, or select an existing markup to change its properties.</p>
             {!editingSelected && (tool === 'select' || tool === 'hand') ? <p>Choose a markup tool first.</p> : (
               <div className="props">
-                <label>Color<input type="color" value={shown.color} onChange={(e) => changeStyle({ color: e.target.value })} /></label>
+                <label>Color<StandardColorPicker value={shown.color} onChange={(color) => changeStyle({ color })} /></label>
                 <label>Line width<input type="range" min={1} max={12} value={shown.width} onChange={(e) => changeStyle({ width: +e.target.value })} /></label>
                 <label>Opacity<input type="range" min={0.1} max={1} step={0.05} value={shown.opacity} onChange={(e) => changeStyle({ opacity: +e.target.value })} /></label>
                 <label>Fill<input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} /></label>
@@ -1695,7 +2191,66 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           </div>
         </div>
       )}
+      {spellReviewOpen && (
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="spell-review-title">
+          <div className="usermgmt spell-review-dialog">
+            <div className="row between">
+              <h3 id="spell-review-title">Check spelling in PDF</h3>
+              <div className="row">
+                {spellReviewMatches.length > 0 && <button onClick={clearSpellReviewHighlights}>Clear highlights</button>}
+                <button onClick={closeSpellReview}>Close</button>
+              </div>
+            </div>
+            <p className="muted">{spellReviewDocName} · Checks selectable PDF text only; scanned pages require OCR.</p>
+            {spellReviewBusy && <p role="status">Checking PDF text… {spellReviewProgress}%</p>}
+            {spellReviewError && <p className="danger" role="alert">{spellReviewError}</p>}
+            {!spellReviewBusy && !spellReviewError && spellReviewResults.length === 0 && (
+              <p role="status">
+                {spellReviewPagesWithText === 0
+                  ? 'No selectable text was found. Scanned pages require OCR before they can be checked.'
+                  : `No spelling issues found in ${spellReviewWordsChecked.toLocaleString()} words.`}
+              </p>
+            )}
+            {!spellReviewBusy && spellReviewResults.length > 0 && (
+              <>
+                <p role="status">Found {spellReviewResults.length} possible misspellings across {spellReviewWordsChecked.toLocaleString()} words.</p>
+                <div className="spell-review-results">
+                  {spellReviewResults.map((issue) => (
+                    <div className="spell-review-item" key={issue.word.toLocaleLowerCase('en')}>
+                      <div>
+                        <b>{issue.word}</b>
+                        <div className="spell-review-pages">
+                          {issue.pages.map((page) => <button key={page} onClick={() => navigateToSpellReviewPage(page)}>Page {page}</button>)}
+                          <span className="muted small">{issue.occurrences} occurrence{issue.occurrences === 1 ? '' : 's'}</span>
+                        </div>
+                        <div className="muted small">Suggestions: {issue.suggestions.join(', ') || 'none'}</div>
+                      </div>
+                      <button onClick={() => void addSpellReviewWord(issue.word)}>Add to dictionary</button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="row"><button onClick={closeSpellReview}>Done</button></div>
+          </div>
+        </div>
+      )}
       {licenseInfo && <LicenseInfo status={licenseInfo} onClose={() => setLicenseInfo(null)} onImport={viewOnly ? () => { setLicenseInfo(null); onImportLicense?.(); } : undefined} />}
+      {closePromptOpen && (
+        <div className="modal close-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="close-confirm-title">
+          <div className="usermgmt close-confirm">
+            <b id="close-confirm-title">Save changes before closing?</b>
+            <p>The following PDFs have unsaved changes:</p>
+            <ul>{docs.filter((document) => document.dirty && !document.shared).map((document) => <li key={document.id}>{document.name}</li>)}</ul>
+            {closePromptError && <p className="danger" role="alert">{closePromptError}</p>}
+            <div className="row close-confirm-actions">
+              <button onClick={() => void finishAppClose()} disabled={closePromptBusy}>Don't Save</button>
+              <button onClick={cancelAppClose} disabled={closePromptBusy}>Cancel</button>
+              <button className="primary" onClick={() => void saveAllAndClose()} disabled={closePromptBusy || viewOnly}>Save All</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

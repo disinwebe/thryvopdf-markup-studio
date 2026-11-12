@@ -7,6 +7,7 @@ import { Actor, canDeleteComment, canDeleteMarkup, canEditComment, ownsComment, 
 import { isReviewMarkup, numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 import { PdfComments } from './PdfComments';
+import { StandardColorPicker } from './StandardColorPicker';
 
 export interface MarkupsPanelProps {
   doc: Doc;
@@ -34,19 +35,19 @@ export function MarkupsPanel(p: MarkupsPanelProps) {
   const rows = useMemo(
     () =>
       doc.markups
-        .filter((m) => isMeasure(m.type) === measurementsOnly)
+        .filter((m) => !m.watermark && isMeasure(m.type) === measurementsOnly)
         .filter((m) => (scope === 'all' ? true : m.page === doc.page))
         .filter((m) => status === 'All' || m.status === status)
         .filter((m) => {
           if (!q.trim()) return true;
-          const hay = [m.type, m.text, m.subject, m.author, m.status, ...(isReviewMarkup(m) ? m.comments.map((c) => c.text) : [])].join(' ').toLowerCase();
+          const hay = [m.type, m.text, m.subject, m.stamp, m.author, m.status, ...(isReviewMarkup(m) ? m.comments.map((c) => c.text) : [])].join(' ').toLowerCase();
           return hay.includes(q.toLowerCase());
         })
         .sort((a, b) => a.page - b.page || (a.date ?? '').localeCompare(b.date ?? '')),
     [doc.markups, q, status, scope, doc.page, measurementsOnly],
   );
   const nums = numberMarkups(doc.markups);
-  const sel = doc.markups.find((m) => m.id === p.selectedId && isMeasure(m.type) === measurementsOnly) ?? null;
+  const sel = doc.markups.find((m) => m.id === p.selectedId && !m.watermark && isMeasure(m.type) === measurementsOnly) ?? null;
 
   const exportCsv = () => {
     p.onExport(markupCsv(doc.markups, doc.path || doc.name));
@@ -115,7 +116,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       {isMeasure(m.type) && <div className="muted">{measureLabel(m, cal) || '1 item'}</div>}
       <label>
         Color
-        <input type="color" value={m.color} onChange={(e) => upd({ color: e.target.value }, 'color')} />
+        <StandardColorPicker value={m.color} onChange={(color) => upd({ color }, 'color')} />
       </label>
       {m.type !== 'highlight' && (
         <label>
@@ -170,13 +171,13 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         <label className="inline-check">
           Fill
           <input type="checkbox" checked={!!m.fill} onChange={(e) => upd({ fill: e.target.checked ? '#ffffff' : undefined })} />
-          {m.fill && <input type="color" value={m.fill} onChange={(e) => upd({ fill: e.target.value }, 'fill')} />}
+          {m.fill && <StandardColorPicker value={m.fill} onChange={(color) => upd({ fill: color }, 'fill')} />}
         </label>
       )}
       {(m.type === 'text' || m.type === 'callout') && (
         <label>
           Font size
-          <input type="number" min={6} max={72} value={m.fontSize ?? 12} onChange={(e) => upd({ fontSize: +e.target.value || 12 }, 'fs')} />
+          <input type="number" min={6} max={240} value={m.fontSize ?? 12} onChange={(e) => upd({ fontSize: Math.max(6, +e.target.value || 12) }, 'fs')} />
         </label>
       )}
       {m.type === 'stamp' && (
@@ -201,6 +202,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       {(m.type === 'text' || m.type === 'callout' || m.type === 'note') && (
         <textarea
           rows={3}
+          spellCheck
           placeholder="Text"
           autoFocus={!m.text}
           value={m.text ?? ''}
@@ -210,7 +212,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       {isMeasure(m.type) && (
         <label>
           Subject
-          <input value={m.subject ?? ''} placeholder={defaultSubject(m)} onChange={(e) => upd({ subject: e.target.value }, 'subject')} />
+          <input spellCheck value={m.subject ?? ''} placeholder={defaultSubject(m)} onChange={(e) => upd({ subject: e.target.value }, 'subject')} />
         </label>
       )}
       <label>
@@ -238,7 +240,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           {c.edited && <span className="muted small"> (edited)</span>}
           {editing?.id === c.id ? (
             <div>
-              <textarea className="comment-input" value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
+              <textarea className="comment-input" spellCheck value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
               <div className="row">
                 <button
                   onClick={() => {
@@ -280,6 +282,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         <textarea
           className="comment-input"
           ref={commentInput}
+          spellCheck
           rows={2}
           value={comment}
           aria-label="Add Comment"

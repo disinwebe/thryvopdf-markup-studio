@@ -10,7 +10,7 @@ export function CommentPopup({ onSave, onCancel }: { onSave(text: string): void;
       <div className="usermgmt comment-popup" role="dialog" aria-modal="true" aria-labelledby="comment-popup-title">
         <h3 id="comment-popup-title">Add comment</h3>
         <label htmlFor="new-markup-comment">Comment</label>
-        <textarea id="new-markup-comment" ref={input} rows={4} value={text} onChange={(e) => setText(e.target.value)}
+        <textarea id="new-markup-comment" ref={input} spellCheck rows={4} value={text} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); }
             else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); submit(); }

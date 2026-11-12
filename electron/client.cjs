@@ -17,7 +17,7 @@ function normalizeUrl(u) {
   }
 }
 
-function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNotifications }) {
+function createClient({ configFile, localFile, sessionFile, safeStorage, fetch: f = globalThis.fetch, onNotifications }) {
   let cfg = { mode: null, serverUrl: '' };
   try {
     cfg = { ...cfg, ...JSON.parse(fs.readFileSync(configFile, 'utf8')) };
@@ -27,10 +27,55 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
   const local = createAuth(localFile);
   let session = null; // { user, token, expiresAt }
   let notificationStream = null;
+  let remembered = false;
+  let sessionError = '';
 
   const saveCfg = () => {
     fs.mkdirSync(path.dirname(configFile), { recursive: true });
     fs.writeFileSync(configFile, JSON.stringify(cfg, null, 2));
+  };
+
+  const canEncryptSession = () => !!sessionFile && !!safeStorage?.isEncryptionAvailable?.();
+  const clearRememberedSession = () => {
+    remembered = false;
+    if (!sessionFile || !fs.existsSync(sessionFile)) {
+      sessionError = '';
+      return null;
+    }
+    try {
+      fs.unlinkSync(sessionFile);
+      sessionError = '';
+      return null;
+    } catch (error) {
+      sessionError = error instanceof Error ? error.message : String(error);
+      return 'Could not clear the saved server sign-in: ' + sessionError;
+    }
+  };
+  const rememberSession = () => {
+    if (!session) return { remembered: false };
+    if (session.user.mustChange) {
+      remembered = false;
+      return { remembered: false, rememberError: 'Change your temporary password before saving this sign-in.' };
+    }
+    if (!canEncryptSession()) {
+      remembered = false;
+      return { remembered: false, rememberError: 'Secure sign-in storage is unavailable on this device.' };
+    }
+    try {
+      const payload = JSON.stringify({ version: 1, serverUrl: cfg.serverUrl, ...session });
+      const encrypted = safeStorage.encryptString(payload);
+      fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+      const temp = sessionFile + '.tmp';
+      fs.writeFileSync(temp, encrypted);
+      fs.renameSync(temp, sessionFile);
+      remembered = true;
+      sessionError = '';
+      return { remembered: true };
+    } catch (error) {
+      remembered = false;
+      sessionError = error instanceof Error ? error.message : String(error);
+      return { remembered: false, rememberError: 'Could not save this sign-in securely: ' + sessionError };
+    }
   };
 
   async function call(base, method, url, body, token, o = {}) {
@@ -45,7 +90,14 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
     if (o.download && res.ok) return { ok: true, bytes: new Uint8Array(await res.arrayBuffer()), name: decodeURIComponent(res.headers.get('x-doc-name') || '') };
     try {
       const j = await res.json();
-      if (res.status === 401 && token) j.expired = true;
+      if (res.status === 401 && token) {
+        j.expired = true;
+        if (session?.token === token) {
+          session = null;
+          stopNotificationStream();
+          clearRememberedSession();
+        }
+      }
       if (res.status === 404 && j.error === 'Not found.') return { ok: false, notFound: true, route: method + ' ' + url.split('?')[0], error: 'The server at ' + base + ' does not know the route ' + method + ' ' + url.split('?')[0] + '.' };
       return j;
     } catch {
@@ -103,6 +155,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
               if (event === 'auth') {
                 session = null;
                 stopNotificationStream();
+                clearRememberedSession();
                 return;
               }
               if (event === 'notifications' && data.length) {
@@ -118,6 +171,8 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
         if (session !== activeSession || controller.signal.aborted) return;
         if (Date.now() >= activeSession.expiresAt) {
           session = null;
+          stopNotificationStream();
+          clearRememberedSession();
           return;
         }
         await wait(retryMs);
@@ -128,11 +183,46 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
     void connect();
   };
 
+  const restoreRememberedSession = () => {
+    if (!sessionFile || !fs.existsSync(sessionFile)) return;
+    if (cfg.mode !== 'server') {
+      const warning = clearRememberedSession();
+      if (warning) sessionError = warning;
+      return;
+    }
+    if (!canEncryptSession()) {
+      sessionError = 'Secure sign-in storage is unavailable; sign in again to connect to the server.';
+      return;
+    }
+    try {
+      const data = JSON.parse(safeStorage.decryptString(fs.readFileSync(sessionFile)));
+      const valid = data?.version === 1 && typeof cfg.serverUrl === 'string' && !!cfg.serverUrl && data.serverUrl === cfg.serverUrl &&
+        typeof data.token === 'string' && data.token.length > 0 &&
+        typeof data.expiresAt === 'number' && data.expiresAt > Date.now() &&
+        data.user && typeof data.user.email === 'string' && typeof data.user.name === 'string';
+      if (!valid) {
+        const warning = clearRememberedSession();
+        if (warning) sessionError = warning;
+        return;
+      }
+      session = { user: data.user, token: data.token, expiresAt: data.expiresAt };
+      remembered = true;
+      startNotificationStream();
+    } catch (error) {
+      sessionError = error instanceof Error ? error.message : String(error);
+      const warning = clearRememberedSession();
+      if (warning) sessionError += '; ' + warning;
+    }
+  };
+
+  restoreRememberedSession();
+
   const current = () => {
     if (cfg.mode === 'local') return local.current();
     if (session && session.expiresAt <= Date.now()) {
       session = null;
       stopNotificationStream();
+      clearRememberedSession();
     }
     return session && !session.user.mustChange ? session.user : null;
   };
@@ -141,7 +231,7 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
     if (r.ok && r.token) {
       session = { user: r.user, token: r.token, expiresAt: r.expiresAt };
       startNotificationStream();
-      return { ok: true, user: r.user };
+      return { ok: true, user: r.user, ...rememberSession() };
     }
     if (r.ok && r.pending) return { ok: true, pending: true, message: r.message };
     return { ok: false, error: r.error || 'Request failed.' };
@@ -153,11 +243,11 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
 
     async status() {
       const base = { mode: cfg.mode, serverUrl: cfg.serverUrl, configured: cfg.mode === 'local' || (cfg.mode === 'server' && !!cfg.serverUrl) };
-      if (cfg.mode === 'local') return { ...base, online: true, ...local.status() };
-      if (!base.configured) return { ...base, online: false, hasUsers: false, user: null };
+      if (cfg.mode === 'local') return { ...base, online: true, ...local.status(), remembered: false };
+      if (!base.configured) return { ...base, online: false, hasUsers: false, user: null, remembered: false, sessionError };
       const h = await call(cfg.serverUrl, 'GET', '/api/health');
-      if (!h.ok) return { ...base, online: false, hasUsers: false, user: null, error: h.error };
-      return { ...base, online: true, hasUsers: !!h.hasUsers, user: current() };
+      if (!h.ok) return { ...base, online: false, hasUsers: false, user: current(), remembered, sessionError, error: h.error };
+      return { ...base, online: true, hasUsers: !!h.hasUsers, user: current(), remembered, sessionError };
     },
 
     async test(url) {
@@ -178,8 +268,9 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
       }
       session = null;
       local.logout();
+      const warning = clearRememberedSession();
       saveCfg();
-      return { ok: true };
+      return { ok: true, ...(warning ? { warning } : {}) };
     },
 
     async register(a) {
@@ -197,7 +288,10 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
       if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Not signed in to a server.' };
       if (String(password ?? '') !== String(confirm ?? '')) return { ok: false, error: 'Passwords do not match.' };
       const r = await call(cfg.serverUrl, 'POST', '/api/change-password', { current, password }, session.token);
-      if (r.ok) session.user = r.user;
+      if (r.ok) {
+        session.user = r.user;
+        rememberSession();
+      }
       return r.ok ? { ok: true, user: r.user } : { ok: false, error: r.error };
     },
 
@@ -267,8 +361,9 @@ function createClient({ configFile, localFile, fetch: f = globalThis.fetch, onNo
       const s = session;
       session = null;
       stopNotificationStream();
+      const warning = clearRememberedSession();
       if (s) await call(cfg.serverUrl, 'POST', '/api/logout', null, s.token);
-      return { ok: true };
+      return { ok: true, ...(warning ? { warning } : {}) };
     },
   };
 }

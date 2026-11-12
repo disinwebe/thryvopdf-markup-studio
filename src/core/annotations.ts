@@ -22,6 +22,7 @@ import {
   rectPoly,
   splinePoints,
   wrapText,
+  rotateAround,
 } from './geometry';
 import { countNumbers, DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, measurementCircle, Pt, Rect, SheetMeta, uid } from './types';
@@ -415,13 +416,30 @@ export function buildAppearance(
       const r = boxOf(m);
       const image = m.type === 'image' ? m.image : m.stampImage;
       if (image) {
-        const origin = cv({ x: r.x, y: r.y + r.h });
-        const right = cv({ x: r.x + r.w, y: r.y + r.h });
-        const top = cv({ x: r.x, y: r.y });
+        const center = boxCenter(m);
+        const rotate = (point: Pt) => m.watermark ? rotateAround(point, center, m.rotation ?? 0) : point;
+        const origin = cv(rotate({ x: r.x, y: r.y + r.h }));
+        const right = cv(rotate({ x: r.x + r.w, y: r.y + r.h }));
+        const top = cv(rotate({ x: r.x, y: r.y }));
         const imageName = m.type === 'image' ? 'MarkupImage' : 'StampImage';
         ops = `q ${f(right.x - origin.x)} ${f(right.y - origin.y)} ${f(top.x - origin.x)} ${f(top.y - origin.y)} ${f(origin.x)} ${f(origin.y)} cm /${imageName} Do Q`;
-        viewPts = rectPoly(r);
+        viewPts = rectPoly(r).map(rotate);
         if (m.type === 'stamp') extra.Name = 'Draft';
+        break;
+      }
+      if (m.watermarkKind === 'text') {
+        const t = m.stamp ?? '';
+        const size = Math.max(6, Math.min(m.fontSize ?? Infinity, r.h * 0.8, (r.w - 8) / Math.max(1, t.length * 0.62)));
+        const center = boxCenter(m);
+        const rotate = (point: Pt) => rotateAround(point, center, m.rotation ?? 0);
+        const origin = { x: center.x - textWidth(t, size) / 2, y: center.y + size * 0.35 };
+        const p = cv(rotate(origin));
+        const x = cv(rotate({ x: origin.x + 1, y: origin.y }));
+        const y = cv(rotate({ x: origin.x, y: origin.y - 1 }));
+        const matrix = `${f(x.x - p.x)} ${f(x.y - p.y)} ${f(y.x - p.x)} ${f(y.y - p.y)} ${f(p.x)} ${f(p.y)} Tm`;
+        ops = `BT /F2 ${f(size)} Tf ${col.join(' ')} rg ${matrix} (${latin1(t)}) Tj ET`;
+        viewPts = rectPoly(r).map(rotate);
+        extra.Name = 'Draft';
         break;
       }
       const t = (m.stamp ?? m.text ?? 'STAMP').toUpperCase();

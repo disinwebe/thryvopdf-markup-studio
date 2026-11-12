@@ -157,7 +157,8 @@ describe('native menu wiring', () => {
     expect(inactive[0].submenu.find((m: { label: string }) => m.label === '&Save').enabled).toBe(false);
     expect(inactive[3].submenu[0].enabled).toBe(false);
     const loggedOut = menuTemplate({}, send, 'win32');
-    expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === 'Open S&hared...').enabled).toBe(false);
+    expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === 'Open S&hared...').enabled).toBe(true);
+    expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === '&Logout').enabled).toBe(false);
     expect(loggedOut[2].submenu[0].visible).toBe(false);
     const compare = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: false, admin: false }, send, 'win32');
     expect(compare[3].submenu[0].enabled).toBe(false);
@@ -199,5 +200,26 @@ describe('native menu wiring', () => {
     expect(menu[1].submenu.find((entry: { label: string }) => entry.label === '&Flatten').enabled).toBe(false);
     menu[4].submenu.find((m: { label: string }) => m.label === '&License...').click();
     expect(send).toHaveBeenCalledWith('license');
+  });
+  it('offers persistent English spell-check language options', () => {
+    const send = vi.fn();
+    const menu = menuTemplate({ spellcheckLanguage: 'en-GB' }, send, 'win32');
+    const language = menu[2].submenu.find((entry: { label: string }) => entry.label === 'Spell check &language');
+    expect(language.submenu.map((entry: { label: string; checked?: boolean }) => [entry.label, entry.checked])).toEqual([
+      ['English (US)', false],
+      ['English (UK)', true],
+    ]);
+    language.submenu[0].click();
+    expect(send).toHaveBeenCalledWith('spellcheck-language:en-US');
+  });
+  it('provides a viewer spell-check command without requiring a license', () => {
+    const send = vi.fn();
+    const viewerMenu = menuTemplate({ documentOpen: true, viewerActive: true, licensed: false }, send, 'win32');
+    const action = viewerMenu[1].submenu.find((entry: { label: string }) => entry.label === 'Check spell&ing in PDF...');
+    expect(action.enabled).toBe(true);
+    action.click();
+    expect(send).toHaveBeenCalledWith('spellcheckPdf');
+    const compareMenu = menuTemplate({ documentOpen: true, compareActive: true }, send, 'win32');
+    expect(compareMenu[1].submenu.find((entry: { label: string }) => entry.label === 'Check spell&ing in PDF...').enabled).toBe(false);
   });
 });

@@ -1,7 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
+import AuthGate from '../src/components/AuthGate';
 import { SharedLibrary } from '../src/components/SharedLibrary';
+import { NotificationBell } from '../src/components/Notifications';
 import { renamedTab } from '../src/app/model';
 import { TabNameEditor } from '../src/components/TabNameEditor';
 
@@ -9,6 +11,27 @@ const user: AuthUser = { name: 'Reader', email: 'reader@example.test', disciplin
 const actions = { serverMode: true, logout: vi.fn(), changePassword: vi.fn() };
 
 describe('read-only viewer UI', () => {
+  it('renders the local workspace without showing an account gate', () => {
+    const html = renderToStaticMarkup(<AuthGate>{(currentUser) => <div>{currentUser.name} workspace</div>}</AuthGate>);
+    expect(html).toContain('Local user workspace');
+    expect(html).not.toContain('auth-card');
+  });
+
+  it('uses the Windows logon name for the signed-out local identity', () => {
+    vi.stubGlobal('window', { api: { localUserName: 'Tito.SASEC' } });
+    try {
+      const html = renderToStaticMarkup(<AuthGate>{(currentUser) => <div>{currentUser.name} workspace</div>}</AuthGate>);
+      expect(html).toContain('Tito.SASEC workspace');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('offers optional server sign-in without blocking the local workspace', () => {
+    const html = renderToStaticMarkup(<NotificationBell api={null} onSignIn={vi.fn()} />);
+    expect(html).toContain('Sign in for collaboration');
+  });
+
   it('shows a viewer notice and measurement tools disabled without a license', () => {
     const html = renderToStaticMarkup(<App user={user} actions={actions} viewOnly licenseStatus={{ ok: false }} onImportLicense={vi.fn()} />);
     expect(html).toContain('Read-only viewer mode');
@@ -47,7 +70,7 @@ describe('read-only viewer UI', () => {
     const html = renderToStaticMarkup(<App user={user} actions={actions} viewOnly licenseStatus={{ ok: false }} onImportLicense={vi.fn()} />);
     expect(html).toMatch(/toolbar-command-label">Open…<\/span><\/button><button[^>]*>[\s\S]*?toolbar-command-label">Open Shared\.\.\.<\/span><\/button>/);
     const offline = renderToStaticMarkup(<App user={user} actions={{ ...actions, serverMode: false }} viewOnly licenseStatus={{ ok: false }} onImportLicense={vi.fn()} />);
-    expect(offline).toMatch(/<button disabled="" title="Shared documents require server mode"/);
+    expect(offline).toMatch(/<button title="Sign in to open shared documents"/);
   });
 
   it('does not show a separate pending-registration alert in the toolbar', () => {

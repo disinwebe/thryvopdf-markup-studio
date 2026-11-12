@@ -28,6 +28,9 @@
     "nsis": { "installerIcon": "assets/icon.ico", "uninstallerIcon": "assets/icon.ico", "oneClick": false, "allowToChangeInstallationDirectory": true }
   },
   "dependencies": {
+    "dictionary-en": "^4.0.0",
+    "dictionary-en-gb": "^3.0.0",
+    "nspell": "^2.1.5",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
     "react": "^19.3.1",

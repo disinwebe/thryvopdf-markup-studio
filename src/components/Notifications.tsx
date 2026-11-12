@@ -101,9 +101,13 @@ export function useNotifications(user: AuthUser | null, serverMode: boolean) {
 
 export type NotificationsApi = NonNullable<ReturnType<typeof useNotifications>>;
 
-export function NotificationBell({ api, onOpenShared, onOpenNotification }: { api: NotificationsApi | null; onOpenShared?: () => void; onOpenNotification?: (notification: AppNotification) => void }) {
+export function NotificationBell({ api, onSignIn, onOpenShared, onOpenNotification }: { api: NotificationsApi | null; onSignIn?: () => void; onOpenShared?: () => void; onOpenNotification?: (notification: AppNotification) => void }) {
   const [open, setOpen] = useState(false);
-  if (!api) return null;
+  if (!api) return (
+    <aside className="notifications">
+      <button type="button" className="bell" onClick={onSignIn} aria-label="Sign in for collaboration">Sign in for collaboration</button>
+    </aside>
+  );
   const { state, markRead, clearAll } = api;
   const latest = state.notifications.find((n) => !n.read);
   const openNotification = (notification: AppNotification) => {
