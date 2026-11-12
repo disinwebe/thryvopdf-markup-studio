@@ -117,7 +117,7 @@ To close a document, choose the **X** on its tab or **File > Close Document**. S
    - **Angle:** click three points to finish.
    - **Stamp**, **Image**, and **Note:** click to place. For Image, choose a PNG or JPEG file; the image is added as a review markup and opens the comment dialog.
 3. For a Text box, edit the displayed text in the properties panel.
-4. To choose another color, width, or opacity, set it in the toolbar before drawing or select the markup and change its properties in the right panel.
+4. To choose another color, width, or opacity, set it in the toolbar before drawing or select the markup and change its properties in the right panel. Color controls include a **Standard** palette as well as custom colors.
 5. After placing a review markup, the **Add comment** dialog appears. Enter a comment and choose **Add comment**; press **Enter** to submit or **Shift+Enter** for a new line. **Cancel** leaves the markup without a comment.
 
 Line and Stamp markups do not open the comment dialog. To add a comment later, select a review markup and use **Add a comment / reply** in the right panel.
@@ -169,6 +169,16 @@ Supported stamp sources include common image formats and PDF files up to 20 MB. 
 4. Select the image to move or resize it. Its aspect ratio is preserved.
 
 The image is embedded in the markup and saved into the PDF, so the annotation does not depend on the original image file. Image markups can also be shared in shared documents.
+
+### Watermarks
+
+1. Choose **Watermark** in the content toolbar and select **Text**, **Image**, or **PDF page**.
+2. Enter the text or choose a source file. For a multi-page PDF source, choose the page to use as the watermark.
+3. Enter pages as individual page numbers or ranges, such as `1-3, 5`. Leave the page range covering the document to apply it to every page.
+4. Set the starting opacity, rotation, and (for text) color, then choose **Add watermark**.
+5. Open **Watermarks** in the right panel to use the **Watermarks Manager**. Select a watermark there to edit its text, color, opacity, and rotation, replace its image/PDF source, or delete it from all pages where it was placed. Choose **Select on page to resize**, then drag its page handles.
+
+Watermarks are embedded in the document and remain editable markups until flattened. Image and PDF sources are converted to bounded PNG images when imported. Standard color swatches are available in the color controls.
 
 ### Cloud arc size
 

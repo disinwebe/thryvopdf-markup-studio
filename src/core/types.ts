@@ -64,6 +64,11 @@ export interface Markup {
   text?: string;
   fontSize?: number;
   stamp?: string;
+  watermark?: boolean;
+  watermarkKind?: 'text' | 'image' | 'pdf';
+  watermarkId?: string;
+  watermarkName?: string;
+  rotation?: number;
   zOrder?: number;
   /** Embedded PNG, independent of the source file path. */
   stampImage?: import('./stamp').StampImage;

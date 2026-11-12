@@ -141,6 +141,22 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 .auth-card input, .auth-card select { padding: 6px 8px; font-size: 13px; }
 button.link { background: none; border: 0; color: var(--acc); }
 .toolbar-content-controls { display: inline-flex; align-items: center; gap: 4px; }
+.standard-color-picker { display: inline-flex; align-items: center; gap: 5px; }
+.standard-color-picker details { position: relative; }
+.standard-color-picker summary { cursor: pointer; color: var(--acc); font-size: 11px; user-select: none; }
+.standard-color-swatches { position: fixed; z-index: 100; display: grid; grid-template-columns: repeat(8, 20px); gap: 3px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 4px 12px var(--shadow); }
+.standard-color-swatches button { width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); }
+.standard-color-swatches button.selected { outline: 2px solid var(--acc); outline-offset: 1px; }
+.watermark-dialog > label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.watermark-dialog textarea { width: 100%; }
+.watermarks-manager h3 { margin: 4px 0 8px; }
+.watermark-item { width: 100%; text-align: left; }
+.watermark-item-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.watermark-properties fieldset { display: flex; flex-direction: column; gap: 8px; border: 0; padding: 0; margin: 8px 0; min-width: 0; }
+.watermark-properties fieldset > label { display: flex; flex-direction: column; gap: 4px; }
+.watermark-properties fieldset > label.inline-check { flex-direction: row; align-items: center; }
+.watermark-properties textarea { width: 100%; }
+.watermark-properties input[type=number] { width: 100%; }
 .toolbar-content-controls input[aria-label="PDF text to place"] { width: 150px; }
 .toolbar-content-controls input[type="number"] { width: 58px; }
 .signature-manager { width: min(620px, 95vw); }

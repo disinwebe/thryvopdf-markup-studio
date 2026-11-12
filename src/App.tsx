@@ -47,6 +47,10 @@ import { canEditComment } from './core/comments';
 import { EditCommentsPopup } from './components/EditCommentsPopup';
 import { ActionIcon, type ActionIconName } from './components/ActionIcon';
 import { MovableToolbar, toolbarDockReservations, type ToolbarLayout } from './components/MovableToolbar';
+import { StandardColorPicker } from './components/StandardColorPicker';
+import { parseWatermarkPages } from './core/watermarks';
+import { WatermarksManager } from './components/WatermarksManager';
+import { groupWatermarks } from './core/watermarks';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'image', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
@@ -66,7 +70,7 @@ const TOOL_HINT: Partial<Record<Tool, string>> = {
 };
 const HISTORY_LIMIT = 100;
 
-type RightTab = 'markups' | 'measure' | 'organize' | 'sheets' | 'search';
+type RightTab = 'markups' | 'measure' | 'watermarks' | 'organize' | 'sheets' | 'search';
 type LeftTab = 'pages' | 'bookmarks' | 'project';
 type ViewerContextMenu = { x: number; y: number; markupId: string | null; calloutId: string | null; pageObjectId: string | null; stackId: string | null; point: Pt; calloutOnly: boolean };
 
@@ -125,6 +129,14 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [signatureId, setSignatureId] = useState<string | null>(signatureStore.items[0]?.id ?? null);
   const [removeSignatureBackground, setRemoveSignatureBackground] = useState(false);
   const [signatureManagerOpen, setSignatureManagerOpen] = useState(false);
+  const [watermarkDialogOpen, setWatermarkDialogOpen] = useState(false);
+  const [watermarkKind, setWatermarkKind] = useState<'text' | 'image' | 'pdf'>('text');
+  const [watermarkText, setWatermarkText] = useState('CONFIDENTIAL');
+  const [watermarkPages, setWatermarkPages] = useState('');
+  const [watermarkColor, setWatermarkColor] = useState('#c00000');
+  const [watermarkOpacity, setWatermarkOpacity] = useState(0.25);
+  const [watermarkRotation, setWatermarkRotation] = useState(-45);
+  const [watermarkFile, setWatermarkFile] = useState<PickedFile | null>(null);
   const [selectedMarkupIds, setSelectedMarkupIds] = useState<string[]>([]);
   const [selectedCalloutIds, setSelectedCalloutIds] = useState<string[]>([]);
   const [selectedPageObjectIds, setSelectedPageObjectIds] = useState<string[]>([]);
@@ -350,7 +362,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
 
   const updateMarkup = (id: string, patch: Partial<Markup>, key?: string) =>
-    !viewOnly && active && commit(active.id, active.markups.map((m) => (m.id === id ? { ...m, ...patch } : m)), key);
+    !viewOnly && active && (() => {
+      const target = active.markups.find((markup) => markup.id === id);
+      const watermarkId = target?.watermarkId;
+      return commit(active.id, active.markups.map((markup) =>
+        markup.id === id || (!!watermarkId && markup.watermarkId === watermarkId) ? { ...markup, ...patch } : markup), key);
+    })();
 
   const closeCommentPopup = () => {
     setCommentTarget(null);
@@ -389,12 +406,102 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const deleteMarkup = (id: string) => {
     if (!active || viewOnly) return;
     const target = active.markups.find((m) => m.id === id);
-    if (target && !canDeleteMarkup(target, user)) {
+    const targets = target?.watermarkId
+      ? active.markups.filter((markup) => markup.watermarkId === target.watermarkId)
+      : target ? [target] : [];
+    if (targets.some((markup) => !canDeleteMarkup(markup, user))) {
       window.alert('Only the author of a markup can delete it.');
       return;
     }
-    commit(active.id, active.markups.filter((m) => m.id !== id));
+    const ids = new Set(targets.map((markup) => markup.id));
+    commit(active.id, active.markups.filter((m) => !ids.has(m.id)));
     updateSelection([], []);
+  };
+
+  const openWatermarkDialog = () => {
+    if (!active || readOnly) return;
+    setWatermarkPages(`1-${active.numPages}`);
+    setWatermarkFile(null);
+    setWatermarkDialogOpen(true);
+  };
+  const chooseWatermarkFile = async () => {
+    if (!window.api) {
+      window.alert('File import is unavailable.');
+      return;
+    }
+    try {
+      const filters = watermarkKind === 'pdf'
+        ? [{ name: 'PDF documents', extensions: ['pdf'] }]
+        : [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }];
+      const [file] = await window.api.openFiles({ multi: false, filters });
+      if (file) setWatermarkFile(file);
+    } catch (error) {
+      window.alert(`Could not choose watermark source: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const addWatermark = async () => {
+    if (!active || readOnly) return;
+    const doc = active;
+    try {
+      const pages = parseWatermarkPages(watermarkPages, doc.numPages);
+      if (watermarkKind === 'text' && !watermarkText.trim()) throw new Error('Enter watermark text.');
+      if (watermarkKind !== 'text' && !watermarkFile) throw new Error('Choose an image or PDF source.');
+      const image = watermarkKind === 'text' ? undefined : await importStamp(watermarkFile!, (total) => {
+        const answer = window.prompt(`Choose a PDF page from 1 to ${total}:`, '1');
+        return answer === null ? null : Number(answer);
+      });
+      if (watermarkKind !== 'text' && !image) return;
+      if (active?.id !== doc.id) return;
+      const watermarkId = uid();
+      const markups: Markup[] = [];
+      for (const pageIndex of pages) {
+        const page = await doc.pdf.getPage(pageIndex + 1);
+        const viewport = page.getViewport({ scale: 1 });
+        const maxWidth = viewport.width * 0.78;
+        const maxHeight = viewport.height * (watermarkKind === 'text' ? 0.18 : 0.4);
+        const fontSize = Math.max(12, Math.min(viewport.height * 0.14, maxWidth / Math.max(1, watermarkText.trim().length * 0.62)));
+        const width = watermarkKind === 'text'
+          ? Math.min(maxWidth, Math.max(fontSize * 2, watermarkText.trim().length * fontSize * 0.62))
+          : Math.min(maxWidth, maxHeight * (image!.width / image!.height));
+        const height = watermarkKind === 'text' ? Math.min(maxHeight, fontSize * 1.5) : width / (image!.width / image!.height);
+        const extra: Partial<Markup> = {
+          watermark: true,
+          watermarkKind,
+          watermarkId,
+          watermarkName: watermarkKind === 'text' ? watermarkText.trim() : watermarkFile!.name,
+          rotation: watermarkRotation,
+          opacity: watermarkOpacity,
+          ...(image ? { image, imageLockAspectRatio: true } : { stamp: watermarkText.trim(), fontSize }),
+        };
+        markups.push(makeMarkup(
+          watermarkKind === 'text' ? 'stamp' : 'image',
+          pageIndex,
+          [
+            { x: (viewport.width - width) / 2, y: (viewport.height - height) / 2 },
+            { x: (viewport.width + width) / 2, y: (viewport.height + height) / 2 },
+          ],
+          {
+            ...defaultStyle(watermarkKind === 'text' ? 'stamp' : 'image'),
+            color: watermarkColor,
+            opacity: watermarkOpacity,
+            ...(watermarkKind === 'text' ? { stamp: watermarkText.trim(), fontSize } : {}),
+          },
+          author,
+          extra,
+        ));
+      }
+      if (active?.id !== doc.id) return;
+      commit(doc.id, [...doc.markups, ...markups.map((markup) => ({ ...markup, authorEmail: user.email }))]);
+      const selectedMarkup = markups.find((markup) => markup.page === doc.page) ?? markups[0];
+      updateSelection([selectedMarkup.id], []);
+      setTool('select');
+      setWatermarkDialogOpen(false);
+      setRightTab('watermarks');
+      setRightPanelVisible(true);
+      say(`Watermark added to ${pages.length} page${pages.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      window.alert(`Could not add watermark: ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   const contextSelectionIds = () => {
@@ -980,6 +1087,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
       if (selectedMarkupIds.length || selectedPageObjectIds.length) deleteSelection();
     } else if (e.key === 'Escape') {
+      if (watermarkDialogOpen) setWatermarkDialogOpen(false);
       setTool('select');
       setPending(null);
       setContentMode(null);
@@ -1078,7 +1186,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       canUngroupSelected: canUngroupSelected(),
       canFlattenSelected: !viewOnly && !!active && !active.shared && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
       canFlattenAll: !viewOnly && !!active && !active.shared && active.markups.some((markup) => canDeleteMarkup(markup, user)),
-      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || !!licenseInfo, viewOnly,
+      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || watermarkDialogOpen || !!licenseInfo, viewOnly,
       toolbars: {
         file: toolbarLayouts.file?.visible ?? true,
         content: toolbarLayouts.content?.visible ?? true,
@@ -1086,7 +1194,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         measure: toolbarLayouts.measure?.visible ?? true,
       },
     });
-  }, [active, selectedId, selectedMarkupIds, selectedPageObjectIds, user, view, actions.serverMode, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, licenseInfo, toolbarLayouts]);
+  }, [active, selectedId, selectedMarkupIds, selectedPageObjectIds, user, view, actions.serverMode, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, watermarkDialogOpen, licenseInfo, toolbarLayouts]);
   useEffect(() => () => window.api?.setMenuState({
     signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, canFlattenSelected: false, canFlattenAll: false, serverMode: false, blocked: false, viewOnly: false,
   }), []);
@@ -1178,7 +1286,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     }
   };
 
-  const countOf = useMemo(() => active?.markups.filter((markup) => !isMeasure(markup.type)).length ?? 0, [active?.markups]);
+  const countOf = useMemo(() => active?.markups.filter((markup) => !isMeasure(markup.type) && !markup.watermark).length ?? 0, [active?.markups]);
+  const watermarkCount = useMemo(() => groupWatermarks(active?.markups ?? []).length, [active?.markups]);
   const measurementCount = useMemo(() => active?.markups.filter((markup) => isMeasure(markup.type)).length ?? 0, [active?.markups]);
   const contextMarkup = contextMenu && active?.markups.find((markup) => markup.id === contextMenu.markupId && markup.page === active.page);
   const contextStackable = !!contextMenu?.stackId;
@@ -1225,10 +1334,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <button className={contentMode === 'text' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'text' ? null : 'text'); }} disabled={!active || readOnly || !!active.shared} title="Text: click the page to add editable PDF text"><ActionIcon name="text" className="tool-icon" /><span className="toolbar-command-label">Text</span></button>
             <button className={contentMode === 'symbol' ? 'on' : ''} onClick={() => { setTool('select'); setContentMode(contentMode === 'symbol' ? null : 'symbol'); }} disabled={!active || readOnly || !!active.shared} title="Symbol: place a flattened symbol"><ActionIcon name="symbol" className="tool-icon" /><span className="toolbar-command-label">Symbol</span></button>
             <button className={contentMode === 'signature' ? 'on' : ''} onClick={() => setSignatureManagerOpen(true)} disabled={!active || readOnly || !!active.shared} title="Signatures: manage and place transparent PNG signatures"><ActionIcon name="signature" className="tool-icon" /><span className="toolbar-command-label">Signatures</span></button>
+            <button onClick={openWatermarkDialog} disabled={!active || readOnly} title="Add and manage text, image, or PDF watermarks"><ActionIcon name="stamp" className="tool-icon" /><span className="toolbar-command-label">Watermark</span></button>
             {contentMode === 'text' && (
               <span className="toolbar-content-controls">
                 <input aria-label="PDF text size" type="number" min={6} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(6, Math.min(96, +e.target.value || 24)))} />
-                <input aria-label="PDF text color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+                <StandardColorPicker ariaLabel="PDF text color" value={contentColor} onChange={setContentColor} />
                 <span className="muted small">Click page, then type</span>
               </span>
             )}
@@ -1238,7 +1348,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   {SYMBOLS.map((symbol) => <option key={symbol.value} value={symbol.value}>{symbol.glyph} {symbol.label}</option>)}
                 </select>
                 <input aria-label="Symbol size" type="number" min={12} max={96} value={contentSize} onChange={(e) => setContentSize(Math.max(12, Math.min(96, +e.target.value || 24)))} />
-                <input aria-label="Symbol color" type="color" value={contentColor} onChange={(e) => setContentColor(e.target.value)} />
+                <StandardColorPicker ariaLabel="Symbol color" value={contentColor} onChange={setContentColor} />
                 <span className="muted small">Click page to place</span>
               </span>
             )}
@@ -1364,7 +1474,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 onSelectionChange={(markupIds, pageObjectIds, calloutIds) => {
                   updateSelection(markupIds, pageObjectIds, calloutIds);
                   const selectedMarkup = active.markups.find((markup) => markup.id === markupIds[markupIds.length - 1]);
-                  if (selectedMarkup) setRightTab(isMeasure(selectedMarkup.type) ? 'measure' : 'markups');
+                  if (selectedMarkup) setRightTab(selectedMarkup.watermark ? 'watermarks' : isMeasure(selectedMarkup.type) ? 'measure' : 'markups');
                 }}
                 onPageObjectsChange={updatePageObjects}
                 onEditPageObject={editPageObject}
@@ -1420,6 +1530,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <div className="side right" id="right-panel" hidden={!rightPanelVisible}>
               <div className="ptabs">
                 <button className={rightTab === 'markups' ? 'on' : ''} onClick={() => setRightTab('markups')}>Markups ({countOf})</button>
+                <button className={rightTab === 'watermarks' ? 'on' : ''} onClick={() => setRightTab('watermarks')}>Watermarks ({watermarkCount})</button>
                 <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')}>Measurements ({measurementCount})</button>
               </div>
               {rightTab === 'markups' && (
@@ -1490,8 +1601,32 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   />
                 </div>
               )}
+              {rightTab === 'watermarks' && (
+                <WatermarksManager
+                  doc={active}
+                  user={user}
+                  readOnly={readOnly}
+                  selectedId={selectedId}
+                  onSelect={(id) => {
+                    const markup = active.markups.find((item) => item.id === id);
+                    if (!markup) return;
+                    setTool('select');
+                    setRightTab('watermarks');
+                    setRightPanelVisible(true);
+                    if (markup.page === active.page) {
+                      pendingMarkupSelection.current = null;
+                      updateSelection([id], []);
+                    } else {
+                      pendingMarkupSelection.current = { docId: active.id, markupId: id };
+                      goto(markup.page);
+                    }
+                  }}
+                  onUpdate={updateMarkup}
+                  onDelete={deleteMarkup}
+                />
+              )}
             </div>
-            {rightTab !== 'markups' && rightTab !== 'measure' && (
+            {rightTab !== 'markups' && rightTab !== 'measure' && rightTab !== 'watermarks' && (
               <div className="modal" role="dialog" aria-modal="true" aria-label="Document tools">
                 <div className="usermgmt tool-dialog">
                   <div className="row between"><b>{rightTab === 'organize' ? 'Organize pages' : rightTab === 'sheets' ? 'Sheet index' : 'Search documents'}</b><button onClick={() => setRightTab('markups')}>Close</button></div>
@@ -1662,6 +1797,49 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           </div>
         </div>
       )}
+      {watermarkDialogOpen && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Add watermark">
+          <div className="usermgmt tool-dialog watermark-dialog">
+            <div className="row between"><b>Add watermark</b><button onClick={() => setWatermarkDialogOpen(false)}>Close</button></div>
+            <p className="muted">Watermarks are editable markups. Resize with the page handles; edit, replace, or delete them in the Watermarks Manager.</p>
+            <label>
+              Watermark type
+              <select value={watermarkKind} onChange={(event) => { setWatermarkKind(event.target.value as 'text' | 'image' | 'pdf'); setWatermarkFile(null); }}>
+                <option value="text">Text</option>
+                <option value="image">Image</option>
+                <option value="pdf">PDF page</option>
+              </select>
+            </label>
+            {watermarkKind === 'text' ? (
+              <>
+                <label>Text<textarea rows={2} value={watermarkText} onChange={(event) => setWatermarkText(event.target.value)} /></label>
+                <label>Text color<StandardColorPicker value={watermarkColor} onChange={setWatermarkColor} /></label>
+              </>
+            ) : (
+              <div className="row">
+                <button onClick={() => void chooseWatermarkFile()}>{watermarkFile ? 'Choose another source...' : `Choose ${watermarkKind === 'pdf' ? 'PDF' : 'image'}...`}</button>
+                <span className="muted">{watermarkFile?.name ?? 'No source selected'}</span>
+              </div>
+            )}
+            <label>
+              Apply to pages
+              <input aria-label="Watermark pages" value={watermarkPages} onChange={(event) => setWatermarkPages(event.target.value)} placeholder="1-3, 5" />
+            </label>
+            <label>
+              Opacity ({Math.round(watermarkOpacity * 100)}%)
+              <input type="range" min={0.05} max={1} step={0.05} value={watermarkOpacity} onChange={(event) => setWatermarkOpacity(+event.target.value)} />
+            </label>
+            <label>
+              Rotation ({watermarkRotation}°)
+              <input type="range" min={-180} max={180} step={1} value={watermarkRotation} onChange={(event) => setWatermarkRotation(+event.target.value)} />
+            </label>
+            <div className="row">
+              <button className="primary" onClick={() => void addWatermark()}>Add watermark</button>
+              <button onClick={() => setWatermarkDialogOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
       {defaultsOpen && (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Tool defaults">
           <div className="usermgmt tool-dialog">
@@ -1669,7 +1847,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <p>Select a markup tool to set defaults, or select an existing markup to change its properties.</p>
             {!editingSelected && (tool === 'select' || tool === 'hand') ? <p>Choose a markup tool first.</p> : (
               <div className="props">
-                <label>Color<input type="color" value={shown.color} onChange={(e) => changeStyle({ color: e.target.value })} /></label>
+                <label>Color<StandardColorPicker value={shown.color} onChange={(color) => changeStyle({ color })} /></label>
                 <label>Line width<input type="range" min={1} max={12} value={shown.width} onChange={(e) => changeStyle({ width: +e.target.value })} /></label>
                 <label>Opacity<input type="range" min={0.1} max={1} step={0.05} value={shown.opacity} onChange={(e) => changeStyle({ opacity: +e.target.value })} /></label>
                 <label>Fill<input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} /></label>
