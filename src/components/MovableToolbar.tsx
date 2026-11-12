@@ -1,21 +1,94 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 type Position = { x: number; y: number };
 export type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 type ToolbarSide = 'top' | 'right' | 'bottom' | 'left';
 type Edge = 'top' | 'right' | 'bottom' | 'left';
 type AttachedTo = { id: string; side: ToolbarSide };
-type SavedState = { visible: boolean; locked: boolean; position: Position | null; width: number | null; height: number | null; edge: Edge | null; corner: Corner | null; attachedTo: AttachedTo | null };
+export type SavedToolbarState = { visible: boolean; locked: boolean; position: Position | null; width: number | null; height: number | null; edge: Edge | null; corner: Corner | null; attachedTo: AttachedTo | null };
 type BoundsRef = { current: HTMLDivElement | null };
+export type ToolbarOrientation = 'horizontal' | 'icons';
 export type ToolbarLayout = { id: string; edge: Edge | null; corner: Corner | null; attachedTo: AttachedTo | null; position: Position; width: number; height: number; visible: boolean; moved: boolean };
 export type ToolbarReservations = { top: number; bottom: number; left: number; right: number };
+export type ToolbarDockPreview = { position: Position; attachedTo: AttachedTo | null; corner: Corner | null; edge: Edge | null };
 
 const storageKey = (id: string) => `thryvopdf-toolbar-group-${id}-v1`;
 
-function loadState(id: string): SavedState {
+export function directlyAttachedToolbarIds(layouts: ToolbarLayout[], id: string): string[] {
+  return layouts.filter((layout) => layout.attachedTo?.id === id).map((layout) => layout.id);
+}
+
+export function toolbarSavedDimensions(
+  state: Pick<SavedToolbarState, 'width' | 'height'>,
+  docked: boolean,
+): Pick<SavedToolbarState, 'width' | 'height'> {
+  return docked ? { width: null, height: null } : state;
+}
+
+function orientationForAnchoredLayout(layout: ToolbarLayout, layouts: ToolbarLayout[]): ToolbarOrientation | null {
+  let current: ToolbarLayout | undefined = layout;
+  let terminal: ToolbarLayout | undefined;
+  const visited = new Set<string>();
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    if (current.edge === 'left' || current.edge === 'right') return 'icons';
+    if (current.edge === 'top' || current.edge === 'bottom') return 'horizontal';
+    if (current.corner) return current.corner.endsWith('right') ? 'icons' : 'horizontal';
+    terminal = current;
+    current = current.attachedTo
+      ? layouts.find((candidate) => candidate.id === current?.attachedTo?.id)
+      : undefined;
+  }
+  if (terminal && terminal.width > 0 && terminal.height > 0) {
+    return terminal.width >= terminal.height ? 'horizontal' : 'icons';
+  }
+  return null;
+}
+
+export function toolbarOrientationForTarget(
+  target: Pick<ToolbarDockPreview, 'edge' | 'corner' | 'attachedTo'> | null,
+  layouts: ToolbarLayout[] = [],
+): ToolbarOrientation {
+  if (target?.edge === 'left' || target?.edge === 'right') return 'icons';
+  if (target?.edge === 'top' || target?.edge === 'bottom') return 'horizontal';
+  if (target?.corner) return target.corner.endsWith('right') ? 'icons' : 'horizontal';
+  if (target?.attachedTo) {
+    const attachedLayout = layouts.find((layout) => layout.id === target.attachedTo?.id);
+    const inherited = attachedLayout ? orientationForAnchoredLayout(attachedLayout, layouts) : null;
+    if (inherited) return inherited;
+    return target.attachedTo.side === 'left' || target.attachedTo.side === 'right' ? 'icons' : 'horizontal';
+  }
+  return 'horizontal';
+}
+
+export function toolbarOrientation(
+  preview: ToolbarDockPreview | null,
+  state: { edge: Edge | null; corner: Corner | null; attachedTo: AttachedTo | null; height: number | null },
+  dragging: boolean,
+  layouts: ToolbarLayout[] = [],
+): ToolbarOrientation {
+  if (preview) return toolbarOrientationForTarget(preview, layouts);
+  const savedOrientation = toolbarOrientationForTarget(state, layouts);
+  if (savedOrientation !== 'horizontal') return savedOrientation;
+  return !dragging && !state.edge && !state.corner && !state.attachedTo && state.height !== null && state.height > 72
+    ? 'icons'
+    : 'horizontal';
+}
+
+export function toolbarUsesIconMode(
+  preview: ToolbarDockPreview | null,
+  state: { edge: Edge | null; corner: Corner | null; attachedTo: AttachedTo | null; height: number | null },
+  dragging: boolean,
+  layouts: ToolbarLayout[] = [],
+): boolean {
+  return toolbarOrientation(preview, state, dragging, layouts) === 'icons';
+}
+
+export function loadToolbarState(id: string, storage: Pick<Storage, 'getItem'> = localStorage): SavedToolbarState {
   try {
-    const raw: unknown = JSON.parse(localStorage.getItem(storageKey(id)) || 'null');
+    const raw: unknown = JSON.parse(storage.getItem(storageKey(id)) || 'null');
     if (raw && typeof raw === 'object' && 'visible' in raw && typeof raw.visible === 'boolean') {
       const position = 'position' in raw && raw.position && typeof raw.position === 'object' &&
         'x' in raw.position && 'y' in raw.position &&
@@ -47,6 +120,10 @@ function loadState(id: string): SavedState {
     }
   } catch { /* use the default toolbar layout */ }
   return { visible: true, locked: false, position: null, width: null, height: null, edge: null, corner: null, attachedTo: null };
+}
+
+export function saveToolbarState(id: string, state: SavedToolbarState, storage: Pick<Storage, 'setItem'> = localStorage): void {
+  try { storage.setItem(storageKey(id), JSON.stringify(state)); } catch { /* preference is session-only when storage is unavailable */ }
 }
 
 export function toolbarDockReservations(layouts: ToolbarLayout[], appWidth: number, appHeight: number, topBaseHeight: number): ToolbarReservations {
@@ -128,31 +205,48 @@ export function attachedToolbarPosition(target: ToolbarLayout, side: ToolbarSide
   return { x: target.position.x + (target.width - width) / 2, y: target.position.y + target.height };
 }
 
-export function snapToToolbar(position: Position, width: number, height: number, layouts: ToolbarLayout[], selfId: string): { position: Position; attachedTo: AttachedTo } | null {
-  const candidates: { distance: number; position: Position; attachedTo: AttachedTo }[] = [];
-  for (const target of layouts) {
-    if (!target.visible || target.id === selfId) continue;
+function overlapsToolbar(position: Position, width: number, height: number, target: ToolbarLayout): boolean {
+  return position.x < target.position.x + target.width &&
+    position.x + width > target.position.x &&
+    position.y < target.position.y + target.height &&
+    position.y + height > target.position.y;
+}
+
+export function snapToToolbar(position: Position, width: number, height: number, layouts: ToolbarLayout[], selfId: string, maxX = Infinity, maxY = Infinity): { position: Position; attachedTo: AttachedTo } | null {
+  const targets = layouts.filter((target) => target.visible && target.id !== selfId);
+  const eligible = targets.filter((target) => {
     let ancestor: string | undefined = target.id;
-    let cyclic = false;
     const visited = new Set<string>();
     while (ancestor) {
-      if (ancestor === selfId || visited.has(ancestor)) {
-        cyclic = true;
-        break;
-      }
+      if (ancestor === selfId || visited.has(ancestor)) return false;
       visited.add(ancestor);
       ancestor = layouts.find((layout) => layout.id === ancestor)?.attachedTo?.id;
     }
-    if (cyclic) continue;
+    return true;
+  });
+  const overlappingTargets = eligible.filter((target) => overlapsToolbar(position, width, height, target));
+  const consideredTargets = overlappingTargets.length ? overlappingTargets : eligible;
+  const candidates: { distance: number; position: Position; attachedTo: AttachedTo }[] = [];
+  for (const target of consideredTargets) {
     for (const side of ['left', 'right', 'top', 'bottom'] as const) {
-      const candidate = attachedToolbarPosition(target, side, width, height);
+      const rawPosition = attachedToolbarPosition(target, side, width, height);
+      const candidate = {
+        x: Math.max(0, Math.min(maxX, rawPosition.x)),
+        y: Math.max(0, Math.min(maxY, rawPosition.y)),
+      };
+      if (overlappingTargets.length && overlapsToolbar(candidate, width, height, target)) continue;
       const dx = candidate.x - position.x;
       const dy = candidate.y - position.y;
       const distance = Math.hypot(dx, dy);
-      if (distance <= 30) candidates.push({ distance, position: candidate, attachedTo: { id: target.id, side } });
+      if (overlappingTargets.length || distance <= 30) {
+        candidates.push({ distance, position: candidate, attachedTo: { id: target.id, side } });
+      }
     }
   }
-  const nearest = candidates.sort((a, b) => a.distance - b.distance)[0];
+  const clearCandidates = overlappingTargets.length
+    ? candidates.filter((candidate) => !eligible.some((target) => overlapsToolbar(candidate.position, width, height, target)))
+    : candidates;
+  const nearest = (clearCandidates.length ? clearCandidates : candidates).sort((a, b) => a.distance - b.distance)[0];
   return nearest ? { position: nearest.position, attachedTo: nearest.attachedTo } : null;
 }
 
@@ -197,6 +291,43 @@ export function snapDockPosition(position: Position, maxX: number, maxY: number)
   return nearestEdge.distance <= 28 ? nearestEdge.position : null;
 }
 
+export function toolbarDockPreview(position: Position, width: number, height: number, layouts: ToolbarLayout[], selfId: string, maxX: number, maxY: number): ToolbarDockPreview | null {
+  const clamp = (target: Position): Position => ({
+    x: Math.max(0, Math.min(maxX, target.x)),
+    y: Math.max(0, Math.min(maxY, target.y)),
+  });
+  const attached = snapToToolbar(position, width, height, layouts, selfId, maxX, maxY);
+  if (attached) return { position: clamp(attached.position), attachedTo: attached.attachedTo, corner: null, edge: null };
+  const snapped = snapDockPosition(position, maxX, maxY);
+  if (!snapped) return null;
+  const target = clamp(snapped);
+  const corner = cornerForPosition(target, maxX, maxY);
+  return { position: target, attachedTo: null, corner, edge: corner ? null : edgeForPosition(target, maxX, maxY) };
+}
+
+export function repositionDockPreview(preview: ToolbarDockPreview, pointerPosition: Position, width: number, height: number, layouts: ToolbarLayout[], maxX: number, maxY: number): ToolbarDockPreview | null {
+  const clamp = (position: Position): Position => ({
+    x: Math.max(0, Math.min(maxX, position.x)),
+    y: Math.max(0, Math.min(maxY, position.y)),
+  });
+  let position = clamp(pointerPosition);
+  if (preview.edge === 'left') position.x = 0;
+  else if (preview.edge === 'right') position.x = maxX;
+  else if (preview.edge === 'top') position.y = 0;
+  else if (preview.edge === 'bottom') position.y = maxY;
+  else if (preview.corner) {
+    position = {
+      x: preview.corner.endsWith('right') ? maxX : 0,
+      y: preview.corner.startsWith('bottom') ? maxY : 0,
+    };
+  } else if (preview.attachedTo) {
+    const target = layouts.find((layout) => layout.id === preview.attachedTo?.id && layout.visible);
+    if (!target) return null;
+    position = clamp(attachedToolbarPosition(target, preview.attachedTo.side, width, height));
+  }
+  return { ...preview, position };
+}
+
 export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayoutChange }: {
   id: string;
   label: string;
@@ -205,12 +336,20 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
   layouts: ToolbarLayout[];
   onLayoutChange(id: string, layout: ToolbarLayout | null): void;
 }) {
-  const [saved, setSaved] = useState(() => loadState(id));
+  const [saved, setSaved] = useState(() => loadToolbarState(id));
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [dockPreview, setDockPreview] = useState<ToolbarDockPreview | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const measuredWidth = useRef<number | null>(null);
   const measuredHeight = useRef<number | null>(null);
-  const drag = useRef<{ pointerId: number; offsetX: number; offsetY: number; position: Position } | null>(null);
+  const drag = useRef<{ pointerId: number; offsetX: number; offsetY: number; pointerX: number; pointerY: number; position: Position; detached: boolean } | null>(null);
+  const orientation = toolbarOrientation(dockPreview, saved, drag.current !== null, layouts);
+  const sideDocked = orientation === 'icons';
+  const docked = saved.edge !== null || saved.corner !== null || saved.attachedTo !== null;
+  const displayDimensions = toolbarSavedDimensions(saved, docked);
+  const autoOrientationRef = useRef(orientation !== 'horizontal');
+  autoOrientationRef.current = orientation !== 'horizontal';
+  const iconOnly = toolbarUsesIconMode(dockPreview, saved, drag.current !== null, layouts);
 
   useEffect(() => {
     onLayoutChange(id, {
@@ -234,7 +373,7 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
   useEffect(() => () => onLayoutChange(id, null), [id, onLayoutChange]);
 
   useEffect(() => {
-    try { localStorage.setItem(storageKey(id), JSON.stringify(saved)); } catch { /* preference is session-only when storage is unavailable */ }
+    saveToolbarState(id, saved);
   }, [id, saved]);
 
   useEffect(() => {
@@ -243,8 +382,17 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
       if (!detail || detail.id !== id || typeof detail.visible !== 'boolean') return;
       setSaved((current) => current.visible === detail.visible ? current : { ...current, visible: detail.visible });
     };
+    const onToolbarDetach = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string }>).detail;
+      if (!detail || detail.id !== id) return;
+      setSaved((current) => current.attachedTo ? { ...current, attachedTo: null } : current);
+    };
     window.addEventListener('toolbar-visibility', onToolbarVisibility);
-    return () => window.removeEventListener('toolbar-visibility', onToolbarVisibility);
+    window.addEventListener('toolbar-detach-request', onToolbarDetach);
+    return () => {
+      window.removeEventListener('toolbar-visibility', onToolbarVisibility);
+      window.removeEventListener('toolbar-detach-request', onToolbarDetach);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -283,10 +431,10 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
               ? maxY
               : Math.max(0, Math.min(maxY, current.position.y)),
           };
-        const nextWidth = previousWidth !== null && previousWidth !== width
+        const nextWidth = !autoOrientationRef.current && previousWidth !== null && previousWidth !== width
           ? width
           : current.width;
-        const nextHeight = previousHeight !== null && previousHeight !== height
+        const nextHeight = !autoOrientationRef.current && previousHeight !== null && previousHeight !== height
           ? height
           : current.height;
         if ((!nextPosition || (nextPosition.x === current.position?.x && nextPosition.y === current.position?.y)) &&
@@ -317,6 +465,37 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
     }
   }, [layouts, saved.attachedTo, saved.position, size.height, size.width]);
 
+  useEffect(() => {
+    const active = drag.current;
+    const bounds = boundsRef.current;
+    if (!active || !bounds || !dockPreview) return;
+    const rect = bounds.getBoundingClientRect();
+    const maxX = Math.max(0, bounds.clientWidth - size.width);
+    const maxY = Math.max(0, bounds.clientHeight - size.height);
+    const pointerPosition = clampPosition({
+      x: active.pointerX - rect.left - active.offsetX,
+      y: active.pointerY - rect.top - active.offsetY,
+    });
+    const adjustedPreview = repositionDockPreview(dockPreview, pointerPosition, size.width, size.height, layouts, maxX, maxY);
+    if (!adjustedPreview) {
+      setDockPreview(null);
+      return;
+    }
+    const position = adjustedPreview.position;
+    active.position = position;
+    setSaved((current) => current.position?.x === position.x && current.position?.y === position.y
+      ? current
+      : { ...current, position });
+    setDockPreview((current) => current?.position.x === adjustedPreview.position.x &&
+      current?.position.y === adjustedPreview.position.y &&
+      current?.edge === adjustedPreview.edge &&
+      current?.corner === adjustedPreview.corner &&
+      current?.attachedTo?.id === adjustedPreview.attachedTo?.id &&
+      current?.attachedTo?.side === adjustedPreview.attachedTo?.side
+      ? current
+      : adjustedPreview);
+  }, [boundsRef, dockPreview?.corner, dockPreview?.edge, dockPreview?.attachedTo?.id, dockPreview?.attachedTo?.side, id, layouts, size.height, size.width]);
+
   const clampPosition = (position: Position): Position => {
     const bounds = boundsRef.current;
     if (!bounds) return position;
@@ -333,13 +512,19 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
     const rect = toolbarRef.current.getBoundingClientRect();
     const boundsRect = boundsRef.current.getBoundingClientRect();
     const position = { x: rect.left - boundsRect.left, y: rect.top - boundsRect.top };
-    drag.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, position };
+    drag.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      position,
+      detached: false,
+    };
+    setDockPreview(null);
     setSaved((current) => ({
       ...current,
       position: current.position ?? position,
-      edge: null,
-      corner: null,
-      attachedTo: null,
     }));
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -353,57 +538,66 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
       x: event.clientX - rect.left - active.offsetX,
       y: event.clientY - rect.top - active.offsetY,
     });
+    active.pointerX = event.clientX;
+    active.pointerY = event.clientY;
     active.position = position;
+    if (!active.detached) {
+      active.detached = true;
+      for (const toolbarId of directlyAttachedToolbarIds(layouts, id)) {
+        window.dispatchEvent(new CustomEvent('toolbar-detach-request', { detail: { id: toolbarId } }));
+      }
+    }
+    setDockPreview(toolbarDockPreview(
+      position,
+      size.width,
+      size.height,
+      layouts,
+      id,
+      Math.max(0, bounds.clientWidth - size.width),
+      Math.max(0, bounds.clientHeight - size.height),
+    ));
     setSaved((current) => ({ ...current, position, edge: null, corner: null, attachedTo: null }));
   };
 
   const endDrag = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointerId !== event.pointerId) return;
-    const position = drag.current.position;
+    const active = drag.current;
+    if (active?.pointerId !== event.pointerId) return;
+    const position = active.position;
     drag.current = null;
+    setDockPreview(null);
     if (saved.locked) return;
     const bounds = boundsRef.current;
     if (!bounds) return;
     const maxX = Math.max(0, bounds.clientWidth - size.width);
     const maxY = Math.max(0, bounds.clientHeight - size.height);
-    const toolbarSnap = snapToToolbar(position, size.width, size.height, layouts, id);
-    if (toolbarSnap) {
+    const preview = toolbarDockPreview(position, size.width, size.height, layouts, id, maxX, maxY);
+    if (preview) {
       setSaved((current) => ({
         ...current,
-        position: clampPosition(toolbarSnap.position),
-        edge: null,
-        corner: null,
-        attachedTo: toolbarSnap.attachedTo,
-      }));
-      return;
-    }
-    const snapped = snapDockPosition(position, maxX, maxY);
-    if (snapped) {
-      const corner = cornerForPosition(snapped, maxX, maxY);
-      setSaved((current) => ({
-        ...current,
-        position: snapped,
-        edge: corner ? null : edgeForPosition(snapped, maxX, maxY),
-        corner,
-        attachedTo: null,
+        position: preview.position,
+        edge: preview.edge,
+        corner: preview.corner,
+        attachedTo: preview.attachedTo,
       }));
     }
   };
 
   const resetDrag = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointerId === event.pointerId) drag.current = null;
+    if (drag.current?.pointerId === event.pointerId) {
+      drag.current = null;
+      setDockPreview(null);
+    }
   };
-  const iconOnly = saved.height !== null && saved.height > 72;
-
   return (
     saved.visible ? (
+      <>
       <div
         ref={toolbarRef}
-        className={`toolbar-group${saved.position ? ' moved' : ''}${iconOnly ? ' toolbar-group-icon-only' : ''}`}
+        className={`toolbar-group${saved.position ? ' moved' : ''}${docked ? ' toolbar-group-docked' : ''}${iconOnly ? ' toolbar-group-icon-only' : ''}${sideDocked ? ' toolbar-group-side-docked' : ''}`}
         style={{
           ...(saved.position ? { left: saved.position.x, top: saved.position.y } : {}),
-          ...(saved.width ? { width: saved.width } : {}),
-          ...(saved.height ? { height: saved.height } : {}),
+          ...(displayDimensions.width ? { width: displayDimensions.width } : {}),
+          ...(displayDimensions.height ? { height: displayDimensions.height } : {}),
         }}
       >
         <div
@@ -436,6 +630,22 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
         </div>
         {children}
       </div>
+      {dockPreview && boundsRef.current ? createPortal(
+        <div
+          className={`toolbar-dock-preview${dockPreview.attachedTo ? ' attached' : ''}`}
+          data-label={dockPreview.attachedTo ? 'Drop to attach' : 'Drop to dock'}
+          data-label-position={dockPreview.position.y < 12 ? 'below' : 'above'}
+          style={{
+            left: dockPreview.position.x,
+            top: dockPreview.position.y,
+            width: size.width,
+            height: size.height,
+          }}
+          aria-hidden="true"
+        />,
+        boundsRef.current,
+      ) : null}
+      </>
     ) : null
   );
 }
