@@ -76,18 +76,33 @@ export function toolbarDockReservations(layouts: ToolbarLayout[], appWidth: numb
     const right = Math.max(...component.map((item) => item.position.x + item.width));
     const top = Math.min(...component.map((item) => item.position.y));
     const bottom = Math.max(...component.map((item) => item.position.y + item.height));
-    const anchorCorner = component.find((item) => item.corner)?.corner;
-    const anchorEdge = component.find((item) => item.edge)?.edge;
-    if (anchorCorner) {
-      if (anchorCorner.startsWith('top')) reservations.top = Math.max(reservations.top, Math.max(0, bottom - topBaseHeight));
-      else reservations.bottom = Math.max(reservations.bottom, Math.max(0, bottom - top));
-      continue;
-    }
-    if (anchorEdge) {
-      if (anchorEdge === 'left') reservations.left = Math.max(reservations.left, Math.max(0, right - left));
-      else if (anchorEdge === 'right') reservations.right = Math.max(reservations.right, Math.max(0, right - left));
-      else if (anchorEdge === 'top') reservations.top = Math.max(reservations.top, Math.max(0, bottom - topBaseHeight));
-      else reservations.bottom = Math.max(reservations.bottom, Math.max(0, bottom - top));
+    const anchors = component.filter((item) => item.edge || item.corner);
+    if (anchors.length) {
+      const byEdge = new Map<Edge, ToolbarLayout[]>();
+      const anchorEdge = anchors.find((item) => item.edge)?.edge;
+      for (const item of component) {
+        let edge = item.edge ?? (item.corner
+          ? item.corner.startsWith('top') ? 'top' : 'bottom'
+          : null);
+        if (!edge && item.attachedTo) {
+          if (item.height > item.width && item.position.x <= 32) edge = 'left';
+          else if (item.height > item.width && appWidth - item.position.x - item.width <= 32) edge = 'right';
+          else if (item.width >= item.height && item.position.y <= topBaseHeight + 32) edge = 'top';
+          else if (item.width >= item.height && appHeight - item.position.y - item.height <= 32) edge = 'bottom';
+          else edge = anchorEdge ?? null;
+        }
+        if (edge) byEdge.set(edge, [...(byEdge.get(edge) ?? []), item]);
+      }
+      for (const [edge, edgeLayouts] of byEdge) {
+        const edgeLeft = Math.min(...edgeLayouts.map((item) => item.position.x));
+        const edgeRight = Math.max(...edgeLayouts.map((item) => item.position.x + item.width));
+        const edgeTop = Math.min(...edgeLayouts.map((item) => item.position.y));
+        const edgeBottom = Math.max(...edgeLayouts.map((item) => item.position.y + item.height));
+        if (edge === 'left') reservations.left = Math.max(reservations.left, edgeRight - edgeLeft);
+        else if (edge === 'right') reservations.right = Math.max(reservations.right, edgeRight - edgeLeft);
+        else if (edge === 'top') reservations.top = Math.max(reservations.top, Math.max(0, edgeBottom - topBaseHeight));
+        else reservations.bottom = Math.max(reservations.bottom, Math.max(0, edgeBottom - edgeTop));
+      }
       continue;
     }
     const edges = [

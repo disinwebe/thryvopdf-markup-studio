@@ -98,8 +98,9 @@ The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**
 3. Change pages using the page-number field or the previous/next buttons. **PageUp** and **PageDown** also navigate pages.
 4. Zoom with the plus/minus controls, **Ctrl+=** / **Ctrl+-**, or Ctrl+mouse wheel.
 5. Choose **Width** or **Page** in the floating controls to fit the page to the viewer.
-6. To move around a zoomed page, select **Pan**, hold the middle mouse button, or hold **Space** temporarily while dragging.
-7. Open the **Pages** tab in the left panel and select a thumbnail to jump to that page.
+6. The last zoom level is saved per document on this device and restored when you reopen that local or shared PDF.
+7. To move around a zoomed page, select **Pan**, hold the middle mouse button, or hold **Space** temporarily while dragging.
+8. Open the **Pages** tab in the left panel and select a thumbnail to jump to that page.
 
 To close a document, choose the **X** on its tab or **File > Close Document**. Save changes first if you need to keep them.
 

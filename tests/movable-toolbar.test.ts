@@ -61,4 +61,17 @@ describe('movable toolbar docking', () => {
       { ...toolbar, id: 'right', edge: 'right' as const, position: { x: 700, y: 120 } },
     ], 1000, 800, 60)).toEqual({ top: 0, bottom: 0, left: 0, right: 300 });
   });
+
+  it('reserves top and side space independently for an attached vertical toolbar', () => {
+    expect(toolbarDockReservations([
+    {
+      id: 'file', edge: 'top', corner: null, attachedTo: null, position: { x: 0, y: 0 },
+      width: 900, height: 60, visible: true, moved: true,
+    },
+    {
+      id: 'markup', edge: null, corner: null, attachedTo: { id: 'file', side: 'bottom' },
+      position: { x: 0, y: 60 }, width: 90, height: 300, visible: true, moved: true,
+    },
+    ], 1920, 1080, 60)).toEqual({ top: 0, bottom: 0, left: 90, right: 0 });
+  });
 });
