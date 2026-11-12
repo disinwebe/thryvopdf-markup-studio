@@ -25,17 +25,29 @@ interface AuthStatus {
   hasUsers: boolean;
   user: AuthUser | null;
   error?: string;
+  remembered?: boolean;
+  sessionError?: string;
 }
-type AuthResult = { ok: true; user: AuthUser; pending?: undefined } | { ok: true; pending: true; message: string; user?: undefined } | { ok: false; error: string };
+type AuthResult = { ok: true; user: AuthUser; pending?: undefined; remembered?: boolean; rememberError?: string } | { ok: true; pending: true; message: string; user?: undefined } | { ok: false; error: string };
 interface Window {
   api?: {
-    setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; compareActive?: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; canGroupSelected?: boolean; canUngroupSelected?: boolean; canFlattenSelected?: boolean; canFlattenAll?: boolean; serverMode: boolean; blocked: boolean; viewOnly?: boolean; toolbars?: Record<string, boolean> }): void;
+    localUserName: string;
+    setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; compareActive?: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; canGroupSelected?: boolean; canUngroupSelected?: boolean; canFlattenSelected?: boolean; canFlattenAll?: boolean; serverMode: boolean; blocked: boolean; viewOnly?: boolean; toolbars?: Record<string, boolean>; spellcheckLanguage?: 'en-US' | 'en-GB' }): void;
+    spellCheckerLanguage(): Promise<'en-US' | 'en-GB'>;
+    setSpellCheckerLanguage(language: 'en-US' | 'en-GB'): Promise<'en-US' | 'en-GB'>;
+    checkSpellWords(words: string[]): Promise<Array<{ word: string; suggestions: string[] }>>;
+    addSpellCheckerWord(word: string): Promise<void>;
     setNativeTheme(theme: 'dark' | 'light'): void;
     onMenuAction(fn: (action: string) => void): () => void;
     quitApp(): Promise<void>;
+    onAppCloseRequested(fn: () => void): () => void;
+    markCloseGuardReady(): void;
+    respondToAppClose(allow: boolean): void;
     appVersion(): Promise<string>;
     showAbout(): Promise<void>;
     startupFiles(): Promise<PickedFile[]>;
+    consumeOpenFiles(): Promise<PickedFile[]>;
+    onOpenFiles(fn: (files: PickedFile[], error?: string) => void): () => void;
     openFiles(opts?: { multi?: boolean; filters?: { name: string; extensions: string[] }[] }): Promise<PickedFile[]>;
     renameFile(args: { path: string; name: string }): Promise<{ ok: boolean; path?: string; error?: string }>;
     pickStamp(): Promise<PickedFile | null>;
@@ -61,7 +73,7 @@ interface Window {
     configureAuth(args: { mode: 'server' | 'local'; serverUrl?: string }): Promise<{ ok: boolean; error?: string }>;
     register(args: { name: string; email: string; discipline: string; password: string; confirm: string }): Promise<AuthResult>;
     login(args: { email: string; password: string }): Promise<AuthResult>;
-    logout(): Promise<{ ok: true }>;
+    logout(): Promise<{ ok: true; warning?: string }>;
   };
 }
 

@@ -80,6 +80,7 @@ export function WatermarksManager({ doc, user, selectedId, readOnly = false, onS
                     <label>
                       Text
                       <textarea
+                        spellCheck
                         rows={2}
                         value={selected.stamp ?? ''}
                         onChange={(event) => onUpdate(selected.id, { stamp: event.target.value, watermarkName: event.target.value }, 'watermark-text')}

@@ -20,6 +20,7 @@ export function EditCommentsPopup({ comments, onSave, onCancel }: {
             <textarea
               id={`edit-comment-${comment.id}`}
               ref={index === 0 ? input : undefined}
+              spellCheck
               rows={4}
               value={edits[comment.id] ?? ''}
               onChange={(event) => setEdits((current) => ({ ...current, [comment.id]: event.target.value }))}

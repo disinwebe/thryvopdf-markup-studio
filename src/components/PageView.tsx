@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Doc, Style, Tool, makeMarkup } from '../app/model';
 import { applyHandle, boxOf, dist, handlesOf, hitMarkup, pickTop, simplify, splinePoints, translate, HandleKey } from '../core/geometry';
 import { countNumbers, DEFAULT_CAL } from '../core/measurement';
 import { Markup, MarkupType, Pt } from '../core/types';
-import { pageSize, renderToCanvas } from '../pdf/pdfjs';
+import { pageSize, renderToCanvas, type PdfSpellingMatch, type PdfTextMatch } from '../pdf/pdfjs';
 import { MarkupShape } from './MarkupShape';
 import { numberMarkups } from '../core/numbering';
 import { CALLOUT_MAX, CALLOUT_MIN_H, CALLOUT_MIN_W, calloutLayout, hitCallout, moveCallout } from '../core/callout';
@@ -43,6 +43,12 @@ export interface PageViewProps {
   selectedCalloutIds: string[];
   selectedPageObjectIds: string[];
   fit: { mode: 'width' | 'page'; n: number };
+  continuous?: boolean;
+  onPageChange?(page: number): void;
+  searchMatches?: Array<PdfTextMatch & { index: number }>;
+  spellcheckMatches?: PdfSpellingMatch[];
+  activeSearchIndex?: number;
+  searchNavigation?: { page: number; y: number; token: number } | null;
   onCreate(m: Markup): void;
   onBeginEdit(): void;
   onLive(markups: Markup[]): void;
@@ -60,10 +66,154 @@ export interface PageViewProps {
   onEditComments(markupId: string): void;
 }
 
+export function pageAtScrollOffset(pages: { page: number; top: number; bottom: number }[], offset: number): number {
+  const current = pages.find((page) => page.top <= offset && page.bottom > offset);
+  if (current) return current.page;
+  return pages.find((page) => page.top > offset)?.page ?? pages[pages.length - 1]?.page ?? 0;
+}
+
+type PageCanvasProps = PageViewProps & {
+  continuousCell?: boolean;
+  scrollContainerRef?: RefObject<HTMLDivElement | null>;
+  isActivePage?: boolean;
+};
+
 export function PageView(p: PageViewProps) {
+  return p.continuous ? <ContinuousPageView {...p} /> : <PageCanvas {...p} />;
+}
+
+function ContinuousPageView(p: PageViewProps) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const pageChangedByScroll = useRef(false);
+  const zoomAnchor = useRef<{ page: number; x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const zoom = p.doc.zoom || 1;
+
+  const scrollToSelectedPage = useCallback(() => {
+    const element = scroller.current;
+    const target = element?.querySelector<HTMLElement>(`.continuous-page-cell[data-page-index="${p.doc.page}"]`);
+    if (!element || !target || target.clientHeight === 0) return false;
+    element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    return true;
+  }, [p.doc.page]);
+
+  useEffect(() => {
+    if (p.searchNavigation?.page === p.doc.page) {
+      pageChangedByScroll.current = false;
+      return;
+    }
+    if (pageChangedByScroll.current) {
+      pageChangedByScroll.current = false;
+      return;
+    }
+    if (scrollToSelectedPage()) return;
+    const element = scroller.current;
+    const target = element?.querySelector<HTMLElement>(`.continuous-page-cell[data-page-index="${p.doc.page}"]`);
+    if (!target) return;
+    const observer = new ResizeObserver(() => {
+      if (scrollToSelectedPage()) observer.disconnect();
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [p.doc.page, scrollToSelectedPage]);
+
+  useLayoutEffect(() => {
+    const anchor = zoomAnchor.current;
+    const element = scroller.current;
+    if (!anchor || !element) return;
+    const page = element.querySelector<HTMLElement>(`.page[data-page-index="${anchor.page}"]`);
+    if (!page) return;
+    const pageRect = page.getBoundingClientRect();
+    const scrollRect = element.getBoundingClientRect();
+    element.scrollLeft += pageRect.left - scrollRect.left + anchor.x * zoom - anchor.offsetX;
+    element.scrollTop += pageRect.top - scrollRect.top + anchor.y * zoom - anchor.offsetY;
+    zoomAnchor.current = null;
+  }, [zoom]);
+
+  useLayoutEffect(() => {
+    const navigation = p.searchNavigation;
+    const element = scroller.current;
+    if (!navigation || navigation.page !== p.doc.page || !element) return;
+    const target = element.querySelector<HTMLElement>(`.continuous-page-cell[data-page-index="${navigation.page}"]`);
+    if (!target) return;
+    const scrollToHit = () => {
+      const page = target.querySelector<HTMLElement>('.page');
+      if (!page || page.clientHeight === 0) return false;
+      const pageRect = page.getBoundingClientRect();
+      const scrollRect = element.getBoundingClientRect();
+      element.scrollTop += pageRect.top - scrollRect.top + navigation.y * zoom - Math.min(120, element.clientHeight * 0.25);
+      return true;
+    };
+    if (scrollToHit()) return;
+    const observer = new ResizeObserver(() => {
+      if (scrollToHit()) observer.disconnect();
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [p.searchNavigation?.token, p.searchNavigation?.page, p.searchNavigation?.y, p.doc.page, zoom]);
+
+  const handleScroll = () => {
+    const element = scroller.current;
+    if (!element || !p.onPageChange) return;
+    const bounds = element.getBoundingClientRect();
+    const marker = element.scrollTop + Math.min(120, element.clientHeight * 0.25);
+    const pages = Array.from(element.querySelectorAll<HTMLElement>('.continuous-page-cell[data-page-index]'))
+      .map((page) => {
+        const rect = page.getBoundingClientRect();
+        return {
+          page: Number(page.dataset.pageIndex),
+          top: element.scrollTop + rect.top - bounds.top,
+          bottom: element.scrollTop + rect.bottom - bounds.top,
+        };
+      })
+      .filter((page) => Number.isInteger(page.page) && page.bottom > page.top);
+    const nextPage = pageAtScrollOffset(pages, marker);
+    if (nextPage !== p.doc.page) {
+      pageChangedByScroll.current = true;
+      p.onPageChange(nextPage);
+    }
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey) return;
+    const element = scroller.current;
+    const target = (event.target as HTMLElement).closest<HTMLElement>('.continuous-page-cell');
+    const page = target?.querySelector<HTMLElement>('.page');
+    const pageIndex = Number(target?.dataset.pageIndex);
+    if (!element || !page || !Number.isInteger(pageIndex)) return;
+    event.preventDefault();
+    const scrollRect = element.getBoundingClientRect();
+    const pageRect = page.getBoundingClientRect();
+    zoomAnchor.current = {
+      page: pageIndex,
+      x: (event.clientX - pageRect.left) / zoom,
+      y: (event.clientY - pageRect.top) / zoom,
+      offsetX: event.clientX - scrollRect.left,
+      offsetY: event.clientY - scrollRect.top,
+    };
+    p.onZoom(Math.max(0.05, Math.min(8, zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15))));
+  };
+
+  return (
+    <div className="scroller continuous-scroller" ref={scroller} onScroll={handleScroll} onWheel={handleWheel}>
+      {Array.from({ length: p.doc.numPages }, (_, page) => (
+        <PageCanvas
+          key={page}
+          {...p}
+          doc={{ ...p.doc, page }}
+          continuousCell
+          scrollContainerRef={scroller}
+          isActivePage={page === p.doc.page}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PageCanvas(p: PageCanvasProps) {
   const { doc, tool, style } = p;
   const zoom = doc.zoom || 1;
-  const scroller = useRef<HTMLDivElement>(null);
+  const localScroller = useRef<HTMLDivElement>(null);
+  const scroller = p.scrollContainerRef ?? localScroller;
   const pageEl = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const taskRef = useRef<{ cancel(): void; promise: Promise<unknown> } | null>(null);
@@ -71,6 +221,7 @@ export function PageView(p: PageViewProps) {
   const viewportCallback = useRef(p.onViewportChange);
   viewportCallback.current = p.onViewportChange;
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [pageVisible, setPageVisible] = useState(!p.continuousCell);
   const [draft, setDraftState] = useState<Pt[] | null>(null);
   const draftRef = useRef<Pt[] | null>(null);
   const setDraft = (d: Pt[] | null) => {
@@ -98,6 +249,11 @@ export function PageView(p: PageViewProps) {
   };
 
   useEffect(() => {
+    if (p.continuousCell && !p.isActivePage) {
+      setSnapIndex(null);
+      setSnapTarget(null);
+      return;
+    }
     let live = true;
     setSnapIndex(null);
     setSnapTarget(null);
@@ -109,7 +265,7 @@ export function PageView(p: PageViewProps) {
     return () => {
       live = false;
     };
-  }, [doc.pdf, doc.page]);
+  }, [doc.pdf, doc.page, p.continuousCell, p.isActivePage]);
 
   useEffect(() => {
     let live = true;
@@ -125,15 +281,15 @@ export function PageView(p: PageViewProps) {
   const [viewportRevision, setViewportRevision] = useState(0);
   const fittedZoom = useRef<number | null>(null);
   useLayoutEffect(() => {
-    if (!size || !scroller.current || doc.zoom === 0) return;
+    if (p.continuousCell || !size || !scroller.current || doc.zoom === 0) return;
     scroller.current.scrollLeft = doc.viewport?.left ?? 0;
     scroller.current.scrollTop = doc.viewport?.top ?? 0;
-  }, [doc.id, size]);
+  }, [doc.id, size, p.continuousCell]);
   useEffect(() => () => {
     if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
     const element = scroller.current;
-    if (element) viewportCallback.current(doc.id, element.scrollLeft, element.scrollTop);
-  }, [doc.id]);
+    if (element && !p.continuousCell) viewportCallback.current(doc.id, element.scrollLeft, element.scrollTop);
+  }, [doc.id, p.continuousCell]);
   const saveViewport = () => {
     if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
     viewportFrame.current = requestAnimationFrame(() => {
@@ -143,13 +299,14 @@ export function PageView(p: PageViewProps) {
     });
   };
   useEffect(() => {
+    if (p.continuousCell && !p.isActivePage) return;
     if (!scroller.current) return;
     const observer = new ResizeObserver(() => setViewportRevision((revision) => revision + 1));
     observer.observe(scroller.current);
     return () => observer.disconnect();
-  }, [size]);
+  }, [size, p.continuousCell, p.isActivePage]);
   useEffect(() => {
-    if (!size || !scroller.current) return;
+    if ((p.continuousCell && !p.isActivePage) || !size || !scroller.current) return;
     const first = doc.zoom === 0;
     const explicit = p.fit.n !== fitDone.current.n;
     const resized = viewportRevision > fitDone.current.viewport && fitDone.current.id === doc.id;
@@ -162,10 +319,26 @@ export function PageView(p: PageViewProps) {
     fittedZoom.current = Math.max(0.05, Math.min(8, z));
     p.onZoom(fittedZoom.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size, p.fit.n, doc.id, viewportRevision]);
+  }, [size, p.fit.n, doc.id, viewportRevision, p.continuousCell, p.isActivePage]);
 
   useEffect(() => {
-    if (!size || !canvas.current) return;
+    if (!p.continuousCell) {
+      setPageVisible(true);
+      return;
+    }
+    const target = pageEl.current;
+    const root = scroller.current;
+    if (!target || !root) return;
+    const observer = new IntersectionObserver(([entry]) => setPageVisible(entry.isIntersecting), {
+      root,
+      rootMargin: '500px 0px',
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [size, p.continuousCell]);
+
+  useEffect(() => {
+    if (!size || !canvas.current || (p.continuousCell && !pageVisible)) return;
     let cancelled = false;
     const el = canvas.current;
     (async () => {
@@ -190,19 +363,31 @@ export function PageView(p: PageViewProps) {
     })();
     return () => {
       cancelled = true;
+      if (p.continuousCell) taskRef.current?.cancel();
     };
-  }, [doc.pdf, doc.page, zoom, size]);
+  }, [doc.pdf, doc.page, zoom, size, pageVisible, p.continuousCell]);
 
   useLayoutEffect(() => {
     const a = anchor.current;
-    if (a && scroller.current && pageEl.current) {
+    if (!p.continuousCell && a && scroller.current && pageEl.current) {
       scroller.current.scrollLeft = pageEl.current.offsetLeft + a.pt.x * zoom - a.ox;
       scroller.current.scrollTop = pageEl.current.offsetTop + a.pt.y * zoom - a.oy;
       anchor.current = null;
     }
-  }, [zoom]);
+  }, [zoom, p.continuousCell]);
+
+  useLayoutEffect(() => {
+    const navigation = p.searchNavigation;
+    const element = scroller.current;
+    const page = pageEl.current;
+    if (p.continuousCell || !navigation || navigation.page !== doc.page || !element || !page) return;
+    const pageRect = page.getBoundingClientRect();
+    const scrollRect = element.getBoundingClientRect();
+    element.scrollTop += pageRect.top - scrollRect.top + navigation.y * zoom - Math.min(120, element.clientHeight * 0.25);
+  }, [p.continuousCell, p.searchNavigation?.token, p.searchNavigation?.page, p.searchNavigation?.y, doc.page, size, zoom]);
 
   useEffect(() => {
+    if (p.continuousCell) return;
     const el = scroller.current;
     if (!el) return;
     const wheel = (e: WheelEvent) => {
@@ -238,6 +423,7 @@ export function PageView(p: PageViewProps) {
   };
 
   useEffect(() => {
+    if (p.continuousCell && !p.isActivePage) return;
     const key = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
@@ -661,9 +847,18 @@ export function PageView(p: PageViewProps) {
   const countNos = useMemo(() => countNumbers(doc.markups), [doc.markups]);
 
   const tags = useMemo(() => numberMarkups(doc.markups), [doc.markups]);
+  if (p.continuousCell && !pageVisible) {
+    return (
+      <div className="continuous-page-cell" data-page-index={doc.page}>
+        {size && <div className="page" ref={pageEl} data-page-index={doc.page} style={{ width: size.w * zoom, height: size.h * zoom }} />}
+      </div>
+    );
+  }
   const cal = doc.calibrations[doc.page] ?? DEFAULT_CAL;
   const pageMarkups = doc.markups.filter((m) => m.page === doc.page);
   const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
+  const searchMatches = (p.searchMatches ?? []).filter((match) => match.page === doc.page);
+  const spellcheckMatches = (p.spellcheckMatches ?? []).filter((match) => match.page === doc.page);
   const layers = orderedPageLayers(pageMarkups.filter((markup) => markup.type === 'stamp'), pageObjects);
   const selectedPageObject = p.selectedPageObjectIds.length === 1
     ? pageObjects.find((object) => object.id === p.selectedPageObjectIds[0])
@@ -692,13 +887,20 @@ export function PageView(p: PageViewProps) {
   const selectedCallout = selected && tool === 'select' && canMoveCallout(selected) ? calloutLayout(selected) : null;
 
   return (
-    <div className="scroller" ref={scroller} onScroll={saveViewport}>
+    <div
+      className={p.continuousCell ? 'continuous-page-cell' : 'scroller'}
+      ref={p.continuousCell ? undefined : localScroller}
+      onScroll={p.continuousCell ? undefined : saveViewport}
+      data-page-index={p.continuousCell ? doc.page : undefined}
+    >
       {size && (
         <div
           className="page"
           ref={pageEl}
+          data-page-index={p.continuousCell ? doc.page : undefined}
           style={{ width: size.w * zoom, height: size.h * zoom }}
         >
+          {!p.continuousCell || pageVisible ? <>
           <canvas ref={canvas} style={{ width: size.w * zoom, height: size.h * zoom }} />
           <svg
             width={size.w * zoom}
@@ -719,6 +921,31 @@ export function PageView(p: PageViewProps) {
             {pageMarkups.filter((markup) => markup.type !== 'stamp').map((markup) => (
               <MarkupShape key={markup.id} m={markup} cal={cal} countNo={countNos.get(markup.id)} tag={tags.get(markup.id)} />
             ))}
+            <g aria-hidden="true">
+              {searchMatches.map((match) => (
+                <polygon
+                  key={`pdf-search-${match.index}`}
+                  points={match.points.map(({ x, y }) => `${x},${y}`).join(' ')}
+                  fill="#ffff00"
+                  fillOpacity={0.5}
+                  stroke={match.index === p.activeSearchIndex ? '#ff9800' : 'none'}
+                  strokeWidth={match.index === p.activeSearchIndex ? 1.5 / zoom : 0}
+                />
+              ))}
+            </g>
+            <g aria-hidden="true">
+              {spellcheckMatches.map((match, index) => (
+                <polygon
+                  key={`pdf-spellcheck-${match.word}-${index}`}
+                  points={match.points.map(({ x, y }) => `${x},${y}`).join(' ')}
+                  fill="#ef4444"
+                  fillOpacity={0.38}
+                  stroke="#dc2626"
+                  strokeOpacity={0.55}
+                  strokeWidth={0.5 / zoom}
+                />
+              ))}
+            </g>
             {preview && (
               <g opacity={0.85}>
                 <MarkupShape m={preview} cal={cal} />
@@ -808,6 +1035,7 @@ export function PageView(p: PageViewProps) {
               p.onContextMenu(e, calloutHit?.id ?? selectable?.id ?? null, selectedObject?.id ?? null, point, !!calloutHit);
             }}
           />
+          </> : null}
         </div>
       )}
     </div>

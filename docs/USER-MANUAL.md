@@ -28,9 +28,9 @@ This manual follows the current ThryvoPDF Markup Studio 1.0 desktop build. It ex
 
 ThryvoPDF Markup Studio is a Windows desktop application for viewing, marking up, measuring, comparing, and organizing PDF drawing sets.
 
-- **Unlicensed viewer:** You can open and view local PDFs without signing in. Editing, saving changes, and other licensed features are disabled until a license is imported.
-- **Licensed desktop app:** A license is perpetual and tied to one Windows device. Import the license file on each licensed device.
-- **Shared documents:** Multi-user collaboration requires a connection to your organization's ThryvoPDF server. The server administrator must install and maintain the separate **ThryvoPDF Server Manager** application.
+- **Local PDFs:** Opening and viewing a PDF never requires an account. A license unlocks paid local features independently of server sign-in.
+- **Shared documents:** Collaboration requires an account on your organization's ThryvoPDF server. Sign in only when you open a shared feature; choose **Continue locally** to stay in the local workspace.
+- **Remembered sign-in:** The app securely stores the server session on this device when operating-system secure storage is available.
 
 Keep original PDFs or backups before making significant changes. Markups, measurements, bookmarks, and sheet information are stored in the saved PDF. Page organization operations change the document when you save it.
 
@@ -54,35 +54,38 @@ If you see **Unlicensed viewing - editing is disabled**:
 
 To license another computer, repeat the process on that computer and send its own device request. A license for one computer cannot be reused on another.
 
-### Connect to a company server
+### Sign in for collaboration
 
-If the connection screen appears:
+To open shared documents or use collaboration:
 
-1. Enter the server address supplied by your administrator, such as `https://pdf-server.example.com:8787` or `192.168.1.10:8787`.
-2. Choose **Test connection** to check the address.
-3. Choose **Connect**.
-4. Sign in with your company account, or choose **Register another user** if registration is open.
-5. Server registrations may require administrator approval before the account can sign in.
+1. Choose **Shared Documents...**. Local PDFs and licensed features remain available while you sign in.
+2. If prompted, enter the server address supplied by your administrator, such as `https://pdf-server.example.com:8787` or `192.168.1.10:8787`.
+3. Choose **Test connection** to check the address.
+4. Choose **Connect**.
+5. Sign in with your company account, or choose **Register another user** if registration is open.
+6. Choose **Continue locally** at any time to return to the PDF workspace without signing in.
+7. Server registrations may require administrator approval before the account can sign in.
 
 When registering, choose your discipline from the list; it includes Instrumentation, Process, and Piping.
 
-Use **Change** on the sign-in screen to update the server address. Choose **Use local accounts on this PC only** only if you intend to use a separate account store on this computer; local accounts are not shared with other PCs.
+Use **Change** on the sign-in screen to update the server address. A successful sign-in is remembered securely on this device when supported.
 
 ### Sign in and password
 
-Enter your email and password on the sign-in screen. If an administrator issued a temporary password, the app requires you to choose a new password before continuing. Use **Option > Password...** to change your password later. There is no self-service password recovery; contact your administrator if you cannot sign in.
+Enter your email and password when using a server feature. If an administrator issued a temporary password, the app requires you to choose a new password before server collaboration can continue; you can still choose **Continue locally**. Use **Option > Password...** to change your password later. There is no self-service password recovery; contact your administrator if you cannot sign in.
 
 ## 3. Understand the workspace
 
 The main workspace has:
 
-- **Toolbars:** The workspace has four independent groups: **File management** (file actions, clockwise/counter-clockwise rotation of the current page, Viewer, and Compare), **Content tools** (Select, Pan, Undo, Redo, Text, Symbol, and Signatures), **Markup tools**, and **Measurement tools**. Toolbars appear only when a PDF is open. Use **View > Toolbars** in the native application menu to show or hide them; the former inline restore buttons are not displayed. Each toolbar has a named header; hold and drag anywhere in the header to move it, and use the close button to hide it. Right-click a toolbar header to lock or unlock its position; a locked toolbar cannot be moved. Drag near a window edge or another toolbar to snap it there; there is no docking dropdown. Commands wrap onto additional rows when narrowed. When a toolbar is made taller, its buttons switch to icon-only mode with command-name tooltips, a minimum 35 × 35-pixel button size, and a maximum of two icons per row. Drag the lower-right resize handle to adjust width and height. Top/bottom docking reserves vertical viewer space, while left/right docking reserves horizontal viewer space independently; the PDF tab strip follows the same left/right reservation as the viewer. Toolbars attached to one another move as a group and reserve space together. Freely moved toolbars do not reserve space. Each group can be restored independently; its position, size, docking, attachment, visibility, and locked state are saved on this device across launches.
+- **Toolbars:** The workspace has four independent groups: **File management** (file actions, clockwise/counter-clockwise rotation of the current page, Viewer, and Compare), **Content tools** (Select, Pan, Undo, Redo, Text, Symbol, and Signatures), **Markup tools**, and **Measurement tools**. Toolbars appear only when a PDF is open. Use **View > Toolbars** in the native application menu to show or hide them; the former inline restore buttons are not displayed. Each toolbar has a named header; hold and drag anywhere in the header to move it, and use the close button to hide it. Right-click a toolbar header to lock or unlock its position; a locked toolbar cannot be moved. Drag near a window edge or another toolbar to snap it there; snapped toolbars remain independent and can be moved separately. When snapped along a docked toolbar's edge, a toolbar inherits that dock area's orientation and viewer-space reservation without following the other toolbar's position. Commands wrap onto additional rows when narrowed. When a toolbar is made taller, its buttons switch to icon-only mode with command-name tooltips, a minimum 35 × 35-pixel button size, and a maximum of two icons per row. Drag the lower-right resize handle to adjust width and height. Top/bottom docking reserves vertical viewer space, while left/right docking reserves horizontal viewer space independently; the PDF tab strip follows the same left/right reservation as the viewer. Freely moved toolbars do not reserve space. Each group can be restored independently; its position, size, docking, visibility, and locked state are saved on this device across launches.
 - **Tabs:** Each open PDF has a tab. A dot indicates unsaved changes. Double-click a local PDF tab name to rename it; shared-document names cannot be renamed here.
 - **Markup toolbar:** Markup tools such as Line, Cloud, Rectangle, and Stamp.
 - **Measure toolbar:** Choose Length, PolyLength, Spline, Radius, Diameter, Area, Perimeter, Angle, or Count here. Choosing a measurement tool does not open the Measurements window.
 - **Left panel:** Project, Pages, and Bookmarks tabs.
 - **Right panel:** Markups and comment properties. The **Measurements...** button opens calibration and takeoff controls when you want them.
-- **Floating controls:** Select/Pan, page navigation, zoom, Fit Width, and Fit Page at the bottom of the viewer.
+- **Floating controls:** Select/Pan, page navigation, continuous-scroll toggle, zoom, Fit Width, and Fit Page at the bottom of the viewer.
+- **Search Text:** The fixed search bar at the upper-right of the PDF tabs finds complete words in the active PDF and highlights every match in yellow. Use the previous/next arrows to navigate matches.
 - **Status bar:** Save and operation messages. After saving a local PDF, choose **Open saved PDF** in the status bar to open the saved file.
 
 The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**, show or hide the left and right panels.
@@ -96,13 +99,15 @@ The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**
 1. Choose **Open...** or **Open PDF...** and select one or more PDF files. You can also drag PDF files onto the app window.
 2. Switch between documents using their tabs.
 3. Change pages using the page-number field or the previous/next buttons. **PageUp** and **PageDown** also navigate pages.
+   Continuous scrolling is on by default; scroll vertically through the document. Use **Continuous** in the floating controls to switch to a single-page view.
 4. Zoom with the plus/minus controls, **Ctrl+=** / **Ctrl+-**, or Ctrl+mouse wheel.
 5. Choose **Width** or **Page** in the floating controls to fit the page to the viewer.
-6. The last zoom level is saved per document on this device and restored when you reopen that local or shared PDF.
+6. PDFs opened directly from Windows start in **Fit Page** preview. PDFs opened from inside ThryvoPDF restore their last zoom level; shared PDFs also remember zoom on this device.
 7. To move around a zoomed page, select **Pan**, hold the middle mouse button, or hold **Space** temporarily while dragging.
 8. Open the **Pages** tab in the left panel and select a thumbnail to jump to that page.
+9. To search the active PDF, enter a complete word in **Search Text** and press **Enter** or **Find**. All exact-word matches are highlighted in yellow at 50% opacity. After the first search, each **Enter** press advances to the next match; use the arrows to move forward or backward. Search works in unlicensed viewing mode, but scanned pages without a text layer cannot be searched.
 
-To close a document, choose the **X** on its tab or **File > Close Document**. Save changes first if you need to keep them.
+To close a document, choose the **X** on its tab or **File > Close Document**. To close ThryvoPDF with unsaved PDF changes, choose **Save All**, **Don't Save**, or **Cancel**; canceled or failed saves keep the app open.
 
 ## 5. Add and edit markups
 
@@ -141,12 +146,14 @@ For shared documents, you can select markups by any author from the Markups list
 3. Choose a status filter or **All pages / This page** to narrow the list.
 4. Select a markup in the list to select it on the drawing and show its properties.
 5. Change its status, color, width, opacity, fill, or text in the properties panel when you have permission.
-6. Add a comment in the comment box and press **Enter**. Use **Shift+Enter** for a new line; drag the box corner to resize it. A comment's author and timestamp are shown in the panel.
+6. Add a comment in the comment box and press **Enter**. Use **Shift+Enter** for a new line; drag the box corner to resize it. A comment's author and timestamp are shown in the panel. When signed out, new markups and comments use the current Windows logon name; when signed in, they use the account name.
 7. To change the comment-box display, use **Show comment box on drawing**. Hiding the box does not delete comments.
 8. Use **Comment text size** to adjust comment text size. The setting is remembered on this PC and used for the drawing and saved PDF.
 9. Choose **CSV** in the Markups panel to export the current document's markup list.
 
 The red numbered comment ID appears beside the comment box and in the Markups panel. It is not drawn at the corner of the markup. Stamps and drawing-only Line markups are not assigned review numbers.
+
+Spell checking is available in comment, markup-text, watermark, shared-document description, and editable PDF text fields. Misspellings are underlined as you type. Open **Option > Spell check language** to choose English (US) or English (UK), then right-click an underlined word for suggestions or **Add to dictionary**. The first use of a language may require an internet connection to download its Chromium dictionary; added words are saved in the operating-system spell-check dictionary. To scan existing PDF text, use **Edit > Check spelling in PDF...**; this is a separate command.
 
 ![Current markup workspace with a selected review cloud, linked comment callout, and editable review properties](user-manual-assets/markups-and-comments.png)
 
@@ -307,9 +314,17 @@ If no page is selected, applicable actions can apply to all pages. The app preve
 
 Text search is available in unlicensed viewer mode as well as licensed mode. It searches PDF text layers; scanned pages without OCR text cannot be searched.
 
+### Check spelling in an open PDF
+
+1. Open a PDF in **Viewer**, then choose **Edit > Check spelling in PDF...** or press **Ctrl+Shift+K**.
+2. The checker scans selectable text page by page and lists possible misspellings with suggested corrections and page links. Each occurrence is highlighted translucent red in the viewer.
+3. Select a page link to navigate to that page. Choose **Add to dictionary** for a valid name or technical term, or **Clear highlights** to remove the red marks.
+
+The scan works without a license and does not change PDF contents. It uses the selected English dictionary. Scanned pages or image-only text require OCR before they can be checked.
+
 ## 10. Shared documents and review assignments
 
-Shared documents are available when the app is connected in server mode. A signed-in, licensed user can upload, collaborate on, and update their assigned review status. In unlicensed viewer mode, shared content is read-only.
+Choose **Shared Documents...** to connect to the company server; the app asks for sign-in only when you use this server feature. A signed-in user can browse shared PDFs in read-only mode without a license. A license is required to upload, edit, or update review status.
 
 ![Current Shared Documents window showing project groups, reviewers, assignments, and review status](user-manual-assets/shared-documents.png)
 
@@ -438,6 +453,7 @@ The manager saves email credentials in the server data folder's `notify.json`; l
 | `Ctrl+Alt+L` | Show or hide left panel |
 | `Ctrl+Alt+R` | Show or hide right panel |
 | `Ctrl+Shift+F` | Search text in open PDFs |
+| `Ctrl+Shift+K` | Check spelling in PDF |
 | `PageUp` / `PageDown` | Previous / next page |
 | `Enter` / double-click / right-click | Finish multi-point markup |
 

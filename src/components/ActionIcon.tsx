@@ -6,7 +6,7 @@ export type ActionIconName =
   | 'compare' | 'text' | 'symbol' | 'signature' | 'line' | 'highlight' | 'cloud' | 'rect'
   | 'ellipse' | 'arrow' | 'polyline' | 'pen' | 'stamp' | 'image' | 'note' | 'page' | 'm-length'
   | 'm-polylength' | 'm-spline' | 'm-radius' | 'm-diameter' | 'm-area' | 'm-perimeter' | 'm-angle'
-  | 'm-count' | 'key' | 'cut' | 'copy' | 'paste' | 'fit-width' | 'rotate-cw' | 'rotate-ccw' | 'left' | 'right' | 'up' | 'down';
+  | 'm-count' | 'key' | 'cut' | 'copy' | 'paste' | 'fit-width' | 'rotate-cw' | 'rotate-ccw' | 'search' | 'left' | 'right' | 'up' | 'down';
 
 const paths: Record<ActionIconName, ReactNode> = {
   open: <><path d="M3 7h7l2 2h9v10H3z" /><path d="M3 10h18l-2 9H5z" /></>,
@@ -56,6 +56,7 @@ const paths: Record<ActionIconName, ReactNode> = {
   'fit-width': <><path d="M3 12h18m-5-5 5 5-5 5M8 7l-5 5 5 5" /><path d="M7 4h10M7 20h10" /></>,
   'rotate-cw': <><path d="M20 11a8 8 0 1 1-2.34-5.66" fill="none" strokeWidth="2.5" /><path d="M20 4v7h-7" /></>,
   'rotate-ccw': <><path d="M4 11a8 8 0 1 0 2.34-5.66" fill="none" strokeWidth="2.5" /><path d="M4 4v7h7" /></>,
+  search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></>,
   left: <path d="m15 5-7 7 7 7" />,
   right: <path d="m9 5 7 7-7 7" />,
   up: <path d="m5 15 7-7 7 7" />,

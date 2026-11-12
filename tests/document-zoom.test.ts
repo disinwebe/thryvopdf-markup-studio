@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { documentZoomKey, loadDocumentZoom, saveDocumentZoom } from '../src/app/model';
+import { documentZoomKey, initialDocumentZoom, loadDocumentZoom, saveDocumentZoom } from '../src/app/model';
 
 function memoryStorage() {
   const entries = new Map<string, string>();
@@ -30,5 +30,13 @@ describe('document zoom preferences', () => {
     expect(loadDocumentZoom(key, storage)).toBe(0.38);
     storage.setItem(`thryvopdf-document-zoom-v1:${key}`, 'not-a-number');
     expect(loadDocumentZoom(key, storage)).toBe(0);
+  });
+
+  it('starts externally opened PDFs at fit-page even when a zoom was remembered', () => {
+    const storage = memoryStorage();
+    const key = documentZoomKey({ name: 'Plan.pdf', path: 'C:\\drawings\\Plan.pdf' });
+    saveDocumentZoom(key, 0.38, storage);
+    expect(initialDocumentZoom(key, true)).toBe(0);
+    expect(initialDocumentZoom(key, false, storage)).toBe(0.38);
   });
 });

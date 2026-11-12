@@ -1,23 +1,96 @@
-const { app, BrowserWindow, ipcMain, dialog, net, Menu, nativeTheme, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, net, Menu, nativeTheme, nativeImage, shell, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('./client.cjs');
 const { menuTemplate, applyNativeTheme } = require('./menu.cjs');
 const { createLicenseStore, MAX_LICENSE_BYTES } = require('./license.cjs');
 const { renamePdfFile, writeSavedFile } = require('./fileOps.cjs');
-const { requireAccess, sharedOperationRequiresLicense } = require('./access.cjs');
+const { requireAccess, requireSignIn, sharedOperationRequiresLicense } = require('./access.cjs');
+const { createWindowCloseGuard } = require('./windowCloseGuard.cjs');
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
 // Keep the pre-rename data folder so existing installs keep their settings and accounts.
 app.setName('ThryvoPDF Markup Studio');
 app.setPath('userData', process.env.PMS_USER_DATA || path.join(app.getPath('appData'), 'Plan Markup Studio'));
 const allowed = new Set();
+const pendingOpenPaths = [];
+let mainWindow = null;
+const hasInstanceLock = app.requestSingleInstanceLock();
+
+function pdfPaths(args, cwd = process.cwd()) {
+  return args
+    .filter((arg) => typeof arg === 'string' && /\.pdf$/i.test(arg))
+    .map((arg) => path.resolve(cwd, arg))
+    .filter((file) => fs.existsSync(file));
+}
 
 function startupPaths() {
-  const fromArgs = process.argv.slice(1).filter((a) => /\.pdf$/i.test(a) && fs.existsSync(a));
-  const fromEnv = (process.env.PMS_OPEN || '').split(';').filter(Boolean);
+  const fromArgs = pdfPaths(process.argv.slice(1));
+  const fromEnv = pdfPaths((process.env.PMS_OPEN || '').split(';').filter(Boolean));
   return [...fromArgs, ...fromEnv];
 }
+
+function applySpellCheckerLanguage(win) {
+  if (!spellChecker || win.isDestroyed()) return;
+  win.webContents.session.setSpellCheckerLanguages([spellChecker.getLanguage()]);
+}
+
+async function addPersonalSpellWord(win, word) {
+  await spellChecker.addWord(word);
+  if (!win.webContents.session.addWordToSpellCheckerDictionary(word)) {
+    throw new Error('The system spell checker did not accept the word.');
+  }
+}
+
+function installSpellCheckContextMenu(win) {
+  win.webContents.on('context-menu', (event, params) => {
+    const word = params.misspelledWord;
+    if (!params.isEditable || !word) return;
+    event.preventDefault();
+    const suggestions = spellChecker.suggestions(word);
+    const template = [
+      ...(suggestions.length
+        ? suggestions.map((suggestion) => ({ label: suggestion, click: () => win.webContents.replaceMisspelling(suggestion) }))
+        : [{ label: 'No suggestions', enabled: false }]),
+      { type: 'separator' },
+      {
+        label: 'Add to dictionary',
+        click: () => {
+          void addPersonalSpellWord(win, word)
+            .then(() => win.webContents.replaceMisspelling(word))
+            .catch((error) => dialog.showMessageBox(win, {
+              type: 'error', title: 'Personal dictionary', message: 'Could not add this word.',
+              detail: error.message, buttons: ['OK'],
+            }));
+        },
+      },
+      { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    ];
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
+function queueOpenFiles(args, cwd) {
+  pendingOpenPaths.push(...pdfPaths(args, cwd));
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+  const notify = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('open-files-pending');
+  };
+  if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', notify);
+  else notify();
+}
+
+if (hasInstanceLock) {
+  app.on('second-instance', (_event, argv, cwd) => queueOpenFiles(argv.slice(1), cwd));
+  app.on('open-file', (event, file) => {
+    event.preventDefault();
+    queueOpenFiles([file], path.dirname(file));
+  });
+} else app.quit();
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -30,8 +103,14 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: true,
     },
   });
+  win.maximize();
+  mainWindow = win;
+  applySpellCheckerLanguage(win);
+  installSpellCheckContextMenu(win);
+  const closeGuard = createWindowCloseGuard(win);
   let rendererSignedIn = false;
   let currentMenuState = {};
   const installMenu = (state) => {
@@ -90,14 +169,28 @@ function createWindow() {
     if (e.sender !== win.webContents) return;
     rendererSignedIn = state.signedIn === true;
     const user = auth.current();
-    installMenu({ ...state, signedIn: (!!user && state.signedIn === true) || state.viewOnly === true, admin: user?.role === 'admin', passwordAvailable: !!user?.email });
+    installMenu({ ...state, signedIn: !!user && state.signedIn === true, admin: user?.role === 'admin', passwordAvailable: !!user?.email });
   };
   ipcMain.on('menu-state', onMenuState);
+  const onCloseGuardReady = (e) => {
+    if (e.sender === win.webContents) closeGuard.markReady();
+  };
+  const onCloseGuardResponse = (e, allow) => {
+    if (e.sender === win.webContents) closeGuard.respond(allow);
+  };
+  ipcMain.on('close-guard-ready', onCloseGuardReady);
+  ipcMain.on('close-guard-response', onCloseGuardResponse);
+  win.on('close', closeGuard.onClose);
   const onTheme = (e, theme) => {
     if (e.sender === win.webContents && applyNativeTheme(nativeTheme, theme)) installMenu(currentMenuState);
   };
   ipcMain.on('theme', onTheme);
-  win.on('closed', () => ipcMain.removeListener('menu-state', onMenuState));
+  win.on('closed', () => {
+    ipcMain.removeListener('menu-state', onMenuState);
+    ipcMain.removeListener('close-guard-ready', onCloseGuardReady);
+    ipcMain.removeListener('close-guard-response', onCloseGuardResponse);
+    if (mainWindow === win) mainWindow = null;
+  });
   win.on('closed', () => ipcMain.removeListener('theme', onTheme));
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) win.loadURL(devUrl);
@@ -128,17 +221,13 @@ function createWindow() {
   }
 }
 
-let auth, license;
+let auth, license, spellChecker;
 const guard = (fn) => (...a) => {
   requireAccess(auth, license, true);
   return fn(...a);
 };
-const readGuard = (fn) => (...a) => {
-  requireAccess(auth, license);
-  return fn(...a);
-};
-const viewerAccess = (fn) => (...a) => {
-  if (license.status().ok && !auth.current()) throw new Error('Not signed in');
+const serverAccess = (fn) => (...a) => {
+  requireSignIn(auth);
   return fn(...a);
 };
 
@@ -148,15 +237,16 @@ const toBuf = (p) => {
   return { path: p, name: path.basename(p), data: new Uint8Array(b.buffer, b.byteOffset, b.byteLength) };
 };
 
-ipcMain.handle('startup-files', viewerAccess(() => startupPaths().map(toBuf)));
+ipcMain.handle('startup-files', () => startupPaths().map(toBuf));
+ipcMain.handle('consume-open-files', () => pendingOpenPaths.splice(0).map(toBuf));
 
-ipcMain.handle('open-files', viewerAccess(async (e, opts = {}) => {
+ipcMain.handle('open-files', async (e, opts = {}) => {
   const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
     properties: ['openFile', ...(opts.multi === false ? [] : ['multiSelections'])],
     filters: opts.filters || [{ name: 'PDF', extensions: ['pdf'] }],
   });
   return r.canceled ? [] : r.filePaths.map(toBuf);
-}));
+});
 
 ipcMain.handle('rename-file', guard((e, args = {}) => renamePdfFile(args.path, args.name, allowed, fs)));
 
@@ -188,14 +278,14 @@ ipcMain.handle('save-file', guard(async (e, { defaultName, data, filters, path: 
   return write(r.filePath);
 }));
 
-ipcMain.handle('open-saved-pdf', viewerAccess(async (_e, file) => {
+ipcMain.handle('open-saved-pdf', async (_e, file) => {
   if (typeof file !== 'string' || !allowed.has(file) || !/\.pdf$/i.test(file) || !fs.existsSync(file)) {
     throw new Error('This PDF is not available to open from the current session.');
   }
   const error = await shell.openPath(file);
   if (error) throw new Error('Could not open the saved PDF: ' + error);
   return { ok: true };
-}));
+});
 
 // Files chosen for shared upload; the renderer refers to them by path and main reads them, so whole projects never cross IPC.
 const MAX_PICK = 500;
@@ -216,7 +306,7 @@ const walkPdfs = (root) => {
   }
   return out.sort();
 };
-ipcMain.handle('pick-uploads', guard(async (e, kind) => {
+ipcMain.handle('pick-uploads', serverAccess(guard(async (e, kind) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   let files = [];
   let root = '';
@@ -241,7 +331,7 @@ ipcMain.handle('pick-uploads', guard(async (e, kind) => {
     return { token, name: path.basename(p), rel, size };
   });
   return { project, items, truncated: files.length > MAX_PICK };
-}));
+})));
 
 ipcMain.handle('save-many', guard(async (e, { files }) => {
   const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
@@ -253,11 +343,16 @@ ipcMain.handle('save-many', guard(async (e, { files }) => {
 }));
 
 app.whenReady().then(() => {
+  if (!hasInstanceLock) return;
   const ud = app.getPath('userData');
+  const { createSpellChecker } = require('./spellcheck.cjs');
+  const spellCheckerReady = createSpellChecker(ud);
   license = createLicenseStore({ file: path.join(ud, 'device-license.json'), publicKeyFile: path.join(__dirname, '..', 'dist', 'license-public.pem') });
   auth = createClient({
     configFile: path.join(ud, 'server.json'),
     localFile: path.join(ud, 'users.json'),
+    sessionFile: path.join(ud, 'server-session.bin'),
+    safeStorage,
     fetch: net.fetch.bind(net),
     onNotifications: (snapshot) => {
       for (const win of BrowserWindow.getAllWindows()) {
@@ -266,6 +361,28 @@ app.whenReady().then(() => {
     },
   });
   ipcMain.handle('license-status', () => license.status());
+  ipcMain.handle('spellchecker-language', () => {
+    if (!spellChecker) throw new Error('The spell checker is not ready.');
+    return spellChecker.getLanguage();
+  });
+  ipcMain.handle('spellchecker-set-language', async (e, language) => {
+    if (!spellChecker) throw new Error('The spell checker is not ready.');
+    const selected = await spellChecker.setLanguage(language);
+    for (const win of BrowserWindow.getAllWindows()) applySpellCheckerLanguage(win);
+    return selected;
+  });
+  ipcMain.handle('spellchecker-check-words', (e, words) => {
+    if (!spellChecker) throw new Error('The spell checker is not ready.');
+    if (e.sender !== mainWindow?.webContents) throw new Error('This spell-check request is not allowed.');
+    if (!Array.isArray(words) || words.length > 500) throw new Error('Spell-check words are invalid or too numerous.');
+    return spellChecker.checkWords(words);
+  });
+  ipcMain.handle('spellchecker-add-word', async (e, word) => {
+    if (!spellChecker) throw new Error('The spell checker is not ready.');
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win !== mainWindow) throw new Error('This spell-check request is not allowed.');
+    await addPersonalSpellWord(win, word);
+  });
   ipcMain.handle('license-import', async (e) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
       properties: ['openFile'], filters: [{ name: 'License files', extensions: ['json', 'license'] }],
@@ -290,7 +407,8 @@ app.whenReady().then(() => {
       detail: 'PDF review, markup and shared drawing collaboration.\nDeveloped by: TRL 2026', buttons: ['OK'],
     });
   });
-  ipcMain.handle('shared-docs', guard((e, a = {}) => {
+  ipcMain.handle('shared-docs', serverAccess((e, a = {}) => {
+    if (sharedOperationRequiresLicense(a.op)) requireAccess(auth, license, true);
     if (!auth.docs) return { ok: false, error: 'Shared documents are unavailable.' };
     if (a.op === 'upload' && a.token) {
       const p = picked.get(a.token);
@@ -306,12 +424,19 @@ app.whenReady().then(() => {
   }));
   // Password changes must remain available during mandatory first-login changes.
   ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
-  ipcMain.handle('auth-notifications', readGuard((e, a) => auth.notifications(a || {})));
-  ipcMain.handle('auth-admin-list', readGuard(() => auth.adminList()));
-  ipcMain.handle('auth-admin-action', readGuard((e, a) => auth.adminAction(a || {})));
+  ipcMain.handle('auth-notifications', (e, a) => { requireSignIn(auth); return auth.notifications(a || {}); });
+  ipcMain.handle('auth-admin-list', () => { requireSignIn(auth); return auth.adminList(); });
+  ipcMain.handle('auth-admin-action', (e, a) => { requireSignIn(auth); return auth.adminAction(a || {}); });
   ipcMain.handle('auth-test', (e, url) => auth.test(url));
   ipcMain.handle('auth-configure', (e, a) => auth.configure(a || {}));
-  createWindow();
-  app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
+  void spellCheckerReady.then((checker) => {
+    spellChecker = checker;
+    createWindow();
+    app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
+  }).catch((error) => {
+    dialog.showErrorBox('Spell checker unavailable', `The English dictionaries could not be loaded.\n\n${error.message}`);
+    createWindow();
+    app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
+  });
 });
 app.on('window-all-closed', () => app.quit());

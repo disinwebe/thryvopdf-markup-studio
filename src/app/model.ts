@@ -72,6 +72,10 @@ export function loadDocumentZoom(key: string, storage: ZoomStore | null = getZoo
   }
 }
 
+export function initialDocumentZoom(key: string, fitPage: boolean, storage: ZoomStore | null = getZoomStore()): number {
+  return fitPage ? 0 : loadDocumentZoom(key, storage);
+}
+
 export function saveDocumentZoom(key: string, zoom: number, storage: ZoomStore | null = getZoomStore()): void {
   if (!storage || !Number.isFinite(zoom) || zoom < 0.05 || zoom > 8) return;
   try { storage.setItem(zoomStorageKey(key), String(zoom)); } catch { /* zoom remains session-only when storage is unavailable */ }
@@ -84,7 +88,7 @@ export const stateOf = (d: Doc): DocState => ({
   bookmarks: d.bookmarks,
 });
 
-export async function createDoc(name: string, bytes: Uint8Array, path?: string, dirty = false): Promise<Doc> {
+export async function createDoc(name: string, bytes: Uint8Array, path?: string, dirty = false, options: { fitPage?: boolean } = {}): Promise<Doc> {
   const pdf = await loadPdf(bytes);
   let st: DocState = { markups: [], calibrations: {}, sheets: {}, bookmarks: [] };
   try {
@@ -105,7 +109,7 @@ export async function createDoc(name: string, bytes: Uint8Array, path?: string, 
     redo: [],
     dirty,
     page: 0,
-    zoom: loadDocumentZoom(documentZoomKey({ name, path })),
+    zoom: initialDocumentZoom(documentZoomKey({ name, path }), options.fitPage === true),
     viewport: { left: 0, top: 0 },
     textCache: new Map(),
   };

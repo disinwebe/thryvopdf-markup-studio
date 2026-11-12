@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { directlyAttachedToolbarIds, loadToolbarState, repositionDockPreview, saveToolbarState, snapDockPosition, snapToToolbar, toolbarDockPreview, toolbarDockReservations, toolbarOrientation, toolbarOrientationForTarget, toolbarSavedDimensions, toolbarUsesIconMode } from '../src/components/MovableToolbar';
+import { loadToolbarState, repositionDockPreview, saveToolbarState, snapDockPosition, snapToToolbar, toolbarDockPreview, toolbarDockReservations, toolbarOrientation, toolbarOrientationForTarget, toolbarSavedDimensions, toolbarUsesIconMode } from '../src/components/MovableToolbar';
 
 describe('movable toolbar docking', () => {
-  it('restores visibility, lock, size, position, and dock attachments from persistent storage', () => {
+  it('restores visibility, lock, size, position, and edge docking from persistent storage', () => {
     const values = new Map<string, string>();
     const storage = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -16,7 +16,6 @@ describe('movable toolbar docking', () => {
       height: 96,
       edge: null,
       corner: null,
-      attachedTo: { id: 'file', side: 'right' as const },
     };
 
     saveToolbarState('content', state, storage);
@@ -29,8 +28,30 @@ describe('movable toolbar docking', () => {
       height: null,
       edge: null,
       corner: null,
-      attachedTo: null,
     });
+  });
+
+  it('ignores legacy toolbar attachment data when restoring saved positions', () => {
+    const state = {
+      visible: true,
+      locked: false,
+      position: { x: 120, y: 64 },
+      width: 420,
+      height: 96,
+      edge: null,
+      corner: null,
+      attachedTo: { id: 'file', side: 'right' },
+    };
+    expect(loadToolbarState('content', { getItem: () => JSON.stringify(state) }))
+      .toEqual({
+        visible: true,
+        locked: false,
+        position: { x: 120, y: 64 },
+        width: 420,
+        height: 96,
+        edge: null,
+        corner: null,
+      });
   });
 
   it('uses natural dimensions when docked but preserves the saved floating size', () => {
@@ -53,175 +74,139 @@ describe('movable toolbar docking', () => {
 
   it('previews the same edge, corner, and toolbar targets used when dropping', () => {
     const target = {
-      id: 'markup', edge: null, corner: null, attachedTo: null, position: { x: 0, y: 12 },
+      id: 'markup', edge: null, corner: null, position: { x: 0, y: 12 },
       width: 300, height: 40, visible: true, moved: false,
     };
     expect(toolbarDockPreview({ x: 4, y: 7 }, 200, 40, [], 'file', 800, 600)).toEqual({
-      position: { x: 0, y: 0 }, attachedTo: null, corner: 'top-left', edge: null,
+      position: { x: 0, y: 0 }, corner: 'top-left', edge: null,
     });
     expect(toolbarDockPreview({ x: 8, y: 120 }, 200, 40, [], 'file', 800, 600)).toEqual({
-      position: { x: 0, y: 120 }, attachedTo: null, corner: null, edge: 'left',
+      position: { x: 0, y: 120 }, corner: null, edge: 'left',
     });
     expect(toolbarDockPreview({ x: 792, y: 120 }, 200, 40, [], 'file', 800, 600)).toEqual({
-      position: { x: 800, y: 120 }, attachedTo: null, corner: null, edge: 'right',
+      position: { x: 800, y: 120 }, corner: null, edge: 'right',
     });
     expect(toolbarDockPreview({ x: 303, y: 12 }, 260, 40, [target], 'measure', 800, 600)).toEqual({
-      position: { x: 300, y: 12 }, attachedTo: { id: 'markup', side: 'right' }, corner: null, edge: null,
+      position: { x: 304, y: 12 }, corner: null, edge: null,
     });
     expect(toolbarDockPreview({ x: 400, y: 300 }, 200, 40, [], 'file', 800, 600)).toBeNull();
   });
 
-  it('inherits dock orientation from the connected toolbar group', () => {
-    expect(toolbarOrientationForTarget({ edge: 'left', corner: null, attachedTo: null })).toBe('icons');
-    expect(toolbarOrientationForTarget({ edge: 'right', corner: null, attachedTo: null })).toBe('icons');
-    expect(toolbarOrientationForTarget({ edge: 'top', corner: null, attachedTo: null })).toBe('horizontal');
-    expect(toolbarOrientationForTarget({ edge: 'bottom', corner: null, attachedTo: null })).toBe('horizontal');
-    expect(toolbarOrientationForTarget({ edge: null, corner: 'top-left', attachedTo: null })).toBe('horizontal');
-    expect(toolbarOrientationForTarget({ edge: null, corner: 'bottom-left', attachedTo: null })).toBe('horizontal');
-    expect(toolbarOrientationForTarget({ edge: null, corner: 'top-right', attachedTo: null })).toBe('icons');
-    expect(toolbarOrientationForTarget({ edge: null, corner: 'bottom-right', attachedTo: null })).toBe('icons');
-    expect(toolbarOrientationForTarget({ edge: null, corner: null, attachedTo: { id: 'target', side: 'top' } })).toBe('horizontal');
-    expect(toolbarOrientationForTarget({ edge: null, corner: null, attachedTo: { id: 'target', side: 'bottom' } })).toBe('horizontal');
-    expect(toolbarOrientationForTarget({ edge: null, corner: null, attachedTo: { id: 'target', side: 'left' } })).toBe('icons');
-
-    const sideDockedTarget = {
-      id: 'markup', edge: 'left' as const, corner: null, attachedTo: null,
-      position: { x: 0, y: 120 }, width: 90, height: 300, visible: true, moved: true,
-    };
-    const topDockedTarget = {
-      id: 'file', edge: 'top' as const, corner: null, attachedTo: null,
-      position: { x: 0, y: 0 }, width: 700, height: 60, visible: true, moved: true,
-    };
-    expect(toolbarOrientationForTarget({
-      edge: null, corner: null,
-      attachedTo: { id: 'markup', side: 'bottom' },
-    }, [sideDockedTarget])).toBe('icons');
-    expect(toolbarOrientationForTarget({
-      edge: null, corner: null,
-      attachedTo: { id: 'file', side: 'right' },
-    }, [topDockedTarget])).toBe('horizontal');
-    const defaultTopToolbar = {
-      id: 'default-file', edge: null, corner: null, attachedTo: null,
-      position: { x: 0, y: 0 }, width: 940, height: 68, visible: true, moved: false,
-    };
-    const attachedToDefaultTop = {
-      id: 'content', edge: null, corner: null, attachedTo: { id: 'default-file', side: 'right' as const },
-      position: { x: 940, y: 0 }, width: 88, height: 240, visible: true, moved: true,
-    };
-    expect(toolbarOrientationForTarget(attachedToDefaultTop, [defaultTopToolbar, attachedToDefaultTop])).toBe('horizontal');
-
-    const rightCornerTarget = {
-      id: 'right-corner', edge: null, corner: 'top-right' as const, attachedTo: null,
-      position: { x: 900, y: 0 }, width: 100, height: 60, visible: true, moved: true,
-    };
-    const attachedToRightCorner = {
-      id: 'attached-right', edge: null, corner: null, attachedTo: { id: 'right-corner', side: 'bottom' as const },
-      position: { x: 900, y: 60 }, width: 100, height: 80, visible: true, moved: true,
-    };
-    expect(toolbarOrientationForTarget(attachedToRightCorner, [rightCornerTarget, attachedToRightCorner])).toBe('icons');
-
-    const rightEdgeTarget = {
-      id: 'right-edge', edge: 'right' as const, corner: null, attachedTo: null,
-      position: { x: 900, y: 60 }, width: 100, height: 80, visible: true, moved: true,
-    };
-    const attachedToRightEdge = {
-      id: 'attached-edge', edge: null, corner: null, attachedTo: { id: 'right-edge', side: 'bottom' as const },
-      position: { x: 900, y: 140 }, width: 100, height: 80, visible: true, moved: true,
-    };
-    expect(toolbarOrientationForTarget(attachedToRightEdge, [rightEdgeTarget, attachedToRightEdge])).toBe('icons');
+  it('uses the toolbar’s own edge or corner for orientation', () => {
+    expect(toolbarOrientationForTarget({ edge: 'left', corner: null })).toBe('icons');
+    expect(toolbarOrientationForTarget({ edge: 'right', corner: null })).toBe('icons');
+    expect(toolbarOrientationForTarget({ edge: 'top', corner: null })).toBe('horizontal');
+    expect(toolbarOrientationForTarget({ edge: 'bottom', corner: null })).toBe('horizontal');
+    expect(toolbarOrientationForTarget({ edge: null, corner: 'top-left' })).toBe('horizontal');
+    expect(toolbarOrientationForTarget({ edge: null, corner: 'bottom-left' })).toBe('horizontal');
+    expect(toolbarOrientationForTarget({ edge: null, corner: 'top-right' })).toBe('icons');
+    expect(toolbarOrientationForTarget({ edge: null, corner: 'bottom-right' })).toBe('icons');
   });
 
   it('uses horizontal buttons at top and bottom edges and corners', () => {
-    const tallState = { edge: null, corner: null, attachedTo: null, height: 140 };
-    const topPreview = { position: { x: 100, y: 0 }, edge: 'top' as const, corner: null, attachedTo: null };
+    const tallState = { edge: null, corner: null, height: 140 };
+    const topPreview = { position: { x: 100, y: 0 }, edge: 'top' as const, corner: null };
     expect(toolbarUsesIconMode(topPreview, tallState, true)).toBe(false);
-    const bottomPreview = { position: { x: 100, y: 500 }, edge: 'bottom' as const, corner: null, attachedTo: null };
+    const bottomPreview = { position: { x: 100, y: 500 }, edge: 'bottom' as const, corner: null };
     expect(toolbarUsesIconMode(bottomPreview, tallState, true)).toBe(false);
-    expect(toolbarUsesIconMode({ position: { x: 0, y: 0 }, edge: null, corner: 'top-left', attachedTo: null }, tallState, true)).toBe(false);
-    expect(toolbarUsesIconMode({ position: { x: 0, y: 0 }, edge: null, corner: 'bottom-left', attachedTo: null }, tallState, true)).toBe(false);
-    expect(toolbarUsesIconMode({ position: { x: 100, y: 0 }, edge: null, corner: 'top-right', attachedTo: null }, tallState, true)).toBe(true);
+    expect(toolbarUsesIconMode({ position: { x: 0, y: 0 }, edge: null, corner: 'top-left' }, tallState, true)).toBe(false);
+    expect(toolbarUsesIconMode({ position: { x: 0, y: 0 }, edge: null, corner: 'bottom-left' }, tallState, true)).toBe(false);
+    expect(toolbarUsesIconMode({ position: { x: 100, y: 0 }, edge: null, corner: 'top-right' }, tallState, true)).toBe(true);
     expect(toolbarUsesIconMode(null, { ...tallState, edge: 'top' }, false)).toBe(false);
     expect(toolbarOrientation(null, { ...tallState, edge: 'top' }, false)).toBe('horizontal');
   });
 
-  it('only detaches immediate toolbar children when a toolbar is moved', () => {
-    const layouts = [
-      { id: 'parent', edge: null, corner: null, attachedTo: null, position: { x: 0, y: 0 }, width: 200, height: 40, visible: true, moved: true },
-      { id: 'child', edge: null, corner: null, attachedTo: { id: 'parent', side: 'bottom' as const }, position: { x: 0, y: 40 }, width: 200, height: 40, visible: true, moved: true },
-      { id: 'grandchild', edge: null, corner: null, attachedTo: { id: 'child', side: 'bottom' as const }, position: { x: 0, y: 80 }, width: 200, height: 40, visible: true, moved: true },
-      { id: 'unrelated', edge: null, corner: null, attachedTo: null, position: { x: 300, y: 0 }, width: 200, height: 40, visible: true, moved: true },
-    ];
-    expect(directlyAttachedToolbarIds(layouts, 'parent')).toEqual(['child']);
-  });
-
   it('reserves the largest visible corner toolbar on each app edge', () => {
     expect(toolbarDockReservations([
-      { id: 'a', edge: null, corner: 'top-left', attachedTo: null, position: { x: 0, y: 0 }, width: 360, height: 44, visible: true, moved: true },
-      { id: 'b', edge: null, corner: 'top-right', attachedTo: null, position: { x: 580, y: 0 }, width: 420, height: 52, visible: true, moved: true },
-      { id: 'c', edge: null, corner: 'bottom-left', attachedTo: null, position: { x: 0, y: 752 }, width: 300, height: 48, visible: true, moved: true },
-      { id: 'd', edge: null, corner: 'bottom-right', attachedTo: null, position: { x: 660, y: 744 }, width: 340, height: 56, visible: true, moved: true },
-      { id: 'e', edge: null, corner: 'top-left', attachedTo: null, position: { x: 0, y: 0 }, width: 600, height: 70, visible: false, moved: true },
-      { id: 'f', edge: null, corner: null, attachedTo: null, position: { x: 100, y: 100 }, width: 700, height: 80, visible: true, moved: true },
+      { id: 'a', edge: null, corner: 'top-left', position: { x: 0, y: 0 }, width: 360, height: 44, visible: true, moved: true },
+      { id: 'b', edge: null, corner: 'top-right', position: { x: 580, y: 0 }, width: 420, height: 52, visible: true, moved: true },
+      { id: 'c', edge: null, corner: 'bottom-left', position: { x: 0, y: 752 }, width: 300, height: 48, visible: true, moved: true },
+      { id: 'd', edge: null, corner: 'bottom-right', position: { x: 660, y: 744 }, width: 340, height: 56, visible: true, moved: true },
+      { id: 'e', edge: null, corner: 'top-left', position: { x: 0, y: 0 }, width: 600, height: 70, visible: false, moved: true },
+      { id: 'f', edge: null, corner: null, position: { x: 100, y: 100 }, width: 700, height: 80, visible: true, moved: true },
     ], 1000, 800, 8)).toEqual({ top: 44, bottom: 56, left: 0, right: 0 });
   });
 
-  it('snaps a toolbar beside another toolbar and keeps attached groups in the reserved layout', () => {
+  it('snaps a toolbar beside another without linking their state', () => {
     const target = {
-      id: 'markup', edge: null, corner: null, attachedTo: null, position: { x: 0, y: 12 },
+      id: 'markup', edge: null, corner: null, position: { x: 0, y: 12 },
       width: 300, height: 40, visible: true, moved: false,
     };
-    expect(snapToToolbar({ x: 303, y: 12 }, 260, 40, [target], 'measure')).toEqual({
-      position: { x: 300, y: 12 },
-      attachedTo: { id: 'markup', side: 'right' },
-    });
+    expect(snapToToolbar({ x: 303, y: 12 }, 260, 40, [target], 'measure'))
+      .toEqual({ position: { x: 304, y: 12 }, edge: null });
     expect(toolbarDockReservations([
       target,
       {
-        id: 'measure', edge: null, corner: null, attachedTo: { id: 'markup', side: 'right' },
-        position: { x: 300, y: 12 }, width: 260, height: 40, visible: true, moved: true,
+        id: 'measure', edge: null, corner: null,
+        position: { x: 304, y: 12 }, width: 260, height: 40, visible: true, moved: true,
       },
-    ], 1000, 800, 60)).toEqual({ top: 0, bottom: 0, left: 560, right: 0 });
+    ], 1000, 800, 60)).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
     expect(toolbarDockReservations([
-      { ...target, position: { x: 0, y: 760 }, corner: 'bottom-left' },
+      { ...target, position: { x: 0, y: 760 }, corner: 'bottom-left', moved: true },
       {
-        id: 'measure', edge: null, corner: null, attachedTo: { id: 'markup', side: 'right' },
-        position: { x: 300, y: 760 }, width: 260, height: 40, visible: true, moved: true,
+        id: 'measure', edge: null, corner: null,
+        position: { x: 304, y: 760 }, width: 260, height: 40, visible: true, moved: true,
       },
     ], 1000, 800, 60)).toEqual({ top: 0, bottom: 40, left: 0, right: 0 });
   });
 
+  it('inherits the dock area when snapping beside a docked toolbar', () => {
+    const topToolbar = {
+      id: 'file', edge: 'top' as const, corner: null, position: { x: 0, y: 0 },
+      width: 300, height: 40, visible: true, moved: true,
+    };
+    const snappedTop = snapToToolbar({ x: 303, y: 0 }, 260, 40, [topToolbar], 'content', 800, 600);
+    expect(snappedTop).toEqual({ position: { x: 304, y: 0 }, edge: 'top' });
+    expect(toolbarDockPreview({ x: 303, y: 0 }, 260, 40, [topToolbar], 'content', 800, 600))
+      .toMatchObject({ position: { x: 304, y: 0 }, edge: 'top' });
+    expect(toolbarOrientationForTarget({ edge: snappedTop?.edge ?? null, corner: null })).toBe('horizontal');
+    expect(toolbarDockReservations([
+      topToolbar,
+      { ...topToolbar, id: 'content', position: { x: 304, y: 0 }, width: 260 },
+    ], 800, 600, 0).top).toBe(40);
+
+    const leftToolbar = {
+      id: 'measure', edge: 'left' as const, corner: null, position: { x: 0, y: 120 },
+      width: 92, height: 300, visible: true, moved: true,
+    };
+    expect(snapToToolbar({ x: 0, y: 420 }, 92, 80, [leftToolbar], 'markup', 800, 600))
+      .toEqual({ position: { x: 0, y: 424 }, edge: 'left' });
+  });
+
   it('moves an overlapping toolbar to its nearest clear side', () => {
     const target = {
-      id: 'target', edge: null, corner: null, attachedTo: null, position: { x: 300, y: 200 },
+      id: 'target', edge: null, corner: null, position: { x: 300, y: 200 },
       width: 100, height: 80, visible: true, moved: true,
     };
-    expect(snapToToolbar({ x: 320, y: 220 }, 80, 60, [target], 'moving', 800, 600)).toEqual({
-      position: { x: 310, y: 280 },
-      attachedTo: { id: 'target', side: 'bottom' },
-    });
+    expect(snapToToolbar({ x: 320, y: 220 }, 80, 60, [target], 'moving', 800, 600))
+      .toEqual({ position: { x: 310, y: 284 }, edge: null });
     const blockedBottom = {
-      id: 'blocker', edge: null, corner: null, attachedTo: null, position: { x: 250, y: 280 },
+      id: 'blocker', edge: null, corner: null, position: { x: 250, y: 280 },
       width: 200, height: 60, visible: true, moved: true,
     };
-    expect(snapToToolbar({ x: 320, y: 220 }, 80, 60, [target, blockedBottom], 'moving', 800, 600)?.attachedTo.side)
-      .toBe('right');
+    expect(snapToToolbar({ x: 320, y: 220 }, 80, 60, [target, blockedBottom], 'moving', 800, 600))
+      .toEqual({ position: { x: 404, y: 210 }, edge: null });
+
+    const wideTarget = { ...target, position: { x: 0, y: 0 }, width: 900, height: 50 };
+    expect(snapToToolbar({ x: 760, y: 0 }, 200, 60, [wideTarget], 'moving', 800, 540))
+      .toEqual({ position: { x: 350, y: 54 }, edge: null });
   });
 
   it('keeps the selected edge stable while resizing a dock preview', () => {
-    const rightPreview = { position: { x: 700, y: 300 }, edge: 'right' as const, corner: null, attachedTo: null };
-    const resized = repositionDockPreview(rightPreview, { x: 800, y: 700 }, 92, 180, [], 908, 620);
+    const rightPreview = { position: { x: 700, y: 300 }, edge: 'right' as const, corner: null };
+    const resized = repositionDockPreview(rightPreview, { x: 800, y: 700 }, 908, 620);
     expect(resized).toEqual({ ...rightPreview, position: { x: 908, y: 620 } });
     expect(toolbarOrientationForTarget(resized)).toBe('icons');
 
-    const topPreview = { position: { x: 300, y: 0 }, edge: 'top' as const, corner: null, attachedTo: null };
-    const resizedTop = repositionDockPreview(topPreview, { x: 0, y: 0 }, 92, 180, [], 908, 620);
+    const topPreview = { position: { x: 300, y: 0 }, edge: 'top' as const, corner: null };
+    const resizedTop = repositionDockPreview(topPreview, { x: 0, y: 0 }, 908, 620);
     expect(resizedTop).toEqual({ ...topPreview, position: { x: 0, y: 0 } });
     expect(toolbarOrientationForTarget(resizedTop)).toBe('horizontal');
   });
 
   it('reserves horizontal viewer space for side-docked toolbars', () => {
     const toolbar = {
-      edge: 'left' as const, corner: null, attachedTo: null, position: { x: 0, y: 120 },
+      edge: 'left' as const, corner: null, position: { x: 0, y: 120 },
       width: 300, height: 50, visible: true, moved: true,
     };
     expect(toolbarDockReservations([{ ...toolbar, id: 'left' }], 1000, 800, 60))
@@ -231,14 +216,14 @@ describe('movable toolbar docking', () => {
     ], 1000, 800, 60)).toEqual({ top: 0, bottom: 0, left: 0, right: 300 });
   });
 
-  it('reserves top and side space independently for an attached vertical toolbar', () => {
+  it('reserves top and side space independently for separate toolbars', () => {
     expect(toolbarDockReservations([
     {
-      id: 'file', edge: 'top', corner: null, attachedTo: null, position: { x: 0, y: 0 },
+      id: 'file', edge: 'top', corner: null, position: { x: 0, y: 0 },
       width: 900, height: 60, visible: true, moved: true,
     },
     {
-      id: 'markup', edge: null, corner: null, attachedTo: { id: 'file', side: 'bottom' },
+      id: 'markup', edge: null, corner: null,
       position: { x: 0, y: 60 }, width: 90, height: 300, visible: true, moved: true,
     },
     ], 1920, 1080, 60)).toEqual({ top: 0, bottom: 0, left: 90, right: 0 });

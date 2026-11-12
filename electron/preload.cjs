@@ -1,8 +1,24 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const localUserName = process.env.USERNAME || process.env.USER || 'Local user';
 
 contextBridge.exposeInMainWorld('api', {
+  localUserName,
   startupFiles: () => ipcRenderer.invoke('startup-files'),
+  consumeOpenFiles: () => ipcRenderer.invoke('consume-open-files'),
+  onOpenFiles: (fn) => {
+    const handler = () => {
+      ipcRenderer.invoke('consume-open-files')
+        .then((files) => { if (files.length) fn(files); })
+        .catch((error) => fn([], error instanceof Error ? error.message : String(error)));
+    };
+    ipcRenderer.on('open-files-pending', handler);
+    return () => ipcRenderer.removeListener('open-files-pending', handler);
+  },
   setMenuState: (state) => ipcRenderer.send('menu-state', state),
+  spellCheckerLanguage: () => ipcRenderer.invoke('spellchecker-language'),
+  setSpellCheckerLanguage: (language) => ipcRenderer.invoke('spellchecker-set-language', language),
+  checkSpellWords: (words) => ipcRenderer.invoke('spellchecker-check-words', words),
+  addSpellCheckerWord: (word) => ipcRenderer.invoke('spellchecker-add-word', word),
   setNativeTheme: (theme) => ipcRenderer.send('theme', theme),
   onMenuAction: (fn) => {
     const handler = (_event, action) => fn(action);
@@ -10,6 +26,13 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.removeListener('menu-action', handler);
   },
   quitApp: () => ipcRenderer.invoke('quit-app'),
+  onAppCloseRequested: (fn) => {
+    const handler = () => fn();
+    ipcRenderer.on('app-close-requested', handler);
+    return () => ipcRenderer.removeListener('app-close-requested', handler);
+  },
+  markCloseGuardReady: () => ipcRenderer.send('close-guard-ready'),
+  respondToAppClose: (allow) => ipcRenderer.send('close-guard-response', allow),
   appVersion: () => ipcRenderer.invoke('app-version'),
   showAbout: () => ipcRenderer.invoke('show-about'),
   openFiles: (opts) => ipcRenderer.invoke('open-files', opts),

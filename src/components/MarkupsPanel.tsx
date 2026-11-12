@@ -202,6 +202,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       {(m.type === 'text' || m.type === 'callout' || m.type === 'note') && (
         <textarea
           rows={3}
+          spellCheck
           placeholder="Text"
           autoFocus={!m.text}
           value={m.text ?? ''}
@@ -211,7 +212,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       {isMeasure(m.type) && (
         <label>
           Subject
-          <input value={m.subject ?? ''} placeholder={defaultSubject(m)} onChange={(e) => upd({ subject: e.target.value }, 'subject')} />
+          <input spellCheck value={m.subject ?? ''} placeholder={defaultSubject(m)} onChange={(e) => upd({ subject: e.target.value }, 'subject')} />
         </label>
       )}
       <label>
@@ -239,7 +240,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           {c.edited && <span className="muted small"> (edited)</span>}
           {editing?.id === c.id ? (
             <div>
-              <textarea className="comment-input" value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
+              <textarea className="comment-input" spellCheck value={editing.text} rows={3} onChange={(e) => setEditing({ id: c.id, text: e.target.value })} />
               <div className="row">
                 <button
                   onClick={() => {
@@ -281,6 +282,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
         <textarea
           className="comment-input"
           ref={commentInput}
+          spellCheck
           rows={2}
           value={comment}
           aria-label="Add Comment"

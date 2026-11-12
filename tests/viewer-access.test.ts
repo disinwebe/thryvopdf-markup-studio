@@ -2,18 +2,24 @@ import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { requireAccess, sharedOperationRequiresLicense } = require('../electron/access.cjs');
+const { requireAccess, requireSignIn, sharedOperationRequiresLicense } = require('../electron/access.cjs');
 const { menuTemplate } = require('../electron/menu.cjs');
 
 describe('unlicensed viewer access', () => {
   const signedIn = { current: () => ({ email: 'reader@example.test' }) };
   const unlicensed = { status: () => ({ ok: false, error: 'License required' }) };
 
-  it('allows authenticated viewing but rejects writes and unauthenticated access', () => {
+  it('allows viewing and licensed local edits without a server account', () => {
     expect(() => requireAccess(signedIn, unlicensed)).not.toThrow();
     expect(() => requireAccess(signedIn, unlicensed, true)).toThrow('License required');
-    expect(() => requireAccess({ current: () => null }, unlicensed)).toThrow('Not signed in');
-    expect(() => requireAccess(signedIn, { status: () => ({ ok: true }) }, true)).not.toThrow();
+    const guest = { current: () => null };
+    expect(() => requireAccess(guest, unlicensed)).not.toThrow();
+    expect(() => requireAccess(guest, { status: () => ({ ok: true }) }, true)).not.toThrow();
+  });
+
+  it('requires a server account only for server-dependent APIs', () => {
+    expect(() => requireSignIn(signedIn)).not.toThrow();
+    expect(() => requireSignIn({ current: () => null })).toThrow('Sign in to the server');
   });
 
   it('allows only shared read and presence operations without a license', () => {
@@ -29,5 +35,12 @@ describe('unlicensed viewer access', () => {
     const measurements = menu[3].submenu.find((item: { label?: string }) => item.label === '&Measurements');
     expect(measurements.enabled).toBe(false);
     expect(measurements.submenu.find((item: { label?: string }) => item.label === '&Area').enabled).toBe(false);
+  });
+
+  it('keeps local menu actions usable before server sign-in', () => {
+    const menu = menuTemplate({ signedIn: false, licensed: true, documentOpen: true, viewerActive: true, serverMode: false }, vi.fn());
+    const find = (label: string) => menu.flatMap((m: { submenu: { label?: string; enabled?: boolean }[] }) => m.submenu).find((item: { label?: string }) => item.label === label);
+    for (const label of ['&Open PDF...', '&Save', 'Open S&hared...', '&Search text in open PDFs...']) expect(find(label)?.enabled).toBe(true);
+    expect(find('&Logout')?.enabled).toBe(false);
   });
 });
