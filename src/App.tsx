@@ -8,7 +8,7 @@ import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, rotatePage, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
-import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, downloadName, makeMarkup, pickFiles, saveBytes, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
+import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, documentZoomKey, downloadName, loadDocumentZoom, makeMarkup, pickFiles, saveBytes, saveDocumentZoom, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
 import { PageView } from './components/PageView';
 import { BookmarksPanel, Thumbnails } from './components/Thumbnails';
 import { MarkupsPanel } from './components/MarkupsPanel';
@@ -741,6 +741,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       const d: Doc = {
         ...base,
         markups: r.markups,
+        zoom: loadDocumentZoom(`shared:${info.id}`),
         dirty: false,
         shared: { id: info.id, version: r.version, pr: r.pr, synced: syncedOf(r.markups), collaborators: r.presence || [], status: 'live' },
       };
@@ -932,7 +933,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const goto = (i: number) =>
     active && updateDoc(active.id, (d) => ({ page: Math.max(0, Math.min(d.numPages - 1, i)) }));
-  const setZoom = (z: number) => active && updateDoc(active.id, () => ({ zoom: z }));
+  const setZoom = (z: number) => {
+    if (!active) return;
+    updateDoc(active.id, () => ({ zoom: z }));
+    saveDocumentZoom(documentZoomKey(active), z);
+  };
   const zoomBy = (f: number) => active && setZoom(Math.max(0.05, Math.min(8, (active.zoom || 1) * f)));
 
   // ---- keyboard -----

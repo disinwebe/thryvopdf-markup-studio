@@ -50,6 +50,33 @@ export function renamedTab(d: Pick<Doc, 'name' | 'shared'>, name: string): strin
   return d.shared || !trimmed || /[\\/:*?"<>|]/.test(trimmed) ? null : trimmed;
 }
 
+export function documentZoomKey(doc: { name: string; path?: string; shared?: { id: string } }): string {
+  if (doc.shared) return `shared:${doc.shared.id}`;
+  if (doc.path) return `file:${doc.path.toLowerCase()}`;
+  return `name:${doc.name.toLowerCase()}`;
+}
+
+type ZoomStore = Pick<Storage, 'getItem' | 'setItem'>;
+const zoomStorageKey = (key: string) => `thryvopdf-document-zoom-v1:${key}`;
+const getZoomStore = (): ZoomStore | null => {
+  try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; }
+};
+
+export function loadDocumentZoom(key: string, storage: ZoomStore | null = getZoomStore()): number {
+  if (!storage) return 0;
+  try {
+    const zoom = Number(storage.getItem(zoomStorageKey(key)));
+    return Number.isFinite(zoom) && zoom >= 0.05 && zoom <= 8 ? zoom : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function saveDocumentZoom(key: string, zoom: number, storage: ZoomStore | null = getZoomStore()): void {
+  if (!storage || !Number.isFinite(zoom) || zoom < 0.05 || zoom > 8) return;
+  try { storage.setItem(zoomStorageKey(key), String(zoom)); } catch { /* zoom remains session-only when storage is unavailable */ }
+}
+
 export const stateOf = (d: Doc): DocState => ({
   markups: d.markups,
   calibrations: d.calibrations,
@@ -78,7 +105,7 @@ export async function createDoc(name: string, bytes: Uint8Array, path?: string, 
     redo: [],
     dirty,
     page: 0,
-    zoom: 0,
+    zoom: loadDocumentZoom(documentZoomKey({ name, path })),
     viewport: { left: 0, top: 0 },
     textCache: new Map(),
   };

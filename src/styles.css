@@ -19,6 +19,13 @@ input.pg { width: 56px; }
 .toolbar-groups[hidden] { display: none; }
 .toolbar-group { display: flex; flex-direction: column; align-items: stretch; width: max-content; min-width: 92px; min-height: 34px; max-width: calc(100vw - 16px); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 2px 8px var(--shadow); overflow: hidden; resize: both; }
 .toolbar-group.moved { position: absolute; z-index: 9; max-height: calc(100% - 8px); box-shadow: 0 4px 14px var(--shadow); }
+.toolbar-group-docked { border-color: transparent; border-radius: 2px; box-shadow: none !important; resize: none; }
+.toolbar-group-side-docked { width: 92px !important; height: auto !important; }
+.toolbar-group-side-docked .bar { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.toolbar-dock-preview { position: absolute; z-index: 10; border: 2px dashed var(--acc); border-radius: 6px; background: #3b82f624; box-shadow: 0 0 0 3px #3b82f622; pointer-events: none; }
+.toolbar-dock-preview::before { position: absolute; top: -10px; left: 8px; padding: 1px 5px; border-radius: 3px; background: var(--acc); color: #fff; content: attr(data-label); font-size: 10px; line-height: 14px; white-space: nowrap; }
+.toolbar-dock-preview[data-label-position="below"]::before { top: auto; bottom: -10px; }
+.toolbar-dock-preview.attached { border-style: solid; }
 .toolbar-group-header { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; min-height: 30px; padding: 2px 4px; border-bottom: 1px solid var(--line); cursor: grab; touch-action: none; user-select: none; }
 .toolbar-group-header.locked { cursor: default; }
 .toolbar-group-header:active { cursor: grabbing; }
