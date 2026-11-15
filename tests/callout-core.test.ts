@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { anchorOf, calloutLayout, defaultCalloutPos, hitCallout, moveCallout } from '../src/core/callout';
-import { canDeleteComment, canDeleteMarkup, canEditComment } from '../src/core/comments';
+import { canDeleteComment, canDeleteMarkup, canEditComment, canManageSharedReview } from '../src/core/comments';
 import { distToPath, translate } from '../src/core/geometry';
 import { saveWithState, readState } from '../src/core/annotations';
 import { Markup } from '../src/core/types';
@@ -109,5 +109,14 @@ describe('comment permissions (client mirror)', () => {
     expect([canEditComment(c, bob), canDeleteComment(c, bob)]).toEqual([false, false]);
     expect([canEditComment(c, adm), canDeleteComment(c, adm)]).toEqual([false, true]);
     expect([canDeleteMarkup(m(), bob), canDeleteMarkup(m(), ann), canDeleteMarkup(m(), adm)]).toEqual([false, true, false]);
+  });
+  it('lets the document uploader manage review markups without granting access to drawings or measurements', () => {
+    const uploader = { name: 'Owner', email: 'owner@x' };
+    const review = m({ author: 'Bob', authorEmail: 'bob@x' });
+    expect(canManageSharedReview(review, uploader, 'owner@x')).toBe(true);
+    expect(canManageSharedReview(review, bob, 'owner@x')).toBe(true);
+    expect(canManageSharedReview(m({ type: 'line', author: 'Bob', authorEmail: 'bob@x' }), uploader, 'owner@x')).toBe(false);
+    expect(canManageSharedReview(m({ type: 'm-area', author: 'Bob', authorEmail: 'bob@x' }), uploader, 'owner@x')).toBe(false);
+    expect(canManageSharedReview(review, uploader, 'other@x')).toBe(false);
   });
 });

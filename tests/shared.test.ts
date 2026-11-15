@@ -256,6 +256,43 @@ describe('shared documents', () => {
     await call('DELETE', `/api/docs/${up.doc.id}`, ann);
   });
 
+  it("lets the uploader change another author's review status and append a reply only", async () => {
+    const up = await call('POST', '/api/docs?member=bob%40example.com&name=uploader-review.pdf', ann, undefined, PDF);
+    const review = mk('review-1', { comments: [{ id: 'review-comment', author: 'x', date: 'd', text: 'Please confirm this detail.' }] });
+    const line = mk('line-1', { type: 'line' });
+    await call('POST', `/api/docs/${up.doc.id}/ops`, bob, { upserts: [review, line] });
+
+    const state = await call('GET', `/api/docs/${up.doc.id}/state`, ann);
+    const storedReview = state.markups.find((markup: any) => markup.id === review.id);
+    const updated = await call('POST', `/api/docs/${up.doc.id}/ops`, ann, {
+      upserts: [{
+        ...storedReview,
+        status: 'Accepted',
+        comments: [...storedReview.comments, { id: 'uploader-reply', author: 'Forged', authorEmail: 'forged@example.com', date: 'd2', text: 'Confirmed.' }],
+      }],
+    });
+    expect(updated.code).toBe(200);
+    const after = (await call('GET', `/api/docs/${up.doc.id}/state`, bob)).markups;
+    const savedReview = after.find((markup: any) => markup.id === review.id);
+    expect(savedReview).toMatchObject({ author: 'Bob Ray', status: 'Accepted' });
+    expect(savedReview.comments.map((comment: any) => [comment.author, comment.authorEmail, comment.text])).toEqual([
+      ['Bob Ray', 'bob@example.com', 'Please confirm this detail.'],
+      ['Ann Lee', 'ann@example.com', 'Confirmed.'],
+    ]);
+
+    expect((await call('POST', `/api/docs/${up.doc.id}/ops`, ann, {
+      upserts: [{ ...savedReview, color: '#000000' }],
+    })).code).toBe(403);
+    expect((await call('POST', `/api/docs/${up.doc.id}/ops`, ann, {
+      upserts: [{ ...savedReview, comments: [{ ...savedReview.comments[0], text: 'Rewritten by uploader.' }, savedReview.comments[1]] }],
+    })).code).toBe(403);
+    const storedLine = after.find((markup: any) => markup.id === line.id);
+    expect((await call('POST', `/api/docs/${up.doc.id}/ops`, ann, {
+      upserts: [{ ...storedLine, status: 'Accepted' }],
+    })).code).toBe(403);
+    await call('DELETE', `/api/docs/${up.doc.id}`, ann);
+  });
+
   it('only the owner or an admin can delete', async () => {
     expect((await call('DELETE', `/api/docs/${id}`, bob)).code).toBe(403);
     expect((await call('DELETE', `/api/docs/${id}`, ann)).ok).toBe(true);
