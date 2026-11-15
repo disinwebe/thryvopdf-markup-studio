@@ -5,6 +5,16 @@ export const isTypingTarget = (t: EventTarget | null): boolean => {
   return !!el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable === true);
 };
 
+export function focusSearchOnShortcut(
+  e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; preventDefault(): void },
+  input: Pick<HTMLInputElement, 'focus'> | null,
+): boolean {
+  if ((!e.ctrlKey && !e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'f' || !input) return false;
+  e.preventDefault();
+  input.focus();
+  return true;
+}
+
 export function historyShortcut(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; target?: EventTarget | null }): 'undo' | 'redo' | null {
   if ((!e.ctrlKey && !e.metaKey) || e.altKey || isTypingTarget(e.target ?? null)) return null;
   const key = e.key.toLowerCase();

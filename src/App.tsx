@@ -21,7 +21,7 @@ import { SharedLibrary, SharedListing } from './components/SharedLibrary';
 import { useSharedSync } from './app/useSharedSync';
 import { batchChanges, syncedOf } from './app/shared';
 import { useTheme } from './app/theme';
-import { historyShortcut, isTypingTarget, toolForKey } from './app/shortcuts';
+import { focusSearchOnShortcut, historyShortcut, isTypingTarget, toolForKey } from './app/shortcuts';
 import { getCommentSize, setCommentSize } from './core/commentSize';
 import { markupCsv } from './core/markupCsv';
 import { importStamp } from './app/stampImport';
@@ -189,6 +189,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const lastEdit = useRef<{ key: string; t: number } | null>(null);
   const searchRun = useRef(0);
   const searchNavigationToken = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const pendingMarkupSelection = useRef<{ docId: string; markupId: string } | null>(null);
   const closeRequestHandlerRef = useRef<() => void>(() => {});
   const docsRef = useRef(docs);
@@ -1315,7 +1316,9 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       }
       return;
     }
-    if (commentTarget || defaultsOpen || licenseInfo || library || actions.uiBlocked || isTypingTarget(e.target)) return;
+    if (commentTarget || defaultsOpen || licenseInfo || library || actions.uiBlocked) return;
+    if (view === 'viewer' && active && focusSearchOnShortcut(e, searchInputRef.current)) return;
+    if (isTypingTarget(e.target)) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     if (view === 'compare' && !mod && (key === 'v' || key === 'h' || e.code === 'Space')) return;
@@ -1677,9 +1680,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             )}
             <label htmlFor="pdf-text-search-input"><ActionIcon name="search" className="pdf-search-icon" /><span>Search Text</span></label>
             <input
+              ref={searchInputRef}
               id="pdf-text-search-input"
               type="search"
               aria-label="Search Text"
+              title="Search exact words in this PDF (Ctrl+F)"
               placeholder="Exact word"
               value={searchText}
               onChange={(event) => changeSearchText(event.target.value)}
