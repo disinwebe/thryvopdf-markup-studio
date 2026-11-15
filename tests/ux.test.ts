@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { COMMENT_SIZE_DEFAULT, COMMENT_SIZE_KEY, clampCommentSize, loadCommentSize, saveCommentSize } from '../src/core/commentSize';
 import { calloutLayout } from '../src/core/callout';
-import { SHARED_REFRESH_MS, historyShortcut, startPolling, toolForKey } from '../src/app/shortcuts';
+import { SHARED_REFRESH_MS, focusSearchOnShortcut, historyShortcut, startPolling, toolForKey } from '../src/app/shortcuts';
 
 const mem = () => {
   const m = new Map<string, string>();
@@ -30,6 +30,18 @@ describe('comment text size preference', () => {
 });
 
 describe('tool shortcuts', () => {
+  it('focuses PDF search with Ctrl+F or Cmd+F, but not with other modifier combinations', () => {
+    const input = { focus: vi.fn() };
+    const event = { key: 'f', ctrlKey: true, preventDefault: vi.fn() };
+    expect(focusSearchOnShortcut(event, input)).toBe(true);
+    expect(input.focus).toHaveBeenCalledOnce();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(focusSearchOnShortcut({ key: 'F', metaKey: true, preventDefault: vi.fn() }, input)).toBe(true);
+    expect(focusSearchOnShortcut({ key: 'f', ctrlKey: true, shiftKey: true, preventDefault: vi.fn() }, input)).toBe(false);
+    expect(focusSearchOnShortcut({ key: 'f', ctrlKey: true, altKey: true, preventDefault: vi.fn() }, input)).toBe(false);
+    expect(focusSearchOnShortcut({ key: 'f', ctrlKey: true, preventDefault: vi.fn() }, null)).toBe(false);
+  });
+
   it('recognizes undo and both redo shortcuts without taking over input editing', () => {
     expect(historyShortcut({ key: 'z', ctrlKey: true })).toBe('undo');
     expect(historyShortcut({ key: 'Z', ctrlKey: true, shiftKey: true })).toBe('redo');

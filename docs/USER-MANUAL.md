@@ -85,7 +85,7 @@ The main workspace has:
 - **Left panel:** Project, Pages, and Bookmarks tabs.
 - **Right panel:** Markups and comment properties. The **Measurements...** button opens calibration and takeoff controls when you want them.
 - **Floating controls:** Select/Pan, page navigation, continuous-scroll toggle, zoom, Fit Width, and Fit Page at the bottom of the viewer.
-- **Search Text:** The fixed search bar at the upper-right of the PDF tabs finds complete words in the active PDF and highlights every match in yellow. Use the previous/next arrows to navigate matches.
+- **Search Text:** The fixed search bar at the upper-right of the PDF tabs finds complete words in the active PDF and highlights every match in yellow. Press **Ctrl+F** to focus the search box, then use the previous/next arrows to navigate matches.
 - **Status bar:** Save and operation messages. After saving a local PDF, choose **Open saved PDF** in the status bar to open the saved file.
 
 The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**, show or hide the left and right panels.
@@ -105,7 +105,7 @@ The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**
 6. PDFs opened directly from Windows start in **Fit Page** preview. PDFs opened from inside ThryvoPDF restore their last zoom level; shared PDFs also remember zoom on this device.
 7. To move around a zoomed page, select **Pan**, hold the middle mouse button, or hold **Space** temporarily while dragging.
 8. Open the **Pages** tab in the left panel and select a thumbnail to jump to that page.
-9. To search the active PDF, enter a complete word in **Search Text** and press **Enter** or **Find**. All exact-word matches are highlighted in yellow at 50% opacity. After the first search, each **Enter** press advances to the next match; use the arrows to move forward or backward. Search works in unlicensed viewing mode, but scanned pages without a text layer cannot be searched.
+9. To search the active PDF, press **Ctrl+F** or click **Search Text**, enter a complete word, then press **Enter** or **Find**. All exact-word matches are highlighted in yellow at 50% opacity. After the first search, each **Enter** press advances to the next match; use the arrows to move forward or backward. Search works in unlicensed viewing mode, but scanned pages without a text layer cannot be searched.
 
 To close a document, choose the **X** on its tab or **File > Close Document**. To close ThryvoPDF with unsaved PDF changes, choose **Save All**, **Don't Save**, or **Cancel**; canceled or failed saves keep the app open.
 
@@ -453,6 +453,7 @@ The manager saves email credentials in the server data folder's `notify.json`; l
 | `Ctrl+Alt+L` | Show or hide left panel |
 | `Ctrl+Alt+R` | Show or hide right panel |
 | `Ctrl+Shift+F` | Search text in open PDFs |
+| `Ctrl+F` | Focus Search Text in the active PDF |
 | `Ctrl+Shift+K` | Check spelling in PDF |
 | `PageUp` / `PageDown` | Previous / next page |
 | `Enter` / double-click / right-click | Finish multi-point markup |
