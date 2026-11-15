@@ -123,7 +123,7 @@ function CaptureApp() {
   useEffect(() => {
     if (scene !== 'shared') return;
     const timer = window.setInterval(() => {
-      const openButton = document.querySelector('button[title="Open Shared Documents"]');
+      const openButton = document.querySelector('button[title="Open Shared Documents"], button[title="Sign in to open shared documents"]');
       if (!openButton || openButton.disabled) return;
       window.clearInterval(timer);
       openButton.click();
@@ -152,7 +152,13 @@ function CaptureApp() {
   window.api = {
     startupFiles: async () => [file],
     setMenuState: () => {},
+    spellCheckerLanguage: async () => 'en-US',
+    onAppCloseRequested: () => () => {},
+    markCloseGuardReady: () => {},
+    respondToAppClose: () => {},
     onMenuAction: () => () => {},
+    onOpenFiles: () => () => {},
+    consumeOpenFiles: async () => [],
     sharedDocs: async ({ op }) => {
       if (op === 'list') return { ok: true, docs };
       if (op === 'users') return { ok: true, users: [

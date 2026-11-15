@@ -3,7 +3,7 @@ import { Doc, TOOL_LABEL } from '../app/model';
 import { defaultSubject, measureLabel, DEFAULT_CAL } from '../core/measurement';
 import { markupCsv } from '../core/markupCsv';
 import { COMMENT_SIZE_MAX, COMMENT_SIZE_MIN } from '../core/commentSize';
-import { Actor, canDeleteComment, canDeleteMarkup, canEditComment, ownsComment, ownsMarkup } from '../core/comments';
+import { Actor, canDeleteComment, canDeleteMarkup, canEditComment, canManageSharedReview, ownsComment, ownsMarkup } from '../core/comments';
 import { isReviewMarkup, numberMarkups } from '../core/numbering';
 import { Markup, STATUSES, STAMPS, Status, isMeasure, uid } from '../core/types';
 import { PdfComments } from './PdfComments';
@@ -97,6 +97,8 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
   const [comment, setComment] = useState('');
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const commentInput = useRef<HTMLTextAreaElement>(null);
+  const canEditProperties = !doc.shared || ownsMarkup(m, user);
+  const canManageReview = !doc.shared || canManageSharedReview(m, user, doc.shared.ownerEmail);
   useEffect(() => {
     if (focusCommentId === m.id) {
       commentInput.current?.focus();
@@ -108,12 +110,13 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
   const hasFill = ['rect', 'ellipse', 'cloud', 'text', 'callout', 'm-area'].includes(m.type);
   return (
     <div className="props">
-      <fieldset className="props-fields" disabled={readOnly || (!!doc.shared && !ownsMarkup(m, user))}>
+      <fieldset className="props-fields" disabled={readOnly}>
       <h4>
         {TOOL_LABEL[m.type]} properties
         <button className="danger" disabled={!canDeleteMarkup(m, user)} title={canDeleteMarkup(m, user) ? undefined : "Only the author can delete this markup"} onClick={() => onDelete(m.id)}>Delete</button>
       </h4>
       {isMeasure(m.type) && <div className="muted">{measureLabel(m, cal) || '1 item'}</div>}
+      <fieldset className="markup-property-fields" disabled={!canEditProperties}>
       <label>
         Color
         <StandardColorPicker value={m.color} onChange={(color) => upd({ color }, 'color')} />
@@ -215,9 +218,10 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           <input spellCheck value={m.subject ?? ''} placeholder={defaultSubject(m)} onChange={(e) => upd({ subject: e.target.value }, 'subject')} />
         </label>
       )}
+      </fieldset>
       <label>
         Status
-        <select value={m.status} onChange={(e) => upd({ status: e.target.value as Status })}>
+        <select value={m.status} disabled={!canManageReview} onChange={(e) => upd({ status: e.target.value as Status })}>
           {STATUSES.map((s) => (
             <option key={s}>{s}</option>
           ))}
@@ -232,7 +236,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       <h4>Comments</h4>
       <label className="inline-check">
         <span>Show comment box on drawing</span>
-        <input type="checkbox" checked={!m.calloutHidden} onChange={(e) => upd({ calloutHidden: !e.target.checked })} />
+        <input type="checkbox" checked={!m.calloutHidden} disabled={!canEditProperties} onChange={(e) => upd({ calloutHidden: !e.target.checked })} />
       </label>
       {m.comments.map((c) => (
         <div key={c.id} className="comment" title={'Comment ID ' + c.id}>
@@ -254,7 +258,13 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
               </div>
             </div>
           ) : (
-            <div>{c.text}</div>
+            <div
+              className={canEditComment(c, user) ? 'comment-text editable' : 'comment-text'}
+              title={canEditComment(c, user) ? 'Double-click to edit your comment' : undefined}
+              onDoubleClick={() => {
+                if (canEditComment(c, user)) setEditing({ id: c.id, text: c.text });
+              }}
+            >{c.text}</div>
           )}
           <label className="comment-size">
             Comment text size
@@ -287,6 +297,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           value={comment}
           aria-label="Add Comment"
           placeholder="Add a comment / reply"
+          disabled={!canManageReview}
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && comment.trim()) {

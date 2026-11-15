@@ -36,6 +36,7 @@ export interface Collaborator {
 
 export interface SharedInfo {
   id: string;
+  ownerEmail?: string;
   version: number;
   pr: number;
   /** JSON of each markup as last known to the server, used to detect local changes. */

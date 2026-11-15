@@ -1,4 +1,5 @@
 import { Comment, Markup } from './types';
+import { isReviewMarkup } from './numbering';
 
 export interface Actor {
   name: string;
@@ -12,6 +13,10 @@ export const ownsMarkup = (m: Markup, u: Actor): boolean => (m.authorEmail ? m.a
 
 /** Only the author edits a comment (administrators cannot rewrite someone else's words). */
 export const canEditComment = ownsComment;
+
+/** The shared-document uploader can manage review status and append replies to review markups. */
+export const canManageSharedReview = (m: Markup, u: Actor, ownerEmail?: string): boolean =>
+  ownsMarkup(m, u) || (!!ownerEmail && ownerEmail === u.email && isReviewMarkup(m));
 
 /** The author deletes a comment; administrators may also delete (moderation). */
 export const canDeleteComment = (c: Comment, u: Actor): boolean => ownsComment(c, u) || u.role === 'admin';

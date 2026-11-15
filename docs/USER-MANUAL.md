@@ -83,16 +83,16 @@ The main workspace has:
 - **Markup toolbar:** Markup tools such as Line, Cloud, Rectangle, and Stamp.
 - **Measure toolbar:** Choose Length, PolyLength, Spline, Radius, Diameter, Area, Perimeter, Angle, or Count here. Choosing a measurement tool does not open the Measurements window.
 - **Left panel:** Project, Pages, and Bookmarks tabs.
-- **Right panel:** Markups and comment properties. The **Measurements...** button opens calibration and takeoff controls when you want them.
+- **Right panel:** Markups and comment properties. The tabs are ordered **Markups**, **Measurements**, then **Watermarks**. The **Measurements...** button opens calibration and takeoff controls when you want them.
 - **Floating controls:** Select/Pan, page navigation, continuous-scroll toggle, zoom, Fit Width, and Fit Page at the bottom of the viewer.
 - **Search Text:** The fixed search bar at the upper-right of the PDF tabs finds complete words in the active PDF and highlights every match in yellow. Press **Ctrl+F** to focus the search box, then use the previous/next arrows to navigate matches.
 - **Status bar:** Save and operation messages. After saving a local PDF, choose **Open saved PDF** in the status bar to open the saved file.
 
 The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**, show or hide the left and right panels.
 
-![Current ThryvoPDF workspace showing grouped toolbars, drawing canvas, project navigation, markup properties, and review notifications](user-manual-assets/workspace.png)
+![Current ThryvoPDF workspace showing Markup and Measurement toolbars in icon-only mode, drawing canvas, project navigation, markup properties, and review notifications](user-manual-assets/workspace.png)
 
-*Figure 1. Main workspace: document navigation at left, the drawing canvas in the center, and markup properties at right.*
+*Figure 1. Main workspace: the Markup and Measurement toolbars are shown in icon-only mode; document navigation is at left, the drawing canvas is centered, and markup properties are at right.*
 
 ## 4. Open and read PDFs
 
@@ -137,7 +137,7 @@ There is no standalone Callout drawing tool. Comment boxes are attached to revie
 4. To delete a selected markup, press **Delete** or use **Edit > Delete selected markup**. Deleting a markup also deletes its comments.
 5. Use **Ctrl+Z** to undo or **Ctrl+Y** / **Ctrl+Shift+Z** to redo.
 
-For shared documents, you can select markups by any author from the Markups list to locate them on the drawing. You can edit only your own markups and comments. The server checks this permission as well as the app. A markup can be deleted only by its author; only a comment's author can edit or delete that comment.
+For shared documents, you can select markups by any author from the Markups list to locate them on the drawing. You can edit only your own markup properties and comments. The document uploader can also change the status of any review markup and append a reply to its comment thread, but cannot change that markup's geometry or properties, or edit or delete another user's comments. Double-click your own comment text, or choose **Edit**, to revise it. Only a markup's author can delete it, and only a comment's author can edit or delete it. The server enforces these permissions.
 
 ### Review markups, statuses, and comments
 
@@ -155,9 +155,9 @@ The red numbered comment ID appears beside the comment box and in the Markups pa
 
 Spell checking is available in comment, markup-text, watermark, shared-document description, and editable PDF text fields. Misspellings are underlined as you type. Open **Option > Spell check language** to choose English (US) or English (UK), then right-click an underlined word for suggestions or **Add to dictionary**. The first use of a language may require an internet connection to download its Chromium dictionary; added words are saved in the operating-system spell-check dictionary. To scan existing PDF text, use **Edit > Check spelling in PDF...**; this is a separate command.
 
-![Current markup workspace with a selected review cloud, linked comment callout, and editable review properties](user-manual-assets/markups-and-comments.png)
+![Current markup workspace showing Markup and Measurement toolbars in icon-only mode, a selected review cloud, linked comment callout, and editable review properties](user-manual-assets/markups-and-comments.png)
 
-*Figure 2. Select a markup to see its properties and associated comments.*
+*Figure 2. The Markup and Measurement toolbars are in icon-only mode; selecting a review markup displays its properties and associated comments.*
 
 ### Custom stamps
 
@@ -326,7 +326,7 @@ The scan works without a license and does not change PDF contents. It uses the s
 
 Choose **Shared Documents...** to connect to the company server; the app asks for sign-in only when you use this server feature. A signed-in user can browse shared PDFs in read-only mode without a license. A license is required to upload, edit, or update review status.
 
-![Current Shared Documents window showing project groups, reviewers, assignments, and review status](user-manual-assets/shared-documents.png)
+![Current Shared Documents window with Markup and Measurement toolbars in icon-only mode behind it, showing project groups, reviewers, assignments, and review status](user-manual-assets/shared-documents.png)
 
 *Figure 4. Shared-document groups and reviewer status are visible in the library.*
 
@@ -374,7 +374,7 @@ Newly assigned reviewers receive an in-app alert and, if the administrator has c
 2. Add and edit markups using the same viewer tools as a local PDF.
 3. Changes sync automatically. The shared-document banner shows who is working in the document and whether your connection is live.
 4. If offline or your session expires, the banner displays a warning. Keep the document open and restore the connection so pending changes can sync.
-5. You can select any markup to locate it on the drawing, but you can move, resize, edit, or delete only markups and comments you authored. The server enforces these restrictions.
+5. You can select any markup to locate it on the drawing, but you can move, resize, edit, or delete only markups you authored. The document uploader can change the status of review markups and add replies to their comments. Each user can edit their own comment by double-clicking its text or choosing **Edit**; only its author can delete it.
 
 Shared documents sync markups and comments, not page calibration, bookmarks, or page organization. Page reorder, rotate, and insert are unavailable on shared tabs. If two people edit the same markup at the same time, the last change accepted by the server wins.
 
@@ -470,7 +470,7 @@ On Windows, use **Alt+F**, **Alt+E**, **Alt+O**, **Alt+V**, or **Alt+H** to open
 | Assigned user does not appear | The uploader should open **Manage access**, select the user, and choose **Save access**. Verify that the user is signing in with the assigned email address. |
 | Review checkbox is missing | Only assigned reviewers have a completion checkbox. Confirm the current user is assigned and refresh the list. |
 | Review count does not show Done | Every assigned reviewer must mark their own review done. Documents with no assigned reviewers count as Pending. |
-| Markup is not editable in a shared PDF | Shared markups can only be changed by their author. Verify the signed-in account and select your own markup. |
+| Markup is not editable in a shared PDF | Only the markup author can change its properties. The uploader can change its review status or add a reply. Verify the signed-in account and select a markup you can edit. |
 | Shared changes are not syncing | Check the collaboration banner for Offline or Session expired. Restore the network connection, sign in again if required, and allow the pending changes to sync. |
 | Email test fails | Check provider host/port, sender, mailbox credentials, and provider-specific requirements. For Graph, confirm the secret **value** is current and `Mail.Send` admin consent was granted. |
 | Search finds no text | Text search requires a text layer. Run OCR on scanned PDFs in another tool if searchable text is needed. Filename search in Shared Documents is separate from drawing text search. |

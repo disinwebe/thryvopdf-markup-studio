@@ -2,11 +2,13 @@
 const crypto = require('crypto');
 const defaultFs = require('fs');
 const path = require('path');
+const { isDeepStrictEqual } = require('util');
 
 const TYPES = new Set([
   'highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow', 'polyline', 'pen', 'stamp', 'note',
   'image', 'm-length', 'm-polylength', 'm-area', 'm-perimeter', 'm-angle', 'm-count',
 ]);
+const REVIEW_STATUSES = new Set(['None', 'Accepted', 'Rejected', 'Cancelled', 'Completed', 'Reviewed']);
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_MARKUPS = 20000;
 const MAX_BATCH = 2000;
@@ -62,6 +64,27 @@ const isAdmin = (u) => u.role === 'admin';
 // Comment ownership: by e-mail when stamped, by name for older comments.
 const ownsMarkup = (m, u) => (m.authorEmail ? m.authorEmail === u.email : m.author === u.name);
 const ownsComment = (c, u) => (c.authorEmail ? c.authorEmail === u.email : c.author === u.name);
+
+function uploaderReviewError(prev, m) {
+  if (prev.type === 'line' || prev.type === 'stamp' || prev.type.startsWith('m-')) {
+    return 'The document uploader can only manage review markups.';
+  }
+  if (m.status !== prev.status && !REVIEW_STATUSES.has(m.status)) return 'Invalid review status.';
+  const previousMarkup = { ...prev };
+  const incomingMarkup = { ...m };
+  delete previousMarkup.status;
+  delete previousMarkup.comments;
+  delete incomingMarkup.status;
+  delete incomingMarkup.comments;
+  if (!isDeepStrictEqual(previousMarkup, incomingMarkup)) {
+    return 'The document uploader can only change a review markup status or add a reply.';
+  }
+  const previousComments = prev.comments || [];
+  if (m.comments.length < previousComments.length || previousComments.some((c, i) => !isDeepStrictEqual(c, m.comments[i]))) {
+    return 'The document uploader cannot edit or delete existing comments.';
+  }
+  return null;
+}
 
 /** Edit/delete rules for comments: only the author edits; only the author (or an administrator) deletes. */
 function commentError(prev, m, user) {
@@ -307,9 +330,14 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       let deniedMsg = '';
       for (const m of ups) {
         const prev = d.markups.get(m.id);
-        const e = prev && !ownsMarkup(prev, user) && JSON.stringify(prev) !== JSON.stringify(m)
-          ? 'Only the author of a markup can edit it.'
-          : commentError(prev, m, user);
+        let e = null;
+        if (prev && !ownsMarkup(prev, user)) {
+          e = d.owner === user.email
+            ? uploaderReviewError(prev, m)
+            : !isDeepStrictEqual(prev, m) ? 'Only the author of a markup can edit it.' : null;
+        } else {
+          e = commentError(prev, m, user);
+        }
         if (e) { denied.add(m.id); deniedMsg = deniedMsg || e; }
       }
       for (const x of dels) {

@@ -34,10 +34,22 @@ async function waitFor(check, description, timeout = 30000) {
   throw new Error(`Timed out waiting for ${description}.`);
 }
 
+async function removeTempDir(directory) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      fs.rmSync(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY'].includes(error.code) || attempt === 9) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
 async function captureScene(scene, output, baseUrl) {
   const profile = path.join(tempDir, scene);
   fs.mkdirSync(profile, { recursive: true });
-  const process = spawn(browser, [
+  const browserProcess = spawn(browser, [
     '--headless=new',
     '--disable-gpu',
     '--hide-scrollbars',
@@ -47,7 +59,7 @@ async function captureScene(scene, output, baseUrl) {
     '--remote-allow-origins=*',
     `--user-data-dir=${profile}`,
     '--window-size=1440,1000',
-    `${baseUrl}?scene=${scene}`,
+    'about:blank',
   ], { stdio: 'ignore' });
   let socket;
 
@@ -84,6 +96,21 @@ async function captureScene(scene, output, baseUrl) {
     });
     await send('Page.enable');
     await send('Runtime.enable');
+    const toolbarPreferences = {
+      'thryvopdf-toolbar-group-markup-v1': {
+        visible: true, locked: false, position: { x: 0, y: 112 }, width: null, height: null, edge: 'right', corner: null,
+      },
+      'thryvopdf-toolbar-group-measure-v1': {
+        visible: true, locked: false, position: { x: 0, y: 430 }, width: null, height: null, edge: 'right', corner: null,
+      },
+    };
+    const preferenceScript = `if (location.origin === ${JSON.stringify(new URL(baseUrl).origin)}) {
+      Object.entries(${JSON.stringify(toolbarPreferences)}).forEach(([key, value]) => localStorage.setItem(key, JSON.stringify(value)));
+    }`;
+    await send('Page.addScriptToEvaluateOnNewDocument', {
+      source: preferenceScript,
+    });
+    await send('Page.navigate', { url: `${baseUrl}?scene=${scene}` });
     const sceneReady = scene === 'shared'
       ? 'document.querySelector(\'[role="dialog"][aria-label="Shared documents"]\')'
       : scene === 'markups'
@@ -95,8 +122,10 @@ async function captureScene(scene, output, baseUrl) {
         const check = () => {
           const canvas = document.querySelector(".page canvas");
           const ready = ${sceneReady};
-          if (canvas && canvas.width > 0 && canvas.height > 0 && ready) {
-            resolve({ ready: true, canvas: [canvas.width, canvas.height] });
+          const iconToolbars = [...document.querySelectorAll(".toolbar-group-icon-only .toolbar-group-title")].map((toolbar) => toolbar.textContent);
+          const iconModeReady = iconToolbars.includes("Markup tools") && iconToolbars.includes("Measurement tools");
+          if (canvas && canvas.width > 0 && canvas.height > 0 && ready && iconModeReady) {
+            resolve({ ready: true, canvas: [canvas.width, canvas.height], iconToolbars });
             return;
           }
           const status = document.querySelector(".status")?.textContent || "";
@@ -105,7 +134,7 @@ async function captureScene(scene, output, baseUrl) {
             return;
           }
           if (Date.now() - started > 30000) {
-            reject(new Error("PDF workspace did not become ready. Visible text: " + document.body.innerText.slice(-600)));
+            reject(new Error("PDF workspace or icon-mode toolbars did not become ready. Icon toolbars: " + iconToolbars.join(", ") + ". Visible text: " + document.body.innerText.slice(-600)));
             return;
           }
           setTimeout(check, 100);
@@ -126,7 +155,11 @@ async function captureScene(scene, output, baseUrl) {
     fs.writeFileSync(output, Buffer.from(screenshot.data, 'base64'));
   } finally {
     if (socket && socket.readyState === WebSocket.OPEN) socket.close();
-    if (!process.killed) process.kill();
+    if (browserProcess.exitCode === null && browserProcess.signalCode === null) {
+      const exited = new Promise((resolve) => browserProcess.once('exit', resolve));
+      browserProcess.kill();
+      await exited;
+    }
   }
 }
 
@@ -155,7 +188,7 @@ async function main() {
     }
   } finally {
     await server.close();
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    await removeTempDir(tempDir);
   }
 }
 

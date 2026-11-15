@@ -973,7 +973,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         markups: r.markups,
         zoom: loadDocumentZoom(`shared:${info.id}`),
         dirty: false,
-        shared: { id: info.id, version: r.version, pr: r.pr, synced: syncedOf(r.markups), collaborators: r.presence || [], status: 'live' },
+        shared: { id: info.id, ownerEmail: info.ownerEmail, version: r.version, pr: r.pr, synced: syncedOf(r.markups), collaborators: r.presence || [], status: 'live' },
       };
       setDocs((all) => [...all, d]);
       setActiveId(d.id);
@@ -1709,7 +1709,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       </div>
 
       {active?.shared && (
-        <div className={'collab' + (active.shared.status === 'live' ? '' : ' warn')} role="status">
+        <div className={'collab' + (active.shared.status === 'live' ? '' : ' warn')} role="status" style={{ marginLeft: toolbarReservations.left, marginRight: toolbarReservations.right }}>
           <b>☁ Shared document</b> - {readOnly ? 'read-only; updates from others appear live.' : 'edits sync live.'}
           {active.shared.status === 'live' ? (
             <span> Working now: {active.shared.collaborators.map((c) => (c.email === user.email ? 'You' : c.name) + (c.discipline ? ` (${c.discipline})` : '')).join(', ') || '-'}</span>
@@ -1853,8 +1853,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <div className="side right" id="right-panel" hidden={!rightPanelVisible}>
               <div className="ptabs">
                 <button className={rightTab === 'markups' ? 'on' : ''} onClick={() => setRightTab('markups')}>Markups ({countOf})</button>
-                <button className={rightTab === 'watermarks' ? 'on' : ''} onClick={() => setRightTab('watermarks')}>Watermarks ({watermarkCount})</button>
                 <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')}>Measurements ({measurementCount})</button>
+                <button className={rightTab === 'watermarks' ? 'on' : ''} onClick={() => setRightTab('watermarks')}>Watermarks ({watermarkCount})</button>
               </div>
               {rightTab === 'markups' && (
                 <MarkupsPanel

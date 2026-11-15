@@ -106,10 +106,15 @@ input.pg { width: 56px; }
 .item.active { background: var(--item-a); border-color: var(--acc); }
 .props, .box { border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 8px 0; }
 .props-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.markup-property-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 .props-fields > label { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin: 8px 0; }
 .props-fields > label.inline-check { flex-direction: row; align-items: center; gap: 8px; }
 .props-fields > label.inline-check input[type=checkbox] { margin: 0; }
 .props-fields > label input:not([type=color]):not([type=checkbox]), .props-fields > label select { width: 100%; }
+.markup-property-fields > label { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin: 8px 0; }
+.markup-property-fields > label.inline-check { flex-direction: row; align-items: center; gap: 8px; }
+.markup-property-fields > label.inline-check input[type=checkbox] { margin: 0; }
+.markup-property-fields > label input:not([type=color]):not([type=checkbox]), .markup-property-fields > label select { width: 100%; }
 label:has(> input[type=checkbox]), .props > label:has(> input[type=checkbox]), .upload-form label:has(> input[type=checkbox]) { display: flex; flex-direction: row; align-items: center; gap: 6px; }
 .upload-form input[type=checkbox] { width: auto; }
 .grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
@@ -141,6 +146,7 @@ th, td { border-bottom: 1px solid var(--line); padding: 3px 4px; text-align: lef
 .cap { text-align: center; color: var(--mut); }
 .nudge { display: inline-flex; gap: 2px; }
 .bm, .comment { padding: 3px 0; }
+.comment-text.editable { cursor: text; }
 .wrap { flex-wrap: wrap; } .pad { padding: 8px; }
 .empty { margin: auto; text-align: center; }
 .status { display: flex; align-items: center; gap: 10px; padding: 3px 10px; background: var(--stat); color: var(--mut); border-top: 1px solid var(--line); font-size: 12px; }
