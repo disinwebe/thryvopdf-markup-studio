@@ -37,7 +37,8 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
   const [f, setF] = useState({ name: '', email: '', discipline: DISCIPLINE_LIST[0], password: '', confirm: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const notifications = useNotifications(user.email ? user : null, st?.mode === 'server');
+  const updateSignedInUser = useCallback((profile: AuthUser) => setUser(profile), []);
+  const notifications = useNotifications(user.email ? user : null, st?.mode === 'server', updateSignedInUser);
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const refresh = useCallback(async () => {
@@ -177,7 +178,7 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
         <div className="modal">
           {panel === 'password'
             ? <ChangePassword onDone={(nextUser) => { setUser(nextUser); setPanel(null); }} onCancel={() => setPanel(null)} />
-            : <UserManagement me={user} onClose={() => setPanel(null)} />}
+            : <UserManagement me={user} onClose={() => setPanel(null)} onUserUpdated={setUser} />}
         </div>
       )}
       {authOpen && (

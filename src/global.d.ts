@@ -66,9 +66,9 @@ interface Window {
     sharedDocs(args: { op: 'list' | 'users' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group' | 'delete-group' | 'members' | 'review'; id?: string; name?: string; project?: string; newProject?: string; revision?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; members?: string[]; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number; done?: boolean }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
     notifications(args?: { read?: string[] | 'all'; clear?: boolean }): Promise<{ ok: boolean; error?: string; notifications?: AppNotification[]; unread?: number }>;
-    onNotifications?(callback: (snapshot: { notifications: AppNotification[]; unread: number }) => void): () => void;
+    onNotifications?(callback: (snapshot: { notifications: AppNotification[]; unread: number; profile?: AuthUser }) => void): () => void;
     adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;
-    adminAction(args: { email: string; action: string; role?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string }>;
+    adminAction(args: { email: string; action: string; role?: string; name?: string; profileEmail?: string; discipline?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string; user?: ManagedUser }>;
     testServer(url: string): Promise<{ ok: boolean; error?: string; url?: string; hasUsers?: boolean }>;
     configureAuth(args: { mode: 'server' | 'local'; serverUrl?: string }): Promise<{ ok: boolean; error?: string }>;
     register(args: { name: string; email: string; discipline: string; password: string; confirm: string }): Promise<AuthResult>;

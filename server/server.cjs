@@ -213,6 +213,28 @@ function createApp(opts = {}) {
           if (b.role !== 'admin' && (self || lastAdmin)) return bad('You cannot remove your own or the last administrator role.');
           u.role = b.role;
           break;
+        case 'profile': {
+          const name = String(b.name || '').trim();
+          const email = normEmail(b.profileEmail);
+          const discipline = String(b.discipline || '').trim();
+          if (!name || name.length > 120) return bad('Enter a name between 1 and 120 characters.');
+          if (!discipline || discipline.length > 80) return bad('Enter a discipline between 1 and 80 characters.');
+          if (email !== u.email && (!EMAIL_RE.test(email) || email.length > 254)) return bad('Enter a valid email address.');
+          const duplicate = find(email);
+          if (duplicate && duplicate !== u) return [409, { ok: false, error: 'An account with this email already exists.' }];
+          const updated = { name, email, discipline };
+          const docsResult = docs.updateUser(u.email, updated);
+          if (docsResult) return docsResult;
+          notifier.updateUser(u.email, updated);
+          const oldEmail = u.email;
+          u.name = name;
+          u.email = email;
+          u.discipline = discipline;
+          for (const session of sessions.values()) if (session.email === oldEmail) session.email = email;
+          for (const key of fails.keys()) if (key.startsWith(oldEmail + '|')) fails.delete(key);
+          save();
+          return [200, { ok: true, user: view(u) }];
+        }
         case 'reset': {
           const temp = randomPassword();
           setPassword(u, temp);

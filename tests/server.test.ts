@@ -225,4 +225,20 @@ describe('electron client against server', () => {
     expect((await c.register({ ...good, email: 'loc@example.com' })).ok).toBe(true);
     expect(c.current().email).toBe('loc@example.com');
   });
+
+  it('updates the signed-in admin session after correcting its own email', async () => {
+    const adm = mk('profile-admin');
+    await adm.configure({ mode: 'server', serverUrl: base });
+    expect((await adm.login({ email: 'admin', password: 'NewAdminPass1' })).ok).toBe(true);
+    const updated = await adm.adminAction({
+      email: 'admin',
+      action: 'profile',
+      name: 'Site Administrator',
+      profileEmail: 'admin@example.com',
+      discipline: 'General',
+    });
+    expect(updated.user).toMatchObject({ name: 'Site Administrator', email: 'admin@example.com' });
+    expect(adm.current()).toMatchObject({ name: 'Site Administrator', email: 'admin@example.com' });
+    expect((await adm.adminList()).ok).toBe(true);
+  });
 });
