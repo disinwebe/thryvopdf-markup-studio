@@ -65,6 +65,7 @@ describe('native menu wiring', () => {
     expect(file.find((m: { label: string }) => m.label === '&Open PDF...').icon).toBe('icon:open');
     expect(file.find((m: { label: string }) => m.label === '&Save').icon).toBe('icon:save');
     expect(file.find((m: { label: string }) => m.label === 'Save &As...').icon).toBe('icon:saveAs');
+    expect(file.find((m: { label: string }) => m.label === '&Print...').accelerator).toBe('CmdOrCtrl+P');
     file.find((m: { label: string }) => m.label === '&Save').click();
     expect(send).toHaveBeenCalledWith('save');
     expect(file.find((m: { label: string }) => m.label === '&Logout').icon).toBe('icon:key');
@@ -196,10 +197,22 @@ describe('native menu wiring', () => {
     const file = menu[0].submenu;
     expect(file.find((m: { label: string }) => m.label === '&Open PDF...').enabled).toBe(true);
     expect(file.find((m: { label: string }) => m.label === '&Save').enabled).toBe(false);
+    expect(file.find((m: { label: string }) => m.label === '&Print...').enabled).toBe(true);
     expect(file.find((m: { label: string }) => m.label === '&Logout').enabled).toBe(false);
     expect(menu[1].submenu.find((entry: { label: string }) => entry.label === '&Flatten').enabled).toBe(false);
     menu[4].submenu.find((m: { label: string }) => m.label === '&License...').click();
     expect(send).toHaveBeenCalledWith('license');
+  });
+  it('enables Print only when a document is open and the menu is not blocked', () => {
+    const send = vi.fn();
+    const closed = menuTemplate({ documentOpen: false }, send, 'win32')[0].submenu.find((entry: { label: string }) => entry.label === '&Print...');
+    const blocked = menuTemplate({ documentOpen: true, blocked: true }, send, 'win32')[0].submenu.find((entry: { label: string }) => entry.label === '&Print...');
+    const active = menuTemplate({ documentOpen: true }, send, 'win32')[0].submenu.find((entry: { label: string }) => entry.label === '&Print...');
+    expect(closed.enabled).toBe(false);
+    expect(blocked.enabled).toBe(false);
+    expect(active.enabled).toBe(true);
+    active.click();
+    expect(send).toHaveBeenCalledWith('print');
   });
   it('offers persistent English spell-check language options', () => {
     const send = vi.fn();

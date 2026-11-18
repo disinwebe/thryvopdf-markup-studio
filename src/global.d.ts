@@ -34,6 +34,10 @@ interface Window {
     localUserName: string;
     setMenuState(state: { signedIn: boolean; documentOpen: boolean; viewerActive: boolean; compareActive?: boolean; canUndo: boolean; canRedo: boolean; selected: boolean; canGroupSelected?: boolean; canUngroupSelected?: boolean; canFlattenSelected?: boolean; canFlattenAll?: boolean; serverMode: boolean; blocked: boolean; viewOnly?: boolean; toolbars?: Record<string, boolean>; spellcheckLanguage?: 'en-US' | 'en-GB' }): void;
     spellCheckerLanguage(): Promise<'en-US' | 'en-GB'>;
+    printPrinters(): Promise<Array<{ name: string; displayName: string; isDefault: boolean }>>;
+    printPrinterCapabilities(name: string): Promise<{ paperSizes: Array<{ name: string; width: number; height: number; rawKind: number }>; paperSources: Array<{ name: string; rawKind: number }>; defaultPaper: string; defaultSource: string }>;
+    openPrinterProperties(name: string): Promise<{ ok: boolean }>;
+    printDocument(options: { silent?: boolean; printBackground?: boolean; landscape?: boolean; pageSize?: string | { width: number; height: number }; copies?: number; collate?: boolean; duplexMode?: 'simplex' | 'shortEdge' | 'longEdge'; deviceName?: string }): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
     setSpellCheckerLanguage(language: 'en-US' | 'en-GB'): Promise<'en-US' | 'en-GB'>;
     checkSpellWords(words: string[]): Promise<Array<{ word: string; suggestions: string[] }>>;
     addSpellCheckerWord(word: string): Promise<void>;

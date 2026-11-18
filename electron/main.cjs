@@ -1,12 +1,15 @@
 const { app, BrowserWindow, ipcMain, dialog, net, Menu, nativeTheme, nativeImage, shell, safeStorage } = require('electron');
+const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { promisify } = require('util');
 const { createClient } = require('./client.cjs');
 const { menuTemplate, applyNativeTheme } = require('./menu.cjs');
 const { createLicenseStore, MAX_LICENSE_BYTES } = require('./license.cjs');
 const { renamePdfFile, writeSavedFile } = require('./fileOps.cjs');
 const { requireAccess, requireSignIn, sharedOperationRequiresLicense } = require('./access.cjs');
 const { createWindowCloseGuard } = require('./windowCloseGuard.cjs');
+const execFileAsync = promisify(execFile);
 
 // Paths the user opened or saved through a dialog; only these may be overwritten by "Save".
 // Keep the pre-rename data folder so existing installs keep their settings and accounts.
@@ -28,6 +31,52 @@ function startupPaths() {
   const fromArgs = pdfPaths(process.argv.slice(1));
   const fromEnv = pdfPaths((process.env.PMS_OPEN || '').split(';').filter(Boolean));
   return [...fromArgs, ...fromEnv];
+}
+
+async function windowsPrinterCapabilities(printerName) {
+  const encodedName = Buffer.from(printerName, 'utf8').toString('base64');
+  const script = `
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+Add-Type -AssemblyName System.Drawing
+$name = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedName}'))
+$settings = New-Object System.Drawing.Printing.PrinterSettings
+$settings.PrinterName = $name
+if (-not $settings.IsValid) { throw 'The selected printer is not available.' }
+$paperSizes = @(
+  foreach ($paper in $settings.PaperSizes) {
+    if ($paper.Width -gt 0 -and $paper.Height -gt 0) {
+      [PSCustomObject]@{ name = [string]$paper.PaperName; width = [int]$paper.Width; height = [int]$paper.Height; rawKind = [int]$paper.RawKind }
+    }
+  }
+)
+$paperSources = @(
+  foreach ($source in $settings.PaperSources) {
+    [PSCustomObject]@{ name = [string]$source.SourceName; rawKind = [int]$source.RawKind }
+  }
+)
+[PSCustomObject]@{
+  paperSizes = $paperSizes
+  paperSources = $paperSources
+  defaultPaper = [string]$settings.DefaultPageSettings.PaperSize.PaperName
+  defaultSource = [string]$settings.DefaultPageSettings.PaperSource.SourceName
+} | ConvertTo-Json -Compress -Depth 4
+`;
+  const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+  const { stdout } = await execFileAsync('powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', encodedScript,
+  ], { windowsHide: true, timeout: 20000, maxBuffer: 1024 * 1024 });
+  let result;
+  try {
+    result = JSON.parse(stdout.trim());
+  } catch {
+    throw new Error('Windows returned invalid printer capabilities.');
+  }
+  if (!Array.isArray(result.paperSizes) || !result.paperSizes.length) {
+    throw new Error('The selected printer did not report any supported paper sizes.');
+  }
+  return result;
 }
 
 function applySpellCheckerLanguage(win) {
@@ -382,6 +431,85 @@ app.whenReady().then(() => {
     const win = BrowserWindow.fromWebContents(e.sender);
     if (!win || win !== mainWindow) throw new Error('This spell-check request is not allowed.');
     await addPersonalSpellWord(win, word);
+  });
+  ipcMain.handle('print-printers', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win !== mainWindow) throw new Error('This printer-list request is not allowed.');
+    return (await win.webContents.getPrintersAsync()).map(({ name, displayName, isDefault }) => ({ name, displayName, isDefault }));
+  });
+  ipcMain.handle('print-printer-capabilities', async (e, printerName) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win !== mainWindow) throw new Error('This printer-settings request is not allowed.');
+    if (typeof printerName !== 'string' || !printerName.trim()) throw new Error('Select a printer first.');
+    const printers = await win.webContents.getPrintersAsync();
+    if (!printers.some((printer) => printer.name === printerName)) throw new Error('The selected printer is no longer available.');
+    if (process.platform !== 'win32') {
+      return {
+        paperSizes: [
+          { name: 'Letter', width: 850, height: 1100, rawKind: 1 },
+          { name: 'A4', width: 827, height: 1169, rawKind: 9 },
+        ],
+        paperSources: [],
+        defaultPaper: '',
+        defaultSource: '',
+      };
+    }
+    return windowsPrinterCapabilities(printerName);
+  });
+  ipcMain.handle('printer-properties', async (e, printerName) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win !== mainWindow) throw new Error('This printer-properties request is not allowed.');
+    if (process.platform !== 'win32') throw new Error('Printer properties are available only on Windows.');
+    if (typeof printerName !== 'string' || !printerName.trim()) throw new Error('Select a printer first.');
+    const printers = await win.webContents.getPrintersAsync();
+    if (!printers.some((printer) => printer.name === printerName)) throw new Error('The selected printer is no longer available.');
+    const child = spawn('rundll32.exe', ['printui.dll,PrintUIEntry', '/e', '/n', printerName], {
+      stdio: 'ignore',
+      windowsHide: false,
+    });
+    await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error('Printer properties closed with an error.'));
+      });
+    });
+    return { ok: true };
+  });
+  ipcMain.handle('print-document', async (e, options = {}) => {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    if (!win || win !== mainWindow) throw new Error('This print request is not allowed.');
+    if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('Print options are invalid.');
+    const papers = new Set(['A3', 'A4', 'A5', 'Legal', 'Letter', 'Tabloid']);
+    const duplexModes = new Set(['simplex', 'shortEdge', 'longEdge']);
+    if (options.copies !== undefined && (!Number.isInteger(options.copies) || options.copies < 1 || options.copies > 99)) throw new Error('Copies must be between 1 and 99.');
+    if (options.pageSize !== undefined) {
+      const standard = typeof options.pageSize === 'string' && papers.has(options.pageSize);
+      const custom = options.pageSize && typeof options.pageSize === 'object'
+        && Number.isInteger(options.pageSize.width) && options.pageSize.width > 0 && options.pageSize.width <= 1000000
+        && Number.isInteger(options.pageSize.height) && options.pageSize.height > 0 && options.pageSize.height <= 1000000;
+      if (!standard && !custom) throw new Error('The selected paper size is not supported.');
+    }
+    if (options.duplexMode !== undefined && !duplexModes.has(options.duplexMode)) throw new Error('The selected duplex mode is not supported.');
+    const printers = await win.webContents.getPrintersAsync();
+    if (options.deviceName !== undefined && !printers.some((printer) => printer.name === options.deviceName)) throw new Error('The selected printer is no longer available.');
+    if (options.silent === true && !options.deviceName) throw new Error('Select a printer before printing.');
+    return new Promise((resolve) => {
+      win.webContents.print({
+        silent: options.silent === true,
+        printBackground: options.printBackground === true,
+        landscape: options.landscape === true,
+        copies: options.copies ?? 1,
+        collate: options.collate === true,
+        ...(options.pageSize ? { pageSize: options.pageSize } : {}),
+        ...(options.duplexMode ? { duplexMode: options.duplexMode } : {}),
+        ...(options.deviceName ? { deviceName: options.deviceName } : {}),
+      }, (success, failureReason) => {
+        resolve(success
+          ? { ok: true }
+          : { ok: false, ...(failureReason === 'cancelled' ? { cancelled: true } : { error: failureReason || 'The print job failed.' }) });
+      });
+    });
   });
   ipcMain.handle('license-import', async (e) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
