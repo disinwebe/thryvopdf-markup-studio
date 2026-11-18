@@ -175,25 +175,53 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
     try { return normalizeSmtp(JSON.parse(fs.readFileSync(configFile, 'utf8')).smtp); } catch { return normalizeSmtp(); }
   };
   const view = (n) => ({ id: n.id, type: n.type, docId: n.docId, docName: n.docName, by: n.by, message: n.message, created: n.created, read: !!n.read });
-  const emit = (email) => {
+  const emit = (email, extra = {}) => {
     const listeners = subscribers.get(email);
     if (!listeners?.size) return;
     const snapshot = {
       notifications: (inbox[email] || []).map(view),
       unread: (inbox[email] || []).filter((item) => !item.read).length,
+      ...extra,
     };
-    for (const listener of listeners) listener(snapshot);
+    for (const subscription of listeners) subscription.listener(snapshot);
   };
 
   return {
     subscribe(email, listener) {
       const listeners = subscribers.get(email) || new Set();
-      listeners.add(listener);
+      const subscription = { email, listener };
+      listeners.add(subscription);
       subscribers.set(email, listeners);
       return () => {
-        listeners.delete(listener);
-        if (!listeners.size) subscribers.delete(email);
+        const current = subscribers.get(subscription.email);
+        current?.delete(subscription);
+        if (current && !current.size) subscribers.delete(subscription.email);
       };
+    },
+    updateUser(oldEmail, profile) {
+      const newEmail = profile.email;
+      const previous = inbox[oldEmail] || [];
+      const existing = inbox[newEmail] || [];
+      if (oldEmail !== newEmail && previous.length) {
+        inbox[newEmail] = [...existing, ...previous]
+          .sort((a, b) => Date.parse(b.created) - Date.parse(a.created))
+          .slice(0, MAX_PER_USER);
+        delete inbox[oldEmail];
+        save();
+      }
+      if (oldEmail !== newEmail) {
+        const listeners = subscribers.get(oldEmail);
+        if (listeners) {
+          const nextListeners = new Set(subscribers.get(newEmail) || []);
+          for (const subscription of listeners) {
+            subscription.email = newEmail;
+            nextListeners.add(subscription);
+          }
+          subscribers.set(newEmail, nextListeners);
+          subscribers.delete(oldEmail);
+        }
+      }
+      emit(newEmail, { profile });
     },
     registered(user, admins) {
       const created = new Date(now()).toISOString();

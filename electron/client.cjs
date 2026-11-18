@@ -160,7 +160,13 @@ function createClient({ configFile, localFile, sessionFile, safeStorage, fetch: 
               }
               if (event === 'notifications' && data.length) {
                 const snapshot = JSON.parse(data.join('\n'));
-                if (Array.isArray(snapshot.notifications) && typeof snapshot.unread === 'number') onNotifications(snapshot);
+                if (Array.isArray(snapshot.notifications) && typeof snapshot.unread === 'number') {
+                  if (snapshot.profile && typeof snapshot.profile.email === 'string') {
+                    activeSession.user = snapshot.profile;
+                    rememberSession();
+                  }
+                  onNotifications(snapshot);
+                }
               }
             }
           }
@@ -302,7 +308,12 @@ function createClient({ configFile, localFile, sessionFile, safeStorage, fetch: 
 
     async adminAction(a) {
       if (!session) return { ok: false, error: 'Not signed in.' };
-      return call(cfg.serverUrl, 'POST', '/api/admin/update', a, session.token);
+      const r = await call(cfg.serverUrl, 'POST', '/api/admin/update', a, session.token);
+      if (r.ok && r.user && session.user.email === a.email) {
+        session.user = r.user;
+        rememberSession();
+      }
+      return r;
     },
 
     async notifications(a = {}) {

@@ -445,6 +445,69 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       for (const w of d.waiters) w.done();
       return [200, { ok: true }];
     },
+    updateUser(oldEmail, updated) {
+      if (unavailable) return [503, { ok: false, error: 'Shared library unavailable. Restart the server to recover the group operation.' }];
+      for (const d of docs.values()) {
+        let changed = false;
+        let presenceChanged = false;
+        const upserts = [];
+        if (d.owner === oldEmail && (d.owner !== updated.email || d.ownerName !== updated.name)) {
+          d.owner = updated.email;
+          d.ownerName = updated.name;
+          changed = true;
+        }
+        if (oldEmail !== updated.email && d.members.includes(oldEmail)) {
+          d.members = [...new Set(d.members.map((email) => email === oldEmail ? updated.email : email))];
+          changed = true;
+        }
+        if (oldEmail !== updated.email && d.reviews.has(oldEmail)) {
+          const previous = d.reviews.get(oldEmail);
+          const current = d.reviews.get(updated.email);
+          if (!current || previous.updated >= current.updated) d.reviews.set(updated.email, previous);
+          d.reviews.delete(oldEmail);
+          changed = true;
+        }
+        for (const m of d.markups.values()) {
+          let markupChanged = false;
+          if (m.authorEmail === oldEmail && (m.author !== updated.name || m.authorEmail !== updated.email)) {
+            m.authorEmail = updated.email;
+            m.author = updated.name;
+            markupChanged = true;
+          }
+          for (const c of m.comments || []) {
+            if (c.authorEmail === oldEmail && (c.author !== updated.name || c.authorEmail !== updated.email)) {
+              c.authorEmail = updated.email;
+              c.author = updated.name;
+              markupChanged = true;
+            }
+          }
+          if (markupChanged) {
+            upserts.push(m);
+            changed = true;
+          }
+        }
+        if (d.presence.has(oldEmail)) {
+          const presence = d.presence.get(oldEmail);
+          d.presence.delete(oldEmail);
+          d.presence.set(updated.email, { ...presence, name: updated.name, email: updated.email, discipline: updated.discipline, last: now() });
+          d.presenceRev++;
+          presenceChanged = true;
+        }
+        if (changed) {
+          const previousVersion = d.version;
+          d.version++;
+          for (const review of d.reviews.values()) if (review.doneVersion === previousVersion) review.doneVersion = d.version;
+          d.log.push({ v: d.version, by: updated.name, byEmail: updated.email, cid: 'profile-update', upserts, deletes: [] });
+          if (d.log.length > LOG_KEEP) {
+            d.log.splice(0, d.log.length - LOG_KEEP);
+            d.logStart = d.log[0].v - 1;
+          }
+          persist(d);
+        }
+        if (changed || presenceChanged) wake(d);
+      }
+      return null;
+    },
     setMembers(id, user, members) {
       const d = get(id);
       if (!d) return NOT_FOUND;

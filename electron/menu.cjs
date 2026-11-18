@@ -1,6 +1,6 @@
 // Menu actions are dispatched to the authenticated renderer; file access remains in guarded IPC handlers.
 const actionIcons = {
-  open: 'open', shared: 'open', save: 'save', saveAs: 'saveAs', csv: 'export',
+  open: 'open', shared: 'open', save: 'save', saveAs: 'saveAs', csv: 'export', print: 'page',
   close: 'close', logout: 'key', quit: 'exit', undo: 'undo', redo: 'redo',
   select: 'select', pan: 'pan', delete: 'delete', users: 'users', password: 'license',
   theme: 'settings', toolDefaults: 'settings',
@@ -38,6 +38,7 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
       item('&Open PDF...', 'open', usable, 'CmdOrCtrl+O'),
       item('&Save', 'save', doc && writable, 'CmdOrCtrl+S'),
       item('Save &As...', 'saveAs', doc && writable, 'CmdOrCtrl+Shift+S'),
+      item('&Print...', 'print', doc, 'CmdOrCtrl+P'),
       item('&Export markup CSV...', 'csv', doc && writable),
       { type: 'separator' },
       item('Open S&hared...', 'shared', usable),

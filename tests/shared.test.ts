@@ -305,4 +305,56 @@ describe('shared documents', () => {
     await call('POST', '/api/register', undefined, { name: 'Cy', email: 'cy@example.com', discipline: 'Other', password: 'correct horse', confirm: 'correct horse' });
     expect((await call('POST', '/api/login', undefined, { email: 'cy@example.com', password: 'correct horse' })).token).toBeUndefined();
   });
+
+  it('updates profile identity without losing document assignments, markup ownership or notifications', async () => {
+    const upload = await call('POST', '/api/docs?member=bob%40example.com&name=profile.pdf', ann, undefined, PDF);
+    const profileDocId = upload.doc.id;
+    await call('POST', `/api/docs/${profileDocId}/ops`, bob, {
+      upserts: [mk('bob-markup', { comments: [{ id: 'bob-comment', text: 'Needs review', date: '2026-01-01T00:00:00Z' }] })],
+      deletes: [],
+    });
+    await call('POST', `/api/docs/${profileDocId}/review`, bob, { done: true });
+
+    const before = await call('GET', '/api/notifications', bob);
+    expect(before.notifications.some((n: any) => n.docId === profileDocId)).toBe(true);
+    expect((await call('POST', '/api/admin/update', admin, {
+      email: 'bob@example.com',
+      action: 'profile',
+      name: '',
+      profileEmail: 'bob.lee@example.com',
+      discipline: 'Process',
+    })).code).toBe(400);
+    expect((await call('POST', '/api/admin/update', admin, {
+      email: 'bob@example.com',
+      action: 'profile',
+      name: 'Bob Ray',
+      profileEmail: 'ann@example.com',
+      discipline: 'Process',
+    })).code).toBe(409);
+
+    const updated = await call('POST', '/api/admin/update', admin, {
+      email: 'bob@example.com',
+      action: 'profile',
+      name: 'Bob Lee',
+      profileEmail: 'bob.lee@example.com',
+      discipline: 'Process',
+    });
+    expect(updated).toMatchObject({ code: 200, user: { name: 'Bob Lee', email: 'bob.lee@example.com', discipline: 'Process' } });
+    expect((await call('GET', '/api/session', bob)).user).toMatchObject({ name: 'Bob Lee', email: 'bob.lee@example.com' });
+    expect((await call('GET', '/api/docs', bob)).docs.map((d: any) => d.id)).toContain(profileDocId);
+    expect((await call('GET', '/api/docs', ann)).docs.find((d: any) => d.id === profileDocId)).toMatchObject({
+      members: ['bob.lee@example.com'],
+      reviews: [{ email: 'bob.lee@example.com', done: true }],
+    });
+    const state = await call('GET', `/api/docs/${profileDocId}/state`, bob);
+    expect(state.markups[0]).toMatchObject({
+      author: 'Bob Lee',
+      authorEmail: 'bob.lee@example.com',
+      comments: [{ author: 'Bob Lee', authorEmail: 'bob.lee@example.com' }],
+    });
+    const after = await call('GET', '/api/notifications', bob);
+    expect(after.notifications).toEqual(before.notifications);
+    expect((await call('POST', '/api/login', undefined, { email: 'bob@example.com', password: 'correct horse' })).code).toBe(401);
+    expect((await call('POST', '/api/login', undefined, { email: 'bob.lee@example.com', password: 'correct horse' })).code).toBe(200);
+  });
 });

@@ -5,7 +5,7 @@ const POLL_INTERVAL_MS = 30_000;
 export type NotificationState = { notifications: AppNotification[]; unread: number; error: string | null };
 
 /** Polls the server inbox after each request completes; only active in server mode. */
-export function useNotifications(user: AuthUser | null, serverMode: boolean) {
+export function useNotifications(user: AuthUser | null, serverMode: boolean, onProfileChange?: (user: AuthUser) => void) {
   const scope = serverMode && user && !user.mustChange ? user.email : null;
   const [snap, setSnap] = useState<{ scope: string; state: NotificationState } | null>(null);
   const stopRef = useRef(false);
@@ -41,8 +41,9 @@ export function useNotifications(user: AuthUser | null, serverMode: boolean) {
     return window.api.onNotifications((snapshot) => {
       inboxRevision.current += 1;
       apply(scope, { ok: true, ...snapshot });
+      if (snapshot.profile) onProfileChange?.(snapshot.profile);
     });
-  }, [scope, apply]);
+  }, [scope, apply, onProfileChange]);
 
   const markRead = useCallback(async (read: string[] | 'all') => {
     if (scope === null || !window.api) return;

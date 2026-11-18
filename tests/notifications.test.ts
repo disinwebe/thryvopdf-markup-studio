@@ -183,6 +183,43 @@ describe('assignment notifications', () => {
     await call('POST', `/api/docs/${id}/members`, ann, { members: ['bob@example.com', 'cara@example.com'] });
     expect((await call('GET', '/api/docs', bob)).docs.find((d: any) => d.id === id).reviews.find((r: any) => r.email === 'bob@example.com').done).toBe(false);
   });
+
+  it('updates signed-in clients and their notification stream after a profile email correction', async () => {
+    let resolveProfile: (() => void) | undefined;
+    let resolveAssignment: (() => void) | undefined;
+    const profileChanged = new Promise<void>((resolve) => { resolveProfile = resolve; });
+    const assignmentReceived = new Promise<void>((resolve) => { resolveAssignment = resolve; });
+    const client = createClient({
+      configFile: join(dir, 'profile-client.json'),
+      localFile: join(dir, 'profile-local.json'),
+      onNotifications: (snapshot: any) => {
+        if (snapshot.profile?.email === 'bob.corrected@example.com') resolveProfile?.();
+        if (snapshot.notifications.some((n: any) => n.type === 'assignment' && n.docName === 'after-profile.pdf')) resolveAssignment?.();
+      },
+    });
+    try {
+      expect((await client.configure({ mode: 'server', serverUrl: base })).ok).toBe(true);
+      expect((await client.login({ email: 'bob@example.com', password: 'password1' })).ok).toBe(true);
+      await upload(ann, ['bob@example.com'], 'before-profile.pdf');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const response = await call('POST', '/api/admin/update', admin, {
+        email: 'bob@example.com',
+        action: 'profile',
+        name: 'Bob Corrected',
+        profileEmail: 'bob.corrected@example.com',
+        discipline: 'Piping',
+      });
+      expect(response.status).toBe(200);
+      await profileChanged;
+      expect(client.current()).toMatchObject({ name: 'Bob Corrected', email: 'bob.corrected@example.com', discipline: 'Piping' });
+      expect((await client.notifications()).notifications.some((n: any) => n.docName === 'before-profile.pdf')).toBe(true);
+      expect((await upload(ann, ['bob.corrected@example.com'], 'after-profile.pdf')).status).toBe(201);
+      await assignmentReceived;
+      expect(client.current().email).toBe('bob.corrected@example.com');
+    } finally {
+      await client.logout();
+    }
+  });
 });
 
 describe('graph client', () => {
