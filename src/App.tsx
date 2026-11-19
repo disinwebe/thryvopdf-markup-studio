@@ -286,12 +286,21 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         ? { kind: 'signature', signature: selectedSignature }
         : null;
   const logout = async () => {
-    await leaveAll();
+    setLibrary(false);
+    try {
+      await leaveAll();
+    } catch (error) {
+      say('Could not notify shared-document sessions before signing out: ' + (error instanceof Error ? error.message : String(error)));
+    }
     const localDocs = docs.filter((d) => !d.shared);
     setDocs(localDocs);
     if (active?.shared) setActiveId(localDocs.at(-1)?.id ?? '');
     await actions.logout();
   };
+  const handleSharedSessionExpired = useCallback(() => {
+    setLibrary(false);
+    actions.requestSignIn?.(() => setLibrary(true));
+  }, [actions.requestSignIn]);
   const openSharedLibrary = () => {
     if (actions.signedIn) setLibrary(true);
     else if (actions.requestSignIn) actions.requestSignIn(() => setLibrary(true));
@@ -2074,7 +2083,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           </button>
         </div>
       )}
-      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} readOnly={readOnly} onChanged={() => setSharedRevision((n) => n + 1)} />}
+      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} readOnly={readOnly} onChanged={() => setSharedRevision((n) => n + 1)} onSessionExpired={handleSharedSessionExpired} />}
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
       {editingCommentsTarget && active?.id === editingCommentsTarget.docId && (() => {
         const markup = active.markups.find((item) => item.id === editingCommentsTarget.markupId);

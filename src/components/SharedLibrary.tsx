@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { Pick, UploadRow, filterDocumentsByName, formatReviewStatusCounts, groupByProject, reviewStatusCounts, runUploads, toRows } from '../app/upload';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 
@@ -93,6 +93,7 @@ export function SharedLibrary({
   onUpload,
   readOnly = false,
   onChanged,
+  onSessionExpired,
 }: {
   me: AuthUser;
   activeName?: string;
@@ -102,6 +103,7 @@ export function SharedLibrary({
   onUpload: (project: string, description: string, members: string[]) => Promise<{ ok: boolean; message: string }>;
   readOnly?: boolean;
   onChanged: () => void;
+  onSessionExpired?: () => void;
 }) {
   const [docs, setDocs] = useState<SharedListing[]>([]);
   const [error, setError] = useState('');
@@ -118,6 +120,9 @@ export function SharedLibrary({
   const [editingAccess, setEditingAccess] = useState<SharedListing | null>(null);
   const [groupAccessProject, setGroupAccessProject] = useState<string | null>(null);
   const [groupAccessVaries, setGroupAccessVaries] = useState(false);
+  const sessionExpiredHandled = useRef(false);
+  const sessionExpiredCallback = useRef(onSessionExpired);
+  sessionExpiredCallback.current = onSessionExpired;
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try { return loadCollapsedGroups(localStorage, COLLAPSE_KEY); } catch { return []; }
   });
@@ -135,14 +140,28 @@ export function SharedLibrary({
   const inheritedGroupAccess = groupSel && groupSel !== NEW
     ? docs.find((doc) => doc.project === groupSel && doc.groupAccessConfigured)
     : undefined;
+  const handleSessionExpired = useCallback(() => {
+    setError('Your server session expired. Sign in again to continue sharing.');
+    if (!sessionExpiredHandled.current) {
+      sessionExpiredHandled.current = true;
+      sessionExpiredCallback.current?.();
+    }
+  }, []);
 
   const load = useCallback(async () => {
-    const r = await window.api!.sharedDocs({ op: 'list' });
-    if (r.ok) {
-      setDocs(r.docs || []);
-      setError('');
-    } else setError(r.expired ? 'Your session expired. Log out and sign in again.' : r.error || 'Could not load shared documents.');
-  }, []);
+    try {
+      const r = await window.api!.sharedDocs({ op: 'list' });
+      if (r.expired) { handleSessionExpired(); return; }
+      if (r.ok) {
+        setDocs(r.docs || []);
+        setError('');
+      } else setError(r.error || 'Could not load shared documents.');
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (message.includes('Sign in to the server to use this feature.')) handleSessionExpired();
+      else setError(`Could not load shared documents: ${message}`);
+    }
+  }, [handleSessionExpired]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -166,12 +185,16 @@ export function SharedLibrary({
     void window.api!.sharedDocs({ op: 'users' }).then((r) => {
       if (!active) return;
       if (r.ok && Array.isArray(r.users)) setUsers(r.users);
+      else if (r.expired) handleSessionExpired();
       else setError(r.error || 'Could not load users for sharing.');
     }).catch((reason: unknown) => {
-      if (active) setError(`Could not load users for sharing: ${reason instanceof Error ? reason.message : String(reason)}`);
+      if (!active) return;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (message.includes('Sign in to the server to use this feature.')) handleSessionExpired();
+      else setError(`Could not load users for sharing: ${message}`);
     });
     return () => { active = false; };
-  }, [readOnly]);
+  }, [handleSessionExpired, readOnly]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
