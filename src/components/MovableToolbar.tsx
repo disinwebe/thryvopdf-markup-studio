@@ -15,6 +15,10 @@ export type ToolbarDockPreview = { position: Position; corner: Corner | null; ed
 const storageKey = (id: string) => `thryvopdf-toolbar-group-${id}-v1`;
 const toolbarSnapGap = 4;
 
+export function defaultToolbarState(): SavedToolbarState {
+  return { visible: true, locked: false, position: null, width: null, height: null, edge: null, corner: null };
+}
+
 export function toolbarSavedDimensions(
   state: Pick<SavedToolbarState, 'width' | 'height'>,
   docked: boolean,
@@ -85,6 +89,12 @@ export function loadToolbarState(id: string, storage: Pick<Storage, 'getItem'> =
 
 export function saveToolbarState(id: string, state: SavedToolbarState, storage: Pick<Storage, 'setItem'> = localStorage): void {
   try { storage.setItem(storageKey(id), JSON.stringify(state)); } catch { /* preference is session-only when storage is unavailable */ }
+}
+
+export function resetToolbarState(id: string, storage: Pick<Storage, 'setItem'> = localStorage): SavedToolbarState {
+  const state = defaultToolbarState();
+  saveToolbarState(id, state, storage);
+  return state;
 }
 
 export function toolbarDockReservations(layouts: ToolbarLayout[], appWidth: number, appHeight: number, topBaseHeight: number): ToolbarReservations {
@@ -287,6 +297,21 @@ export function MovableToolbar({ id, label, children, boundsRef, layouts, onLayo
   useEffect(() => {
     saveToolbarState(id, saved);
   }, [id, saved]);
+
+  useEffect(() => {
+    const onVisibility = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; visible?: boolean }>).detail;
+      if (detail?.id !== id || typeof detail.visible !== 'boolean') return;
+      setSaved((current) => ({ ...current, visible: detail.visible! }));
+    };
+    const onReset = () => setSaved(resetToolbarState(id));
+    window.addEventListener('toolbar-visibility', onVisibility);
+    window.addEventListener('toolbar-reset', onReset);
+    return () => {
+      window.removeEventListener('toolbar-visibility', onVisibility);
+      window.removeEventListener('toolbar-reset', onReset);
+    };
+  }, [id]);
 
   useEffect(() => {
     const toolbar = toolbarRef.current;

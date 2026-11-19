@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadToolbarState, repositionDockPreview, saveToolbarState, snapDockPosition, snapToToolbar, toolbarDockPreview, toolbarDockReservations, toolbarOrientation, toolbarOrientationForTarget, toolbarSavedDimensions, toolbarUsesIconMode } from '../src/components/MovableToolbar';
+import { loadToolbarState, repositionDockPreview, resetToolbarState, saveToolbarState, snapDockPosition, snapToToolbar, toolbarDockPreview, toolbarDockReservations, toolbarOrientation, toolbarOrientationForTarget, toolbarSavedDimensions, toolbarUsesIconMode } from '../src/components/MovableToolbar';
 
 describe('movable toolbar docking', () => {
   it('restores visibility, lock, size, position, and edge docking from persistent storage', () => {
@@ -28,6 +28,25 @@ describe('movable toolbar docking', () => {
       height: null,
       edge: null,
       corner: null,
+    });
+
+  });
+
+  it('resets saved toolbar layout and visibility to defaults', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    saveToolbarState('content', {
+      visible: false, locked: true, position: { x: 120, y: 64 }, width: 420, height: 96, edge: 'left', corner: null,
+    }, storage);
+
+    expect(resetToolbarState('content', storage)).toEqual({
+      visible: true, locked: false, position: null, width: null, height: null, edge: null, corner: null,
+    });
+    expect(loadToolbarState('content', storage)).toEqual({
+      visible: true, locked: false, position: null, width: null, height: null, edge: null, corner: null,
     });
   });
 

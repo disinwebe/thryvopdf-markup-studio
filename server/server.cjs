@@ -325,6 +325,7 @@ function createApp(opts = {}) {
     })],
     ['POST', /^\/api\/docs\/groups\/rename$/, ready((u, b) => docs.renameGroup(u, b))],
     ['POST', /^\/api\/docs\/groups\/delete$/, ready((u, b) => docs.deleteGroup(u, b))],
+    ['POST', /^\/api\/docs\/groups\/members$/, ready((u, b) => validateMembers(b.members) ? docs.setGroupMembers(b.project, u, [...new Set(b.members)]) : invalidMembers)],
     ['GET', /^\/api\/docs\/([\w-]+)\/file$/, ready((u, b, req, url, m) => docs.file(m[1], u))],
     ['GET', /^\/api\/docs\/([\w-]+)\/state$/, ready((u, b, req, url, m) => docs.state(m[1], u))],
     ['POST', /^\/api\/docs\/([\w-]+)\/ops$/, ready((u, b, req, url, m) => docs.ops(m[1], u, b))],

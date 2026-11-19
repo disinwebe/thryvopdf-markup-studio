@@ -382,6 +382,7 @@ function createClient({ configFile, localFile, sessionFile, safeStorage, fetch: 
         case 'leave': return call(u, 'POST', '/api/docs/' + id + '/leave', {}, t);
         case 'rename-group': return call(u, 'POST', '/api/docs/groups/rename', { project: a.project, newProject: a.newProject }, t);
         case 'delete-group': return call(u, 'POST', '/api/docs/groups/delete', { project: a.project, revision: a.revision }, t);
+        case 'group-members': return call(u, 'POST', '/api/docs/groups/members', { project: a.project, members: a.members }, t);
         case 'meta': return call(u, 'POST', '/api/docs/' + id + '/meta', { project: a.project, description: a.description }, t);
         case 'members': return call(u, 'POST', '/api/docs/' + id + '/members', { members: a.members }, t);
     case 'delete': return call(u, 'DELETE', '/api/docs/' + id, null, t);

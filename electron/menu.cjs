@@ -86,6 +86,8 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
         toolbarItem('&Content tools', 'content'),
         { ...toolbarItem('&Markup tools', 'markup'), visible: viewerActive },
         { ...toolbarItem('Measurem&ent tools', 'measure'), visible: viewerActive },
+        { type: 'separator' },
+        { label: '&Reset toolbars', click: () => send('toolbar:reset') },
       ] },
       { type: 'separator' },
       { label: '&Measurements', enabled: doc && viewerActive && writable, submenu: [

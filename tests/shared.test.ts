@@ -12,6 +12,7 @@ const ADMIN_PW = 'InitialAdmin1';
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
 let dir: string, srv: any, base: string, clock: number;
 let admin: string, ann: string, bob: string;
+let groupAccessIds: string[] = [];
 
 const call = async (method: string, p: string, token?: string, body?: any, raw?: Buffer) => {
   const r = await fetch(base + p, {
@@ -168,6 +169,41 @@ describe('shared documents', () => {
     expect(s4.presence.map((p: any) => p.email)).toEqual(['bob@example.com']);
   });
 
+  it('applies group access to existing and future PDFs and restricts management to the uploader', async () => {
+    const project = 'Group Access Test';
+    const upload = (name: string, token = ann, member = false) =>
+      call('POST', `/api/docs?name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}${member ? '&member=bob%40example.com' : ''}`, token, undefined, PDF);
+    const first = await upload('first.pdf', ann, true);
+    const second = await upload('second.pdf');
+    expect(first.code).toBe(201);
+    expect(second.code).toBe(201);
+    groupAccessIds = [first.doc.id, second.doc.id];
+
+    const ownerList = await call('GET', '/api/docs', ann);
+    const groupDocs = ownerList.docs.filter((doc: any) => doc.project === project);
+    expect(groupDocs).toHaveLength(2);
+    expect(groupDocs.every((doc: any) => doc.members.includes('bob@example.com'))).toBe(true);
+    expect((await call('POST', '/api/docs/groups/members', bob, { project, members: [] })).code).toBe(403);
+    expect((await call('POST', '/api/docs/groups/members', ann, { project, members: ['missing@example.com'] })).code).toBe(400);
+    expect((await call('POST', '/api/docs/groups/members', ann, { project, members: [] })).code).toBe(200);
+    for (const id of groupAccessIds) expect((await call('GET', `/api/docs/${id}/file`, bob)).code).toBe(403);
+
+    const third = await upload('third.pdf');
+    expect(third.code).toBe(201);
+    groupAccessIds.push(third.doc.id);
+    expect((await call('GET', `/api/docs/${third.doc.id}/file`, bob)).code).toBe(403);
+
+    expect((await call('POST', '/api/docs/groups/members', ann, { project, members: ['bob@example.com'] })).code).toBe(200);
+    const fourth = await upload('fourth.pdf');
+    expect(fourth.code).toBe(201);
+    groupAccessIds.push(fourth.doc.id);
+    for (const id of groupAccessIds) expect((await call('GET', `/api/docs/${id}/file`, bob)).code).toBe(200);
+    const reviewerList = await call('GET', '/api/docs', bob);
+    const reviewerDoc = reviewerList.docs.find((doc: any) => doc.id === first.doc.id);
+    expect(reviewerDoc.groupAccessConfigured).toBe(true);
+    expect(reviewerDoc).not.toHaveProperty('groupMembers');
+  });
+
   it('persists across a server restart', async () => {
     srv.server.closeAllConnections();
     srv.server.close();
@@ -178,9 +214,15 @@ describe('shared documents', () => {
     const st = await call('GET', `/api/docs/${id}/state`, t);
     expect(st.markups.map((m: any) => m.id).sort()).toEqual(['m4', 'm5', 'm6']);
     expect(Buffer.compare((await call('GET', `/api/docs/${id}/file`, t)).bytes, PDF)).toBe(0);
+    for (const groupId of groupAccessIds) {
+      expect((await call('GET', `/api/docs/${groupId}/file`, t)).code).toBe(200);
+    }
     bob = t;
     ann = (await call('POST', '/api/login', undefined, { email: 'ann@example.com', password: 'correct horse' })).token;
     admin = (await call('POST', '/api/login', undefined, { email: 'admin', password: 'NewAdminPass1' })).token;
+    const inherited = await call('POST', `/api/docs?name=after-restart.pdf&project=${encodeURIComponent('Group Access Test')}`, ann, undefined, PDF);
+    expect(inherited.code).toBe(201);
+    expect((await call('GET', `/api/docs/${inherited.doc.id}/file`, bob)).code).toBe(200);
   });
 
   it('stamps authorship from the session, ignoring client-supplied authors', async () => {
