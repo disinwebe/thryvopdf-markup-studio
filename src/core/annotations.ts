@@ -572,7 +572,7 @@ export async function writeAnnotations(
         countNos.get(m.id),
         (text, size) => boldFont.widthOfTextAtSize(text, size),
       );
-      const opacity = m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity;
+      const opacity = m.type === 'highlight' ? 1 : m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity;
       const gs = ctx.obj({ Type: 'ExtGState', CA: opacity, ca: opacity, ...(b.blend ? { BM: b.blend } : {}) });
       const gs1 = ctx.obj({ Type: 'ExtGState', CA: 1, ca: 1, BM: 'Normal' });
       const markupImage = m.type === 'image' && m.image
@@ -592,7 +592,7 @@ export async function writeAnnotations(
         Rect: [f(b.rect.x), f(b.rect.y), f(b.rect.x + b.rect.w), f(b.rect.y + b.rect.h)],
         F: 4,
         C: hex(m.color),
-        CA: m.opacity,
+        CA: m.type === 'highlight' ? 1 : m.opacity,
         BS: { W: m.width, S: 'S' },
         AP: { N: apRef },
         ...b.extra,

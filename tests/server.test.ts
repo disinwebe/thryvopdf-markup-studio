@@ -113,6 +113,60 @@ describe('approval workflow', () => {
   });
 });
 
+describe('feedback queue', () => {
+  it('accepts signed-in reports and limits review and deletion to administrators', async () => {
+    const reporter = await post('/api/login', { email: 'ann@example.com', password: 'correct horse' });
+    const reporterClient = createClient({
+      configFile: join(dir, 'feedback-user-config.json'),
+      localFile: join(dir, 'feedback-user-local.json'),
+    });
+    expect((await reporterClient.configure({ mode: 'server', serverUrl: base })).ok).toBe(true);
+    expect((await reporterClient.login({ email: 'ann@example.com', password: 'correct horse' })).ok).toBe(true);
+    const report = {
+      category: 'bug',
+      subject: 'Print preview issue',
+      message: 'The preview did not open.',
+      steps: 'Choose File, then Print.',
+      appVersion: '1.0.0',
+      platform: 'Win32',
+      pdfPath: 'C:\\private\\drawing.pdf',
+      attachment: 'private document bytes',
+    };
+    expect((await post('/api/feedback', report)).code).toBe(401);
+    expect((await reporterClient.feedbackSubmit(report)).ok).toBe(true);
+    expect((await reporterClient.feedbackList()).ok).toBe(false);
+    expect((await get('/api/admin/feedback', reporter.token)).code).toBe(403);
+
+    const inbox = await get('/api/admin/feedback', adminToken);
+    expect(inbox.code).toBe(200);
+    expect(inbox.submissions).toHaveLength(1);
+    const stored = JSON.parse(readFileSync(join(dir, 'feedback.json'), 'utf8'));
+    expect(stored[0]).not.toHaveProperty('pdfPath');
+    expect(stored[0]).not.toHaveProperty('attachment');
+    const submission = inbox.submissions[0];
+    expect(submission).toMatchObject({
+      category: 'bug',
+      subject: 'Print preview issue',
+      status: 'new',
+      user: { email: 'ann@example.com' },
+      app: { version: '1.0.0', platform: 'Win32' },
+    });
+    expect(JSON.stringify(submission)).not.toContain('private');
+    expect((await post('/api/admin/feedback/status', { id: submission.id, status: 'closed' }, reporter.token)).code).toBe(403);
+    expect((await post('/api/admin/feedback/status', { id: submission.id, status: 'closed' }, adminToken)).ok).toBe(true);
+    expect((await get('/api/admin/feedback', adminToken)).submissions[0].status).toBe('closed');
+    expect((await post('/api/admin/feedback/delete', { id: submission.id }, adminToken)).ok).toBe(true);
+    expect((await get('/api/admin/feedback', adminToken)).submissions).toHaveLength(0);
+  });
+
+  it('rejects invalid report fields', async () => {
+    const reporter = await post('/api/login', { email: 'ann@example.com', password: 'correct horse' });
+    expect((await post('/api/feedback', { category: 'other', subject: 'x', message: 'y' }, reporter.token)).code).toBe(400);
+    expect((await post('/api/feedback', { category: 'bug', subject: '', message: 'y' }, reporter.token)).code).toBe(400);
+    expect((await post('/api/feedback', { category: 'bug', subject: 'x', message: 'x'.repeat(5001) }, reporter.token)).code).toBe(400);
+  });
+});
+
 describe('role enforcement', () => {
   it('non-admins and anonymous callers cannot use admin endpoints', async () => {
     const u = await post('/api/login', { email: 'ann@example.com', password: 'correct horse' });

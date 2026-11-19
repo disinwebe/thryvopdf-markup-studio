@@ -235,7 +235,7 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
   return (
     <g>
       <g
-        opacity={m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}
+        opacity={m.type === 'highlight' ? 1 : m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}
         transform={m.watermark && m.rotation ? `rotate(${m.rotation} ${boxCenter(m).x} ${boxCenter(m).y})` : undefined}
       >{body}</g>
       {co && (

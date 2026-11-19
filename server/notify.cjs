@@ -241,6 +241,23 @@ function createNotifier({ dir, now = Date.now, send = sendMail, log = () => {} }
         save();
         for (const admin of uniqueAdmins) emit(admin.email);
       }
+      const cfg = smtp();
+      if (!cfg.enabled) return Promise.resolve();
+      const text = `${user.name} (${user.email}) has registered for ThryvoPDF and is awaiting administrator approval.\n\nReview pending accounts in ThryvoPDF Markup Studio's User Management panel.\n\nThis is an automated message from your ThryvoPDF server.`;
+      return Promise.all(uniqueAdmins.filter((admin) => EMAIL_RE.test(admin.email)).map((admin) =>
+        send(cfg, admin.email, `New ThryvoPDF registration: ${user.name}`.slice(0, 200), text)
+          .catch((e) => log(`Registration email to ${admin.email} failed: ${e.message}`))));
+    },
+    registrationResult(user, status) {
+      const cfg = smtp();
+      if (!cfg.enabled || !EMAIL_RE.test(user.email)) return Promise.resolve();
+      const approved = status === 'approved';
+      const text = approved
+        ? `Hello ${user.name},\n\nYour ThryvoPDF account has been approved. You can now sign in to your organization's ThryvoPDF server.\n\nThis is an automated message from your ThryvoPDF server.`
+        : `Hello ${user.name},\n\nYour ThryvoPDF account registration was not approved. Please contact your organization's ThryvoPDF administrator if you need more information.\n\nThis is an automated message from your ThryvoPDF server.`;
+      return Promise.resolve()
+        .then(() => send(cfg, user.email, `ThryvoPDF account ${approved ? 'approved' : 'not approved'}`, text))
+        .catch((e) => log(`Registration ${status} email to ${user.email} failed: ${e.message}`));
     },
     reviewed(doc, by, recipients, done) {
       const created = new Date(now()).toISOString();

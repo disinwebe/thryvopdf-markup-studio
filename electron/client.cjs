@@ -316,6 +316,28 @@ function createClient({ configFile, localFile, sessionFile, safeStorage, fetch: 
       return r;
     },
 
+    async feedbackSubmit(a) {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Sign in to your ThryvoPDF server to submit feedback.' };
+      const result = await call(cfg.serverUrl, 'POST', '/api/feedback', a, session.token);
+      return result.notFound ? { ok: false, error: 'This server does not support feedback yet. Ask an administrator to update ThryvoPDF Server Manager.' } : result;
+    },
+
+    async feedbackList() {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Sign in to your ThryvoPDF server to view feedback.' };
+      const result = await call(cfg.serverUrl, 'GET', '/api/admin/feedback', null, session.token);
+      return result.notFound ? { ok: false, error: 'This server does not support the feedback inbox yet. Update ThryvoPDF Server Manager.' } : result;
+    },
+
+    async feedbackUpdate(a) {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Sign in to your ThryvoPDF server to manage feedback.' };
+      return call(cfg.serverUrl, 'POST', '/api/admin/feedback/status', a, session.token);
+    },
+
+    async feedbackDelete(id) {
+      if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Sign in to your ThryvoPDF server to manage feedback.' };
+      return call(cfg.serverUrl, 'POST', '/api/admin/feedback/delete', { id }, session.token);
+    },
+
     async notifications(a = {}) {
       if (cfg.mode !== 'server' || !session) return { ok: false, error: 'Not signed in.' };
       if (a.clear) return call(cfg.serverUrl, 'POST', '/api/notifications/clear', null, session.token);

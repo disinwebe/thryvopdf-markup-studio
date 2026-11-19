@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { filterDocumentsByName, formatReviewStatusCounts, groupByProject, reviewStatusCounts } from '../src/app/upload';
-import { canDeleteMarkup } from '../src/core/comments';
+import { canDeleteMarkup, canManageSharedReview } from '../src/core/comments';
 
 const req = createRequire(import.meta.url);
 const { start } = req('../server/server.cjs');
@@ -47,6 +47,21 @@ afterAll(() => {
 });
 
 describe('author-only markup deletion', () => {
+  it('lets assigned reviewers change review status but not markup content', async () => {
+    const id = (await upload(ann, 'review-status.pdf')).doc.id;
+    await call('POST', `/api/docs/${id}/ops`, ann, { upserts: [mk('review-status', { type: 'rect' })] });
+    const markup = (await call('GET', `/api/docs/${id}/state`, bob)).markups[0];
+    expect((await call('POST', `/api/docs/${id}/ops`, bob, {
+      upserts: [{ ...markup, status: 'Accepted' }],
+    })).code).toBe(200);
+    expect((await call('GET', `/api/docs/${id}/state`, ann)).markups[0]).toMatchObject({
+      status: 'Accepted', authorEmail: 'ann@example.com',
+    });
+    expect((await call('POST', `/api/docs/${id}/ops`, bob, {
+      upserts: [{ ...markup, status: 'Rejected', color: '#00ff00' }],
+    })).code).toBe(403);
+  });
+
   it('syncs comment box dimensions and visibility while rejecting invalid sizes', async () => {
     const id = (await upload(ann, 'box.pdf')).doc.id;
     const markup = mk('box1', { calloutSize: { width: 220, height: 110 }, calloutHidden: true });
@@ -96,6 +111,8 @@ describe('author-only markup deletion', () => {
     expect(canDeleteMarkup(m, { name: 'Ann Lee', email: 'ann@example.com', role: 'user' } as any)).toBe(true);
     expect(canDeleteMarkup(m, { name: 'Root', email: 'admin', role: 'admin' } as any)).toBe(false);
     expect(canDeleteMarkup({ author: 'Old' } as any, { name: 'Old', email: 'o@x', role: 'user' } as any)).toBe(true);
+    expect(canManageSharedReview({ ...m, type: 'rect' } as any, { name: 'Bob', email: 'bob@example.com' })).toBe(true);
+    expect(canManageSharedReview({ ...m, type: 'line' } as any, { name: 'Bob', email: 'bob@example.com' })).toBe(false);
   });
 });
 

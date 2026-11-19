@@ -86,6 +86,21 @@ function uploaderReviewError(prev, m) {
   return null;
 }
 
+function assignedReviewerError(prev, m) {
+  if (prev.type === 'line' || prev.type === 'stamp' || prev.type.startsWith('m-')) {
+    return 'Assigned users can only change a review markup status.';
+  }
+  if (m.status !== prev.status && !REVIEW_STATUSES.has(m.status)) return 'Invalid review status.';
+  const previousMarkup = { ...prev };
+  const incomingMarkup = { ...m };
+  delete previousMarkup.status;
+  delete incomingMarkup.status;
+  if (!isDeepStrictEqual(previousMarkup, incomingMarkup)) {
+    return 'Assigned users can only change a review markup status.';
+  }
+  return null;
+}
+
 /** Edit/delete rules for comments: only the author edits; only the author (or an administrator) deletes. */
 function commentError(prev, m, user) {
   const old = new Map(((prev && prev.comments) || []).map((c) => [c.id, c]));
@@ -334,7 +349,9 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
         if (prev && !ownsMarkup(prev, user)) {
           e = d.owner === user.email
             ? uploaderReviewError(prev, m)
-            : !isDeepStrictEqual(prev, m) ? 'Only the author of a markup can edit it.' : null;
+            : d.members.includes(user.email)
+              ? assignedReviewerError(prev, m)
+              : !isDeepStrictEqual(prev, m) ? 'Only the author of a markup can edit it.' : null;
         } else {
           e = commentError(prev, m, user);
         }

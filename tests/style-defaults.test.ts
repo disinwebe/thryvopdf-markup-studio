@@ -19,9 +19,10 @@ describe('remembered markup defaults', () => {
       const style = toolStyle(type, undefined, loaded);
       expect(style.color).toBe('#334455');
       expect(style.width).toBe(7);
-      expect(style.opacity).toBe(0.65);
+      expect(style.opacity).toBe(type === 'highlight' ? 1 : 0.65);
     }
     expect(toolStyle('highlight', { width: 2, color: '#ffeb3b' }, loaded).color).toBe('#334455');
+    expect(toolStyle('highlight', { opacity: 0.2 }, loaded).opacity).toBe(1);
   });
 
   it('clamps bad numeric values, ignores invalid colors and recovers corrupt storage', () => {

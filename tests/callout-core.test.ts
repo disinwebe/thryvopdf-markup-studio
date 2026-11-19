@@ -113,10 +113,9 @@ describe('comment permissions (client mirror)', () => {
   it('lets the document uploader manage review markups without granting access to drawings or measurements', () => {
     const uploader = { name: 'Owner', email: 'owner@x' };
     const review = m({ author: 'Bob', authorEmail: 'bob@x' });
-    expect(canManageSharedReview(review, uploader, 'owner@x')).toBe(true);
-    expect(canManageSharedReview(review, bob, 'owner@x')).toBe(true);
-    expect(canManageSharedReview(m({ type: 'line', author: 'Bob', authorEmail: 'bob@x' }), uploader, 'owner@x')).toBe(false);
-    expect(canManageSharedReview(m({ type: 'm-area', author: 'Bob', authorEmail: 'bob@x' }), uploader, 'owner@x')).toBe(false);
-    expect(canManageSharedReview(review, uploader, 'other@x')).toBe(false);
+    expect(canManageSharedReview(review, uploader)).toBe(true);
+    expect(canManageSharedReview(review, bob)).toBe(true);
+    expect(canManageSharedReview(m({ type: 'line', author: 'Bob', authorEmail: 'bob@x' }), uploader)).toBe(false);
+    expect(canManageSharedReview(m({ type: 'm-area', author: 'Bob', authorEmail: 'bob@x' }), uploader)).toBe(false);
   });
 });

@@ -89,6 +89,9 @@ describe('native menu wiring', () => {
     expect(group.enabled).toBe(true);
     expect(group.icon).toBe('icon:group');
     expect(ungroup.enabled).toBe(true);
+    const helpMenu = menu[4].submenu;
+    expect(helpMenu.find((entry: { label: string }) => entry.label === '&Send feedback...').enabled).toBe(true);
+    expect(helpMenu.find((entry: { label: string }) => entry.label === 'Feedback &inbox...').visible).toBe(true);
     expect(ungroup.icon).toBe('icon:ungroup');
     group.click();
     ungroup.click();
@@ -151,7 +154,7 @@ describe('native menu wiring', () => {
       expect(send).toHaveBeenCalledWith(action);
     }
     const help = menu[4].submenu;
-    expect(help.some((entry: { label: string }) => entry.label.includes('Server'))).toBe(false);
+    expect(help.some((entry: { label?: string }) => entry.label?.includes('Server'))).toBe(false);
     help.find((entry: { label: string }) => entry.label === '&License...').click();
     expect(send).toHaveBeenCalledWith('license');
     const inactive = menuTemplate({ signedIn: true, blocked: true, documentOpen: true }, send, 'win32');
@@ -161,6 +164,7 @@ describe('native menu wiring', () => {
     expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === 'Open S&hared...').enabled).toBe(true);
     expect(loggedOut[0].submenu.find((m: { label: string }) => m.label === '&Logout').enabled).toBe(false);
     expect(loggedOut[2].submenu[0].visible).toBe(false);
+    expect(loggedOut[4].submenu.find((entry: { label?: string }) => entry.label === 'Feedback &inbox...').visible).toBe(false);
     const compare = menuTemplate({ signedIn: true, documentOpen: true, viewerActive: false, admin: false }, send, 'win32');
     expect(compare[3].submenu[0].enabled).toBe(false);
     expect(compare[3].submenu.find((entry: { label?: string }) => entry.label === '&Measurements').enabled).toBe(false);
