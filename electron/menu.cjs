@@ -9,7 +9,7 @@ const actionIcons = {
   measureSpline: 'measure',
   measureRadius: 'measure', measureDiameter: 'measure', measureArea: 'measure',
   measurePerimeter: 'measure', measureAngle: 'measure', measureCount: 'measure',
-  searchPanel: 'help',
+  searchPanel: 'help', feedback: 'help',
   spellcheckPdf: 'help',
   zoomIn: 'zoomIn', zoomOut: 'zoomOut', fitWidth: 'page', fitPage: 'page',
   organizePanel: 'page', toggleLeftPanel: 'page', toggleRightPanel: 'page',
@@ -109,6 +109,9 @@ function menuTemplate(state, send, platform = process.platform, iconForAction = 
     ] },
     { label: '&Help', submenu: [
       item('&Keyboard shortcuts', 'shortcuts', usable),
+      item('&Send feedback...', 'feedback', usable),
+      { ...item('Feedback &inbox...', 'feedbackInbox', usable && admin), visible: admin },
+      { type: 'separator' },
       item('&About this software', 'about', usable),
       item('&License...', 'license', usable),
     ] },

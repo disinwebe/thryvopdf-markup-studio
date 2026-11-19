@@ -73,6 +73,10 @@ interface Window {
     onNotifications?(callback: (snapshot: { notifications: AppNotification[]; unread: number; profile?: AuthUser }) => void): () => void;
     adminList(): Promise<{ ok: boolean; error?: string; users?: ManagedUser[] }>;
     adminAction(args: { email: string; action: string; role?: string; name?: string; profileEmail?: string; discipline?: string }): Promise<{ ok: boolean; error?: string; tempPassword?: string; user?: ManagedUser }>;
+    feedbackSubmit(args: { category: 'bug' | 'suggestion' | 'usability'; subject: string; message: string; steps: string; appVersion: string; platform: string }): Promise<{ ok: boolean; error?: string; id?: string }>;
+    feedbackList(): Promise<{ ok: boolean; error?: string; submissions?: Array<{ id: string; category: 'bug' | 'suggestion' | 'usability'; subject: string; message: string; steps: string; created: string; status: 'new' | 'reviewed' | 'closed'; user: { name: string; email: string }; app: { version: string; platform: string } }> }>;
+    feedbackUpdate(args: { id: string; status: 'new' | 'reviewed' | 'closed' }): Promise<{ ok: boolean; error?: string }>;
+    feedbackDelete(id: string): Promise<{ ok: boolean; error?: string }>;
     testServer(url: string): Promise<{ ok: boolean; error?: string; url?: string; hasUsers?: boolean }>;
     configureAuth(args: { mode: 'server' | 'local'; serverUrl?: string }): Promise<{ ok: boolean; error?: string }>;
     register(args: { name: string; email: string; discipline: string; password: string; confirm: string }): Promise<AuthResult>;

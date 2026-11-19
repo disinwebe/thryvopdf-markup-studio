@@ -242,6 +242,8 @@ export function PrintPreview({ document, onClose }: { document: Doc; onClose: ()
     setBusy(true);
     setError('');
     let closeOnSuccess = false;
+    const previousTitle = window.document.title;
+    window.document.title = document.name;
     try {
       for (const page of pages) await renderPage(prepared.pdf, page, 2);
       setRendered([...cache.current.values()]);
@@ -268,6 +270,7 @@ export function PrintPreview({ document, onClose }: { document: Doc; onClose: ()
     } catch (reason) {
       setError(`Could not print the document: ${messageOf(reason)}`);
     } finally {
+      window.document.title = previousTitle;
       setBusy(false);
     }
     if (closeOnSuccess) onClose();

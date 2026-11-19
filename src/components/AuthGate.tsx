@@ -133,12 +133,18 @@ export default function AuthGate({ children }: { children: (user: AuthUser, acti
   };
 
   const logout = async () => {
+    pendingSignIn.current = null;
     const result = await window.api?.logout();
     setUser(localUser);
     setPanel(null);
-    setAuthOpen(false);
+    setF((current) => ({ ...current, password: '', confirm: '' }));
+    setError('');
+    setInfo('');
+    setView('login');
+    setAuthOpen(true);
     if (result?.warning) window.alert(result.warning);
-    await refresh();
+    const status = await refresh();
+    if (status) setView(viewForStatus(status));
   };
 
   const test = () =>

@@ -53,6 +53,40 @@ describe('assignment notifications', () => {
     expect(inbox.notifications.some((n: any) => n.type === 'registration' && n.message.includes('Cara'))).toBe(true);
   });
 
+  it('emails active administrators for new registrations and users about approval or rejection', async () => {
+    const adminEmail = 'registration-admin@example.com';
+    await call('POST', '/api/register', undefined, { name: 'Registration Admin', email: adminEmail, discipline: 'Other', password: 'password1' });
+    await call('POST', '/api/admin/update', admin, { email: adminEmail, action: 'approve' });
+    await call('POST', '/api/admin/update', admin, { email: adminEmail, action: 'role', role: 'admin' });
+
+    sent.length = 0;
+    const approvedEmail = 'approved-user@example.com';
+    await call('POST', '/api/register', undefined, { name: 'Approved User', email: approvedEmail, discipline: 'Other', password: 'password1' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sent).toContainEqual(expect.objectContaining({
+      to: adminEmail,
+      subject: expect.stringContaining('New ThryvoPDF registration'),
+      text: expect.stringContaining(approvedEmail),
+    }));
+
+    sent.length = 0;
+    await call('POST', '/api/admin/update', admin, { email: approvedEmail, action: 'approve' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sent).toContainEqual(expect.objectContaining({
+      to: approvedEmail, subject: expect.stringContaining('approved'),
+    }));
+
+    const rejectedEmail = 'rejected-user@example.com';
+    sent.length = 0;
+    await call('POST', '/api/register', undefined, { name: 'Rejected User', email: rejectedEmail, discipline: 'Other', password: 'password1' });
+    await call('POST', '/api/admin/update', admin, { email: rejectedEmail, action: 'reject' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sent).toContainEqual(expect.objectContaining({
+      to: rejectedEmail, subject: expect.stringContaining('not approved'),
+    }));
+    sent.length = 0;
+  });
+
   it('alerts and emails assigned users on upload, not the uploader', async () => {
     const r = await upload(ann, ['ann@example.com', 'bob@example.com']);
     expect(r.status).toBe(201);

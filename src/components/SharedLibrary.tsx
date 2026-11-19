@@ -150,13 +150,20 @@ export function SharedLibrary({
   }, [load]);
   useEffect(() => {
     let active = true;
+    if (readOnly) {
+      setUsers([]);
+      setError('');
+      return () => { active = false; };
+    }
     void window.api!.sharedDocs({ op: 'users' }).then((r) => {
       if (!active) return;
       if (r.ok && Array.isArray(r.users)) setUsers(r.users);
       else setError(r.error || 'Could not load users for sharing.');
-    }).catch(() => { if (active) setError('Could not load users for sharing.'); });
+    }).catch((reason: unknown) => {
+      if (active) setError(`Could not load users for sharing: ${reason instanceof Error ? reason.message : String(reason)}`);
+    });
     return () => { active = false; };
-  }, []);
+  }, [readOnly]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);

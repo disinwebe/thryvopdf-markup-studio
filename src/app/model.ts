@@ -150,7 +150,7 @@ const base: Style = {
 export function defaultStyle(tool: Tool): Style {
   switch (tool) {
     case 'highlight':
-      return { ...base, color: '#ffeb3b', opacity: 0.4 };
+      return { ...base, color: '#ffeb3b', opacity: 1 };
     case 'text':
     case 'callout':
       return { ...base, fill: true };
@@ -173,7 +173,9 @@ export function defaultStyle(tool: Tool): Style {
 }
 
 export function toolStyle(tool: Tool, custom: Partial<Style> | undefined, defaults: Partial<Pick<Style, 'color' | 'width' | 'opacity'>>, subject = ''): Style {
-  return { ...defaultStyle(tool), ...custom, ...defaults, subject };
+  const style = { ...defaultStyle(tool), ...custom, ...defaults, subject };
+  if (tool === 'highlight') style.opacity = 1;
+  return style;
 }
 
 export function makeMarkup(
@@ -191,7 +193,7 @@ export function makeMarkup(
     points,
     color: style.color,
     width: style.width,
-    opacity: style.opacity,
+    opacity: type === 'highlight' ? 1 : style.opacity,
     status: 'None',
     author,
     date: new Date().toISOString(),

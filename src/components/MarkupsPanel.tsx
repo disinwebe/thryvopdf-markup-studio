@@ -98,7 +98,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const commentInput = useRef<HTMLTextAreaElement>(null);
   const canEditProperties = !doc.shared || ownsMarkup(m, user);
-  const canManageReview = !doc.shared || canManageSharedReview(m, user, doc.shared.ownerEmail);
+  const canManageReview = !doc.shared || canManageSharedReview(m, user);
   useEffect(() => {
     if (focusCommentId === m.id) {
       commentInput.current?.focus();
@@ -165,11 +165,11 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           )}
         </>
       )}
-      <label>
+      {m.type !== 'highlight' && <label>
         Opacity
         <input type="range" min={0.1} max={1} step={0.05} value={m.opacity} onChange={(e) => upd({ opacity: +e.target.value }, 'opacity')} />
         <span>{Math.round(m.opacity * 100)}%</span>
-      </label>
+      </label>}
       {hasFill && m.type !== 'm-area' && (
         <label className="inline-check">
           Fill
@@ -221,7 +221,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       </fieldset>
       <label>
         Status
-        <select value={m.status} disabled={!canManageReview} onChange={(e) => upd({ status: e.target.value as Status })}>
+        <select value={m.status} disabled={readOnly || !canManageReview} onChange={(e) => upd({ status: e.target.value as Status })}>
           {STATUSES.map((s) => (
             <option key={s}>{s}</option>
           ))}

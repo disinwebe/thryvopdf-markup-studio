@@ -58,6 +58,7 @@ export interface PageViewProps {
   onContextMenu(event: React.MouseEvent<HTMLDivElement>, markupId: string | null, pageObjectId: string | null, point: Pt, calloutOnly?: boolean): void;
   onMessage(msg: string): void;
   contentTool: PageContentTool | null;
+  selectionOnly?: boolean;
   onCreatePageObject(page: number, point: Pt): void;
   onSelectionChange(markupIds: string[], pageObjectIds: string[], calloutIds?: string[]): void;
   onPageObjectsChange(objects: PageObject[]): void;
@@ -463,7 +464,7 @@ function PageCanvas(p: PageCanvasProps) {
   };
 
   const selected = p.selectedMarkupIds.length === 1
-    ? doc.markups.find((m) => m.id === p.selectedMarkupIds[0] && m.page === doc.page && (!doc.shared || ownsMarkup(m, p.user))) ?? null
+    ? doc.markups.find((m) => m.id === p.selectedMarkupIds[0] && m.page === doc.page) ?? null
     : null;
   const canMoveCallout = (m: Markup) => !doc.shared || (ownsMarkup(m, p.user) && m.comments.every((comment) => ownsComment(comment, p.user)));
   const additiveSelection = (e: React.PointerEvent) => e.ctrlKey || e.metaKey || e.shiftKey;
@@ -542,7 +543,7 @@ function PageCanvas(p: PageCanvasProps) {
     const pt = snapAt(toPt(e));
     e.currentTarget.setPointerCapture(e.pointerId);
 
-    if (p.contentTool) {
+    if (p.contentTool && !p.selectionOnly) {
       p.onCreatePageObject(doc.page, pt);
       return;
     }
@@ -551,7 +552,7 @@ function PageCanvas(p: PageCanvasProps) {
       const selectedPageObject = p.selectedPageObjectIds.length === 1
         ? doc.pageObjects.find((object) => object.id === p.selectedPageObjectIds[0] && object.page === doc.page)
         : undefined;
-      if (selectedPageObject && pt.x >= selectedPageObject.x + selectedPageObject.width - 10 / zoom &&
+      if (!p.selectionOnly && selectedPageObject && pt.x >= selectedPageObject.x + selectedPageObject.width - 10 / zoom &&
           pt.y >= selectedPageObject.y + selectedPageObject.height - 10 / zoom &&
           pt.x <= selectedPageObject.x + selectedPageObject.width + 6 / zoom &&
           pt.y <= selectedPageObject.y + selectedPageObject.height + 6 / zoom) {
@@ -559,7 +560,7 @@ function PageCanvas(p: PageCanvasProps) {
         e.preventDefault();
         return;
       }
-      if (!additiveSelection(e) && selected) {
+      if (!p.selectionOnly && !additiveSelection(e) && selected && (!doc.shared || ownsMarkup(selected, p.user))) {
         const box = calloutLayout(selected);
         if (canMoveCallout(selected) && box && dist({ x: box.x + box.w, y: box.y + box.h }, pt) * zoom <= 10) {
           drag.current = { kind: 'callout-resize', start: pt, orig: selected, width: box.w, height: box.h, began: false };
@@ -572,7 +573,7 @@ function PageCanvas(p: PageCanvasProps) {
         }
       }
       const calloutHit = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, pt));
-      if (calloutHit && (!doc.shared || ownsMarkup(calloutHit, p.user))) {
+      if (calloutHit) {
         const additive = additiveSelection(e);
         const alreadySelected = p.selectedCalloutIds.includes(calloutHit.id);
         if (additive) {
@@ -580,6 +581,7 @@ function PageCanvas(p: PageCanvasProps) {
           return;
         }
         if (!alreadySelected) selectCallout(calloutHit.id, false);
+        if (p.selectionOnly || !canMoveCallout(calloutHit)) return;
         if (calloutHit.groupId) {
           const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, [calloutHit.id], []);
           drag.current = {
@@ -613,7 +615,7 @@ function PageCanvas(p: PageCanvasProps) {
         }
         return;
       }
-      const pageMarkups = doc.markups.filter((markup) => markup.page === doc.page && (!doc.shared || ownsMarkup(markup, p.user)));
+      const pageMarkups = doc.markups.filter((markup) => markup.page === doc.page);
       const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
       const annotationHit = pickTop(pageMarkups.filter((markup) => markup.type !== 'stamp'), doc.page, pt, 6 / zoom);
       const topLayer = topPageLayerAt(pageMarkups.filter((markup) => markup.type === 'stamp'), pageObjects, pt, (markup) => hitMarkup(markup, pt, 6 / zoom));
@@ -631,6 +633,7 @@ function PageCanvas(p: PageCanvasProps) {
           if (foundMarkup) selectMarkup(foundMarkup.id, false);
           else selectPageObject(hitObject!.id, false);
         }
+        if (p.selectionOnly || (foundMarkup && doc.shared && !ownsMarkup(foundMarkup, p.user))) return;
         const selectedMarkupIds = alreadySelected ? p.selectedMarkupIds : foundMarkup ? [foundMarkup.id] : [];
         const selectedObjectIds = alreadySelected ? p.selectedPageObjectIds : hitObject ? [hitObject.id] : [];
         const expanded = expandGroupedSelection(doc.markups, doc.pageObjects, doc.page, selectedMarkupIds, selectedObjectIds);
@@ -807,7 +810,7 @@ function PageCanvas(p: PageCanvasProps) {
         if (!dg.additive) p.onSelectionChange([], [], []);
         return;
       }
-      const pageMarkups = doc.markups.filter((markup) => markup.page === doc.page && (!doc.shared || ownsMarkup(markup, p.user)));
+      const pageMarkups = doc.markups.filter((markup) => markup.page === doc.page);
       const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
       const found = selectInWindow(pageMarkups, pageObjects, normalizedRect(dg.start, end));
       const markupIds = dg.additive ? new Set([...p.selectedMarkupIds, ...found.markupIds]) : new Set(found.markupIds);
@@ -827,6 +830,7 @@ function PageCanvas(p: PageCanvasProps) {
   };
 
   const onDouble = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (p.selectionOnly) return;
     if (tool === 'select') {
       const point = toPt(event);
       const markup = [...doc.markups].reverse().find((item) => item.page === doc.page && hitCallout(item, point));
@@ -882,7 +886,7 @@ function PageCanvas(p: PageCanvasProps) {
 
   const cursor =
     p.contentTool ? 'crosshair' : tool === 'hand' ? 'grab' : tool === 'select' ? 'default' : 'crosshair';
-  const hs = selected && tool === 'select' ? handlesOf(selected) : [];
+  const hs = selected && tool === 'select' && !p.selectionOnly && (!doc.shared || ownsMarkup(selected, p.user)) ? handlesOf(selected) : [];
   const hsz = 5 / zoom;
   const selectedCallout = selected && tool === 'select' && canMoveCallout(selected) ? calloutLayout(selected) : null;
 
@@ -1022,8 +1026,7 @@ function PageCanvas(p: PageCanvasProps) {
                 return;
               }
               const calloutHit = [...doc.markups].reverse().find((m) => m.page === doc.page && hitCallout(m, point));
-              const candidates = doc.shared ? doc.markups.filter((m) => ownsMarkup(m, p.user)) : doc.markups;
-              const pageMarkups = candidates.filter((markup) => markup.page === doc.page);
+              const pageMarkups = doc.markups.filter((markup) => markup.page === doc.page);
               const pageObjects = doc.pageObjects.filter((object) => object.page === doc.page);
               const annotationHit = pickTop(pageMarkups.filter((markup) => markup.type !== 'stamp'), doc.page, point, 6 / zoom);
               const topLayer = calloutHit || annotationHit ? null : topPageLayerAt(pageMarkups.filter((markup) => markup.type === 'stamp'), pageObjects, point, (markup) => hitMarkup(markup, point, 6 / zoom));

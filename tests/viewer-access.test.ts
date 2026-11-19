@@ -24,7 +24,7 @@ describe('unlicensed viewer access', () => {
 
   it('allows only shared read and presence operations without a license', () => {
     for (const op of ['list', 'open', 'poll', 'leave']) expect(sharedOperationRequiresLicense(op)).toBe(false);
-    for (const op of ['ops', 'upload', 'delete', 'meta', 'unknown']) expect(sharedOperationRequiresLicense(op)).toBe(true);
+    for (const op of ['users', 'ops', 'upload', 'delete', 'meta', 'unknown']) expect(sharedOperationRequiresLicense(op)).toBe(true);
   });
 
   it('keeps opening, shared browsing and panel navigation available while disabling editing menus', () => {

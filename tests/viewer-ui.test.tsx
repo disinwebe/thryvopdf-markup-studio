@@ -3,14 +3,26 @@ import { describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
 import AuthGate from '../src/components/AuthGate';
 import { SharedLibrary } from '../src/components/SharedLibrary';
+import { MarkupShape } from '../src/components/MarkupShape';
 import { NotificationBell } from '../src/components/Notifications';
 import { renamedTab } from '../src/app/model';
+import { DEFAULT_CAL } from '../src/core/measurement';
 import { TabNameEditor } from '../src/components/TabNameEditor';
 
 const user: AuthUser = { name: 'Reader', email: 'reader@example.test', discipline: '', role: 'admin' };
 const actions = { serverMode: true, logout: vi.fn(), changePassword: vi.fn() };
 
 describe('read-only viewer UI', () => {
+  it('renders imported highlights at full opacity', () => {
+    const markup = {
+      id: 'legacy-highlight', type: 'highlight' as const, page: 0, points: [{ x: 1, y: 1 }, { x: 30, y: 20 }],
+      color: '#ffeb3b', width: 2, opacity: 0.25, status: 'None' as const, author: 'Reader',
+      date: '2026-01-01T00:00:00Z', comments: [],
+    };
+    const html = renderToStaticMarkup(<MarkupShape m={markup} cal={DEFAULT_CAL} />);
+    expect(html).toContain('opacity="1"');
+  });
+
   it('renders the local workspace without showing an account gate', () => {
     const html = renderToStaticMarkup(<AuthGate>{(currentUser) => <div>{currentUser.name} workspace</div>}</AuthGate>);
     expect(html).toContain('Local user workspace');

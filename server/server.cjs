@@ -7,6 +7,7 @@ const https = require('https');
 const path = require('path');
 const { createDocs } = require('./docs.cjs');
 const { createNotifier } = require('./notify.cjs');
+const { createFeedback } = require('./feedback.cjs');
 
 const MIN_PASSWORD = 8;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -77,6 +78,7 @@ function createApp(opts = {}) {
   const sessions = new Map(); // sha256(token) -> { email, expires }
   const fails = new Map(); // email|ip -> { n, until }
   const regs = new Map(); // ip -> { n, reset }
+  const feedbackSubmissions = new Map();
   const th = (t) => crypto.createHash('sha256').update(t).digest('hex');
   const bearer = (req) => (/^Bearer (.+)$/.exec(req.headers.authorization || '') || [])[1];
   const dropSessions = (email, exceptHash) => {
@@ -115,7 +117,7 @@ function createApp(opts = {}) {
   const activeAdmins = () => users.filter((u) => u.role === 'admin' && u.status === 'active').length;
 
   const handlers = {
-    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true, docsAccess: true, notifications: true }],
+    'GET /api/health': () => [200, { ok: true, hasUsers: users.length > 0, docs: true, docsAccess: true, notifications: true, feedback: true }],
 
     'POST /api/register': (req, b, ip) => {
       const r = regs.get(ip);
@@ -134,7 +136,8 @@ function createApp(opts = {}) {
       setPassword(user, password);
       users.push(user);
       save();
-      notifier.registered(user, users.filter((u) => u.role === 'admin' && u.status === 'active'));
+      void notifier.registered(user, users.filter((u) => u.role === 'admin' && u.status === 'active'))
+        .catch((error) => console.error(`Registration notification failed: ${error.message}`));
       return [201, { ok: true, pending: true, message: STATUS_MSG.pending }];
     },
 
@@ -188,15 +191,18 @@ function createApp(opts = {}) {
       const self = u === s.user;
       const wasActiveAdmin = u.role === 'admin' && u.status === 'active';
       const lastAdmin = wasActiveAdmin && activeAdmins() <= 1;
+      let registrationResult = null;
       const bad = (m) => [400, { ok: false, error: m }];
       switch (b.action) {
         case 'approve':
           if (u.status !== 'pending' && u.status !== 'rejected') return bad('Only pending or rejected users can be approved.');
           u.status = 'active';
+          registrationResult = 'approved';
           break;
         case 'reject':
           if (u.status !== 'pending') return bad('Only pending users can be rejected.');
           u.status = 'rejected';
+          registrationResult = 'rejected';
           break;
         case 'disable':
           if (self || lastAdmin) return bad('You cannot disable yourself or the last administrator.');
@@ -253,11 +259,30 @@ function createApp(opts = {}) {
           return bad('Unknown action.');
       }
       save();
+      if (registrationResult) void notifier.registrationResult(u, registrationResult);
       return [200, { ok: true }];
     }),
   };
 
   const notifier = createNotifier({ dir: path.dirname(file), now, send: opts.sendMail, log: (m) => console.error(m) });
+  const feedback = createFeedback({ file: opts.feedbackFile || path.join(path.dirname(file), 'feedback.json'), now });
+  handlers['POST /api/feedback'] = authed((s, b, ip) => {
+    if (s.user.mustChange) return [403, { ok: false, error: 'Change your password first.' }];
+    const key = s.user.email;
+    const attempts = feedbackSubmissions.get(key);
+    if (attempts && attempts.reset > now() && attempts.count >= 10) {
+      return [429, { ok: false, error: 'Too many feedback submissions. Try again later.' }];
+    }
+    const result = feedback.submit(s.user, b);
+    if (result[0] === 201) {
+      if (!attempts || attempts.reset <= now()) feedbackSubmissions.set(key, { count: 1, reset: now() + 3600e3 });
+      else attempts.count += 1;
+    }
+    return result;
+  });
+  handlers['GET /api/admin/feedback'] = adminOnly(() => [200, { ok: true, submissions: feedback.list() }]);
+  handlers['POST /api/admin/feedback/status'] = adminOnly((_s, b) => feedback.setStatus(String(b.id || ''), String(b.status || '')));
+  handlers['POST /api/admin/feedback/delete'] = adminOnly((_s, b) => feedback.remove(String(b.id || '')));
   const onAssign = (doc, by, emails) => {
     const recipients = emails.map(find).filter((u) => u && u.status === 'active').map((u) => ({ name: u.name, email: u.email }));
     if (recipients.length) notifier.assigned(doc, { name: by.name, email: by.email }, recipients).catch(() => {});

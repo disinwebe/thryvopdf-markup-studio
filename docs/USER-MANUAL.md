@@ -12,6 +12,7 @@ This manual follows the current ThryvoPDF Markup Studio 1.0 desktop build. It ex
 - [Install, activate, and start the app](#2-install-activate-and-start-the-app)
 - [Understand the workspace](#3-understand-the-workspace)
 - [Open and read PDFs](#4-open-and-read-pdfs)
+- [Print a PDF](#print-a-pdf)
 - [Add and edit markups](#5-add-and-edit-markups)
 - [Measure drawings](#6-measure-drawings)
 - [Compare drawing revisions](#7-compare-drawing-revisions)
@@ -108,6 +109,17 @@ The side-panel toggles at the viewer edges, or **Ctrl+Alt+L** and **Ctrl+Alt+R**
 9. To search the active PDF, press **Ctrl+F** or click **Search Text**, enter a complete word, then press **Enter** or **Find**. All exact-word matches are highlighted in yellow at 50% opacity. After the first search, each **Enter** press advances to the next match; use the arrows to move forward or backward. Search works in unlicensed viewing mode, but scanned pages without a text layer cannot be searched.
 
 To close a document, choose the **X** on its tab or **File > Close Document**. To close ThryvoPDF with unsaved PDF changes, choose **Save All**, **Don't Save**, or **Cancel**; canceled or failed saves keep the app open.
+
+### Print a PDF
+
+Open the print preview with **Ctrl+P** or **File > Print**. Printing is available in viewer-only mode and does not require a license.
+
+1. Select the printer. The paper-size list shows sizes supported by that printer. Choose **Printer Properties...** to set its tray, paper type, or other driver-specific finishing options.
+2. Under **Pages**, choose **All**, **Current**, or **Custom**. A custom range accepts entries such as `1-3, 5`. You can print only odd or even pages, or reverse the page order.
+3. Under **Page Setup**, select the paper size, orientation, and margins. **Auto** orientation follows the page; margins are in inches.
+4. Under **Advanced Print Options**, choose whether to print the document with its markups or the document only. Select **Fit to printable area**, **Actual size**, or a custom scale; configure copies, duplex, and collation as needed.
+5. Review the sheet in the preview. Use the page buttons, page strip, or scroll up/down to move between selected pages; use the zoom controls to inspect the preview.
+6. Choose **Print** to send the job directly to the selected printer without opening another print dialog. The preview closes after the job is accepted; if printing fails, it remains open and displays an error. Choose **Cancel** to close without printing.
 
 ## 5. Add and edit markups
 
@@ -374,7 +386,7 @@ Newly assigned reviewers receive an in-app alert and, if the administrator has c
 2. Add and edit markups using the same viewer tools as a local PDF.
 3. Changes sync automatically. The shared-document banner shows who is working in the document and whether your connection is live.
 4. If offline or your session expires, the banner displays a warning. Keep the document open and restore the connection so pending changes can sync.
-5. You can select any markup to locate it on the drawing, but you can move, resize, edit, or delete only markups you authored. The document uploader can change the status of review markups and add replies to their comments. Each user can edit their own comment by double-clicking its text or choosing **Edit**; only its author can delete it.
+5. Assigned users can select any markup on the drawing and change the status of review markups. You can move, resize, edit, or delete only markups you authored. The document uploader can also add replies to review comments. Each user can edit their own comment by double-clicking its text or choosing **Edit**; only its author can delete it.
 
 Shared documents sync markups and comments, not page calibration, bookmarks, or page organization. Page reorder, rotate, and insert are unavailable on shared tabs. If two people edit the same markup at the same time, the last change accepted by the server wins.
 
@@ -383,7 +395,7 @@ Shared documents sync markups and comments, not page calibration, bookmarks, or 
 In server mode, choose **Notifications** in the top-right area:
 
 - The unread count appears on the button.
-- Assignment, review, and pending-registration alerts appear in the inbox. Newly assigned reviewers are notified in-app; they also receive an email when the administrator has enabled and configured assignment email.
+- Assignment, review, and pending-registration alerts appear in the inbox. Newly assigned reviewers receive an in-app alert and optional email. Active administrators receive an email for new registrations, and applicants receive email when their account is approved or rejected, when the administrator has enabled and configured email notifications.
 - Notifications are pushed to signed-in users as soon as the server records them. The app also refreshes periodically as a fallback.
 - Choose **Open** on an alert to go to Shared Documents or, for a registration alert, user management.
 - Choose **Mark read** on an alert or **Mark all read** in the inbox.
@@ -391,6 +403,12 @@ In server mode, choose **Notifications** in the top-right area:
 - The inbox refreshes automatically about every 30 seconds.
 
 Assignment and review alerts always appear in-app. Email is optional and is configured by the server administrator. Email delivery problems do not prevent document uploads or review-status changes. Clearing notifications requires the current ThryvoPDF Server Manager on the shared server.
+
+### Send feedback
+
+Choose **Help > Send feedback...** to report a bug, suggest an improvement, or share a usability comment. You must be signed in to your organization's ThryvoPDF server. Enter a subject and details; steps to reproduce are optional. The app version, operating system, and your server account are included. The app does not attach PDFs, file names, or local paths. Do not include passwords or sensitive project information.
+
+The server stores submissions in `feedback.json` in its data folder. Only server administrators can open **Help > Feedback inbox...**, review submissions, change their status, or delete them. Deploy the current server build to enable feedback submissions and queue access.
 
 ## 12. Administrator: users and server setup
 
@@ -420,11 +438,11 @@ Server Manager runs the collaboration service as an automatic-start Windows serv
 
 For an existing deployment, update Server Manager while reusing the same data folder to retain users and documents. Do not delete the data folder. Before upgrading the manager, stop and uninstall the Windows service, install the new manager, then install the service again with the same port and data folder. Uninstalling the service does not delete its data. Stop and uninstall the service before changing its port/data folder or uninstalling the manager.
 
-The server data folder contains user accounts, shared PDFs, markup data, and notification/email settings. Restrict its access and back up the entire folder with the service stopped. Do not run another server process against that folder at the same time.
+The server data folder contains user accounts, shared PDFs, markup data, notification/email settings, and feedback submissions. Restrict its access and back up the entire folder with the service stopped. Do not run another server process against that folder at the same time.
 
-The server uses HTTP unless an administrator separately configures TLS. Plain HTTP exposes credentials and documents to other parties on the network; use only on a trusted network or configure HTTPS and certificates appropriate for your organization.
+The server uses HTTP unless an administrator separately configures TLS. Plain HTTP exposes credentials, documents, and feedback submissions to other parties on the network; use only on a trusted network or configure HTTPS and certificates appropriate for your organization.
 
-### Configure assignment email
+### Configure email notifications
 
 1. Start the server service and open Server Manager.
 2. In **Assignment notifications**, enable email and select a provider.
@@ -434,6 +452,8 @@ The server uses HTTP unless an administrator separately configures TLS. Plain HT
 6. If using SMTP for Microsoft 365, the administrator must allow Authenticated SMTP (SMTP AUTH) for the mailbox and satisfy the tenant's authentication policy.
 7. Enter the sender address, save the settings, then send a test email to verify the configuration.
 
+The configured provider sends optional emails for new user registrations, account approvals or rejections, assignments, and review updates. Pending-registration alerts also appear in administrators' in-app notification inboxes.
+
 The manager saves email credentials in the server data folder's `notify.json`; limit access to that folder. Graph `Mail.Send` can permit sending as other mailboxes in the tenant unless an administrator restricts it. Follow the organization's security policy when creating and limiting the mail application.
 
 ## 13. Shortcuts and menus
@@ -441,6 +461,7 @@ The manager saves email credentials in the server data folder's `notify.json`; l
 | Shortcut | Action |
 |---|---|
 | `Ctrl+O` | Open PDF |
+| `Ctrl+P` | Open print preview |
 | `Ctrl+S` | Save |
 | `Ctrl+Shift+S` | Save As |
 | `Ctrl+Shift+Right` | Rotate the current page clockwise |

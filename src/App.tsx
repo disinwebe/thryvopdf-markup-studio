@@ -52,6 +52,7 @@ import { parseWatermarkPages } from './core/watermarks';
 import { WatermarksManager } from './components/WatermarksManager';
 import { groupWatermarks } from './core/watermarks';
 import { PrintPreview } from './components/PrintPreview';
+import { FeedbackDialog } from './components/FeedbackDialog';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'image', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
@@ -82,6 +83,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [docs, setDocs] = useState<Doc[]>([]);
   const [activeId, setActiveId] = useState('');
   const [printOpen, setPrintOpen] = useState(false);
+  const [feedbackMode, setFeedbackMode] = useState<'submit' | 'inbox' | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
   const [tool, setTool] = useState<Tool>('select');
@@ -1369,6 +1371,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     } else if ((e.key === 'Delete' || e.key === 'Backspace') && tool === 'select') {
       if (selectedMarkupIds.length || selectedPageObjectIds.length) deleteSelection();
     } else if (e.key === 'Escape') {
+      if (feedbackMode) setFeedbackMode(null);
       if (watermarkDialogOpen) setWatermarkDialogOpen(false);
       setTool('select');
       setPending(null);
@@ -1406,11 +1409,13 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       void window.api?.quitApp();
       return;
     }
-    if (library || actions.uiBlocked || commentTarget || defaultsOpen || licenseInfo) return;
+    if (library || actions.uiBlocked || commentTarget || defaultsOpen || licenseInfo || feedbackMode) return;
     if (readOnly && ['save', 'saveAs', 'csv', 'undo', 'redo', 'delete', 'flatten', 'flattenAll', 'toolDefaults', 'measurePanel', 'organizePanel', 'sheetsPanel'].includes(action)) return;
     if (readOnly && action.startsWith('measure')) return;
     switch (action) {
       case 'print': if (active) setPrintOpen(true); break;
+      case 'feedback': setFeedbackMode('submit'); break;
+      case 'feedbackInbox': if (user.role === 'admin') setFeedbackMode('inbox'); break;
       case 'open': void open(); break;
       case 'save': void save(false); break;
       case 'saveAs': void save(true); break;
@@ -1480,7 +1485,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       canUngroupSelected: canUngroupSelected(),
       canFlattenSelected: !viewOnly && !!active && !active.shared && !!active.markups.find((m) => m.id === selectedId && canDeleteMarkup(m, user)),
       canFlattenAll: !viewOnly && !!active && !active.shared && active.markups.some((markup) => canDeleteMarkup(markup, user)),
-      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || watermarkDialogOpen || !!licenseInfo || spellReviewOpen || printOpen, viewOnly,
+      serverMode: !!actions.serverMode, blocked: library || !!actions.uiBlocked || !!commentTarget || defaultsOpen || watermarkDialogOpen || !!licenseInfo || spellReviewOpen || printOpen || !!feedbackMode, viewOnly,
       spellcheckLanguage,
       toolbars: {
         file: toolbarLayouts.file?.visible ?? true,
@@ -1489,7 +1494,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         measure: toolbarLayouts.measure?.visible ?? true,
       },
     });
-  }, [active, selectedId, selectedMarkupIds, selectedPageObjectIds, user, view, actions.serverMode, actions.signedIn, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, watermarkDialogOpen, licenseInfo, toolbarLayouts, spellcheckLanguage, spellReviewOpen, printOpen]);
+  }, [active, selectedId, selectedMarkupIds, selectedPageObjectIds, user, view, actions.serverMode, actions.signedIn, actions.uiBlocked, library, viewOnly, commentTarget, defaultsOpen, watermarkDialogOpen, licenseInfo, toolbarLayouts, spellcheckLanguage, spellReviewOpen, printOpen, feedbackMode]);
   useEffect(() => () => window.api?.setMenuState({
     signedIn: false, documentOpen: false, viewerActive: false, canUndo: false, canRedo: false, selected: false, canFlattenSelected: false, canFlattenAll: false, serverMode: false, blocked: false, viewOnly: false,
   }), []);
@@ -1791,7 +1796,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
               <PageView
                 key={active.id}
                 doc={active}
-                tool={readOnly ? 'hand' : tool}
+                tool={readOnly ? 'select' : tool}
+                selectionOnly={readOnly}
                 style={toolStyle}
                 author={author}
                 user={user}
@@ -2062,7 +2068,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           </button>
         </div>
       )}
-      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} onChanged={() => setSharedRevision((n) => n + 1)} />}
+      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} readOnly={readOnly} onChanged={() => setSharedRevision((n) => n + 1)} />}
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
       {editingCommentsTarget && active?.id === editingCommentsTarget.docId && (() => {
         const markup = active.markups.find((item) => item.id === editingCommentsTarget.markupId);
@@ -2187,7 +2193,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
               <div className="props">
                 <label>Color<StandardColorPicker value={shown.color} onChange={(color) => changeStyle({ color })} /></label>
                 <label>Line width<input type="range" min={1} max={12} value={shown.width} onChange={(e) => changeStyle({ width: +e.target.value })} /></label>
-                <label>Opacity<input type="range" min={0.1} max={1} step={0.05} value={shown.opacity} onChange={(e) => changeStyle({ opacity: +e.target.value })} /></label>
+                {(editingSelected ? selected?.type !== 'highlight' : tool !== 'highlight') && <label>Opacity<input type="range" min={0.1} max={1} step={0.05} value={shown.opacity} onChange={(e) => changeStyle({ opacity: +e.target.value })} /></label>}
                 <label>Fill<input type="checkbox" checked={shown.fill} onChange={(e) => changeStyle({ fill: e.target.checked })} /></label>
               </div>
             )}
@@ -2257,6 +2263,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       )}
       {licenseInfo && <LicenseInfo status={licenseInfo} onClose={() => setLicenseInfo(null)} onImport={viewOnly ? () => { setLicenseInfo(null); onImportLicense?.(); } : undefined} />}
       {printOpen && active && <PrintPreview document={active} onClose={() => setPrintOpen(false)} />}
+      {feedbackMode && (feedbackMode !== 'inbox' || user.role === 'admin') && <FeedbackDialog mode={feedbackMode} user={user} signedIn={!!actions.serverMode && !!actions.signedIn} onClose={() => setFeedbackMode(null)} onSignIn={() => actions.requestSignIn?.()} />}
       {closePromptOpen && (
         <div className="modal close-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="close-confirm-title">
           <div className="usermgmt close-confirm">
