@@ -67,7 +67,7 @@ interface Window {
     licenseStatus(): Promise<{ ok: boolean; device?: string; id?: string; error?: string }>;
     importLicense(): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
     pickUploads(kind: 'files' | 'folder'): Promise<{ project: string; items: { token: string; name: string; rel: string; size: number }[]; truncated: boolean } | null>;
-    sharedDocs(args: { op: 'list' | 'users' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group' | 'delete-group' | 'members' | 'review'; id?: string; name?: string; project?: string; newProject?: string; revision?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; members?: string[]; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number; done?: boolean }): Promise<any>;
+    sharedDocs(args: { op: 'list' | 'users' | 'upload' | 'open' | 'ops' | 'poll' | 'leave' | 'delete' | 'meta' | 'rename-group' | 'delete-group' | 'group-members' | 'members' | 'review'; id?: string; name?: string; project?: string; newProject?: string; revision?: string; description?: string; rel?: string; token?: string; bytes?: Uint8Array; members?: string[]; upserts?: unknown[]; deletes?: string[]; cid?: string; since?: number; pr?: number; done?: boolean }): Promise<any>;
     changePassword(args: { current: string; password: string; confirm: string }): Promise<AuthResult>;
     notifications(args?: { read?: string[] | 'all'; clear?: boolean }): Promise<{ ok: boolean; error?: string; notifications?: AppNotification[]; unread?: number }>;
     onNotifications?(callback: (snapshot: { notifications: AppNotification[]; unread: number; profile?: AuthUser }) => void): () => void;

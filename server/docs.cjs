@@ -137,6 +137,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
   const docs = new Map();
   const journal = path.join(dir, '.group-rename-journal');
   const deleteJournal = path.join(dir, '.group-delete-journal');
+  const accessJournal = path.join(dir, '.group-access-journal');
   let unavailable = false;
 
   const replayDelete = () => {
@@ -164,8 +165,27 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
     }
     fs.unlinkSync(journal);
   };
+  const replayGroupAccess = () => {
+    const tx = JSON.parse(fs.readFileSync(accessJournal, 'utf8'));
+    if (!tx || !Array.isArray(tx.ids) || !tx.ids.length || !tx.ids.every((id) => typeof id === 'string' && ID_RE.test(id)) ||
+        new Set(tx.ids).size !== tx.ids.length || typeof tx.project !== 'string' || !tx.project || cleanProject(tx.project) !== tx.project ||
+        !Array.isArray(tx.members) || tx.members.length > 500 || !tx.members.every((email) => typeof email === 'string') ||
+        new Set(tx.members).size !== tx.members.length) throw new Error('Invalid group access journal.');
+    for (const id of tx.ids) {
+      const file = path.join(dir, id + '.json');
+      const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (record.id !== id || record.project !== tx.project) throw new Error('Invalid document in group access journal.');
+      record.members = tx.members;
+      record.groupMembers = tx.members;
+      record.reviews = (Array.isArray(record.reviews) ? record.reviews : []).filter((review) => tx.members.includes(review.email));
+      fs.writeFileSync(file + '.tmp', JSON.stringify(record));
+      fs.renameSync(file + '.tmp', file);
+    }
+    fs.unlinkSync(accessJournal);
+  };
   if (fs.existsSync(journal)) replayRename();
   if (fs.existsSync(deleteJournal)) replayDelete();
+  if (fs.existsSync(accessJournal)) replayGroupAccess();
 
   for (const f of fs.readdirSync(dir)) {
     if (!f.endsWith('.json')) continue;
@@ -175,6 +195,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       docs.set(j.id, {
         id: j.id, name: j.name, owner: j.owner, ownerName: j.ownerName, created: j.created, size: j.size, project: j.project || '', description: j.description || '', rel: j.rel || '',
         members: Array.isArray(j.members) && j.members.every((m) => typeof m === 'string') ? j.members : [],
+        groupMembers: Array.isArray(j.groupMembers) && j.groupMembers.every((m) => typeof m === 'string') ? j.groupMembers : undefined,
         reviews: new Map((Array.isArray(j.reviews) ? j.reviews : []).filter((r) =>
           r && typeof r.email === 'string' && Number.isInteger(r.doneVersion) && typeof r.updated === 'string',
         ).map((r) => [r.email, { doneVersion: r.doneVersion, updated: r.updated }])),
@@ -188,7 +209,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
 
   const persist = (d) => {
     const f = path.join(dir, d.id + '.json');
-    const body = { id: d.id, name: d.name, owner: d.owner, ownerName: d.ownerName, created: d.created, size: d.size, project: d.project, description: d.description, rel: d.rel, ...(d.members === null ? {} : { members: d.members }), version: d.version, markups: [...d.markups.values()], reviews: [...d.reviews].map(([email, review]) => ({ email, ...review })) };
+    const body = { id: d.id, name: d.name, owner: d.owner, ownerName: d.ownerName, created: d.created, size: d.size, project: d.project, description: d.description, rel: d.rel, ...(d.members === null ? {} : { members: d.members }), ...(d.groupMembers ? { groupMembers: d.groupMembers } : {}), version: d.version, markups: [...d.markups.values()], reviews: [...d.reviews].map(([email, review]) => ({ email, ...review })) };
     fs.writeFileSync(f + '.tmp', JSON.stringify(body));
     fs.renameSync(f + '.tmp', f);
   };
@@ -217,7 +238,7 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
   };
   const canAccess = (d, user) => d.owner === user.email || d.members.includes(user.email);
   const groupRevision = (group) => crypto.createHash('sha256').update(JSON.stringify(group.map((d) => d.id).sort())).digest('hex');
-  const info = (d, user, ownedProjects) => ({ id: d.id, name: d.name, owner: d.ownerName, ownerEmail: d.owner, size: d.size, created: d.created, project: d.project, description: d.description || '', rel: d.rel, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name), reviews: d.members.map((email) => ({ email, done: d.reviews.get(email)?.doneVersion === d.version, updated: d.reviews.get(email)?.updated || null })), ...(d.owner === user.email ? { members: d.members } : {}), canRenameGroup: !!d.project && (isAdmin(user) || (ownedProjects ? ownedProjects.has(d.project) : [...docs.values()].some((other) => other.project === d.project && other.owner === user.email))) });
+  const info = (d, user, ownedProjects) => ({ id: d.id, name: d.name, owner: d.ownerName, ownerEmail: d.owner, size: d.size, created: d.created, project: d.project, description: d.description || '', rel: d.rel, version: d.version, markups: d.markups.size, users: live(d).map((p) => p.name), reviews: d.members.map((email) => ({ email, done: d.reviews.get(email)?.doneVersion === d.version, updated: d.reviews.get(email)?.updated || null })), groupAccessConfigured: Array.isArray(d.groupMembers), ...(d.owner === user.email ? { members: d.members, ...(Array.isArray(d.groupMembers) ? { groupMembers: d.groupMembers } : {}) } : {}), canRenameGroup: !!d.project && (isAdmin(user) || (ownedProjects ? ownedProjects.has(d.project) : [...docs.values()].some((other) => other.project === d.project && other.owner === user.email))) });
   const get = (id) => docs.get(id) || null;
   const NOT_FOUND = [404, { ok: false, error: 'Shared document not found.' }];
   const FORBIDDEN = [403, { ok: false, error: 'You do not have access to this shared document.' }];
@@ -236,7 +257,8 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       }));
       return [200, { ok: true, docs: [...docs.values()].filter((d) => canAccess(d, user)).map((d) => {
         const revision = permissions.get(d.project);
-        return { ...info(d, user, ownedProjects), canDeleteGroup: !!revision, ...(revision ? { deleteGroupRevision: revision } : {}) };
+        const group = groups.get(d.project) || [];
+        return { ...info(d, user, ownedProjects), canManageGroupAccess: !!d.project && group.length > 0 && group.every((item) => item.owner === user.email), canDeleteGroup: !!revision, ...(revision ? { deleteGroupRevision: revision } : {}) };
       }).sort((a, b) => b.created.localeCompare(a.created)) }];
     },
     maxUpload,
@@ -306,7 +328,12 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
     upload(user, name, bytes, meta = {}) {
       if (!Buffer.isBuffer(bytes) || bytes.length < 8 || !bytes.subarray(0, 1024).includes('%PDF-')) return [400, { ok: false, error: 'The file is not a PDF.' }];
       const id = crypto.randomBytes(12).toString('base64url');
-      const d = { id, name: cleanName(name), owner: user.email, ownerName: user.name, created: new Date(now()).toISOString(), size: bytes.length, project: cleanProject(meta.project), description: cleanDescription(meta.description), rel: cleanRel(meta.rel), members: meta.members || [], reviews: new Map(), version: 0, markups: new Map(), log: [], logStart: 0, presence: new Map(), presenceRev: 0, waiters: [] };
+      const project = cleanProject(meta.project);
+      const currentGroup = project ? [...docs.values()].filter((doc) => doc.project === project) : [];
+      const savedGroupMembers = currentGroup.find((doc) => Array.isArray(doc.groupMembers))?.groupMembers;
+      const members = savedGroupMembers ?? (Array.isArray(meta.members) ? meta.members : []);
+      const groupMembers = project ? (savedGroupMembers ?? members) : undefined;
+      const d = { id, name: cleanName(name), owner: user.email, ownerName: user.name, created: new Date(now()).toISOString(), size: bytes.length, project, description: cleanDescription(meta.description), rel: cleanRel(meta.rel), members, groupMembers, reviews: new Map(), version: 0, markups: new Map(), log: [], logStart: 0, presence: new Map(), presenceRev: 0, waiters: [] };
       fs.writeFileSync(path.join(dir, id + '.pdf'), bytes);
       persist(d);
       docs.set(id, d);
@@ -538,6 +565,39 @@ function createDocs({ dir, now = Date.now, pollMs = 20000, presenceTtlMs = 45000
       wake(d);
       onAssign(d, user, added);
       return [200, { ok: true, doc: info(d, user) }];
+    },
+    setGroupMembers(project, user, members) {
+      if (typeof project !== 'string' || !project || cleanProject(project) !== project) return [400, { ok: false, error: 'A valid group is required.' }];
+      const affected = [...docs.values()].filter((doc) => doc.project === project);
+      if (!affected.length) return [404, { ok: false, error: 'Group not found.' }];
+      if (!affected.every((doc) => doc.owner === user.email)) return [403, { ok: false, error: 'Only the uploader of every PDF in the group can manage group access.' }];
+      const temp = accessJournal + '.tmp';
+      try {
+        fs.writeFileSync(temp, JSON.stringify({ ids: affected.map((doc) => doc.id), project, members }));
+        fs.renameSync(temp, accessJournal);
+      } catch (error) {
+        try { fs.rmSync(temp, { force: true }); } catch { /* leave uncommitted temp for cleanup */ }
+        if (!fs.existsSync(accessJournal)) throw error;
+        unavailable = true;
+        return [503, { ok: false, error: 'Shared library unavailable. Restart the server to recover group access changes.' }];
+      }
+      try {
+        replayGroupAccess();
+      } catch {
+        unavailable = true;
+        return [503, { ok: false, error: 'Shared library unavailable. Restart the server to recover group access changes.' }];
+      }
+      for (const doc of affected) {
+        const added = members.filter((email) => !doc.members.includes(email));
+        doc.members = members;
+        doc.groupMembers = members;
+        for (const email of doc.reviews.keys()) if (!members.includes(email)) doc.reviews.delete(email);
+        for (const email of doc.presence.keys()) if (!canAccess(doc, { email })) doc.presence.delete(email);
+        doc.presenceRev++;
+        wake(doc);
+        onAssign(doc, user, added);
+      }
+      return [200, { ok: true, project, count: affected.length }];
     },
     review(id, user, b) {
       const d = get(id);

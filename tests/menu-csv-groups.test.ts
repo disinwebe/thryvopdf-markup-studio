@@ -123,6 +123,9 @@ describe('native menu wiring', () => {
     expect(fileToolbar.type).toBe('checkbox');
     expect(fileToolbar.checked).toBe(true);
     expect(contentToolbar.checked).toBe(true);
+    const resetToolbars = toolbars.find((entry: { label?: string }) => entry.label === '&Reset toolbars');
+    resetToolbars.click();
+    expect(send).toHaveBeenCalledWith('toolbar:reset');
     const hiddenMarkupToolbar = menuTemplate({ signedIn: true, viewerActive: true, toolbars: { markup: false } }, send, 'win32')[3].submenu
       .find((entry: { label?: string }) => entry.label === '&Toolbars').submenu
       .find((entry: { label?: string }) => entry.label === '&Markup tools');

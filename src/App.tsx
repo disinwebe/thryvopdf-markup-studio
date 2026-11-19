@@ -53,6 +53,7 @@ import { WatermarksManager } from './components/WatermarksManager';
 import { groupWatermarks } from './core/watermarks';
 import { PrintPreview } from './components/PrintPreview';
 import { FeedbackDialog } from './components/FeedbackDialog';
+import { resetToolbarState } from './components/MovableToolbar';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'image', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
@@ -1387,6 +1388,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const menuRef = useRef<(action: string) => void>(() => {});
   menuRef.current = (action) => {
+    if (action === 'toolbar:reset') {
+      for (const id of ['file', 'content', 'markup', 'measure']) resetToolbarState(id);
+      window.dispatchEvent(new Event('toolbar-reset'));
+      return;
+    }
     if (action.startsWith('toolbar:')) {
       const [, id, command] = action.split(':');
       if (['file', 'content', 'markup', 'measure'].includes(id) && (command === 'show' || command === 'hide')) {

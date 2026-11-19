@@ -356,7 +356,7 @@ Choose **Shared Documents...** to connect to the company server; the app asks fo
 1. Open **Shared Documents**.
 2. Choose **Upload current tab**, **Upload PDFs...**, or **Upload project folder...**.
 3. Choose a group (existing, new, or no group) and optionally enter a description.
-4. In **Users allowed to access these documents**, optionally filter the list by discipline or search names and email addresses, then select the users who should have access. Select-all applies to the users currently matching the filters. The uploader retains access; without selecting others, only the uploader can access the new document.
+4. In **Users allowed to access these documents**, optionally filter the list by discipline or search names and email addresses, then select the users who should have access. Select-all applies to the users currently matching the filters. The uploader retains access; without selecting others, only the uploader can access the new document. For a new group, this selection becomes its default access list.
 5. Choose **Upload** and review the result or per-file upload status.
 
 Uploads must be PDFs no larger than 150 MB each. Folder upload retains subfolder names as labels; it does not create separate folder permissions. Selection is limited to 500 PDFs. An upload with a large number of existing markups may take longer to complete.
@@ -368,6 +368,8 @@ Only the uploader can change a document's access list:
 1. In Shared Documents, find the uploaded document and choose **Manage access**.
 2. Optionally filter by discipline or search names and email addresses, then select or clear the users who should have access. Select-all applies to the users currently matching the filters.
 3. Choose **Save access**.
+
+To assign reviewers across a whole group, choose **Manage group access** in the group heading. This control is available when you uploaded every PDF currently in that group. The chosen access list replaces access for every current PDF and becomes the default for future uploads to that group, including uploads by other users. Removed reviewers lose access to all PDFs in the group. If existing PDFs have different access lists, the dialog warns you and starts with no reviewers selected; choose the complete list you want to apply. Individual **Manage access** changes still affect only that PDF until group access is applied again.
 
 The administrator can delete a document or group only where they have the required access. Group rename and deletion permissions depend on the uploader/admin role and access to the documents in the group. Deleting a document or group removes it for everyone and cannot be undone.
 
