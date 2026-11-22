@@ -8,7 +8,7 @@ import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, rotatePage, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
-import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, documentZoomKey, downloadName, loadDocumentZoom, makeMarkup, pickFiles, saveBytes, saveDocumentZoom, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
+import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, documentZoomKey, downloadName, loadDocumentZoom, makeMarkup, pickFiles, saveBytes, saveDocumentCalibrations, saveDocumentZoom, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
 import { PageView } from './components/PageView';
 import { BookmarksPanel, Thumbnails } from './components/Thumbnails';
 import { MarkupsPanel } from './components/MarkupsPanel';
@@ -930,12 +930,17 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       const path = await saveBytes(document.name, bytes, 'pdf', as ? undefined : document.path);
       if (!path) return false;
       const localCopy = !!document.shared;
+      const hasCalibration = Object.keys(document.calibrations).length > 0;
+      const calibrationSaved = !hasCalibration || saveDocumentCalibrations(
+        documentZoomKey({ name: baseName(path), path }),
+        document.calibrations,
+      );
       updateDoc(document.id, () => localCopy
         ? { path }
         : { path, name: baseName(path), dirty: false });
       setMsg(localCopy
-        ? `Saved local copy ${baseName(path)}. The shared server document is unchanged.`
-        : `Saved ${baseName(path)} with ${document.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)`);
+        ? `Saved local copy ${baseName(path)}. The shared server document is unchanged.${calibrationSaved ? '' : ' Calibration settings could not be saved on this device.'}`
+        : `Saved ${baseName(path)} with ${document.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)${calibrationSaved ? '' : '. Calibration settings could not be saved on this device.'}`);
       setSavedPdfPath(path);
       return true;
     } catch (e) {
@@ -1010,7 +1015,9 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     const r = await window.api!.sharedDocs({ op: 'open', id: info.id });
     if (!r.ok) return say(r.expired ? 'Session expired. Log out and sign in again.' : 'Could not open shared document: ' + (r.error || 'unknown error'));
     try {
-      const base = await createDoc(r.name || info.name, new Uint8Array(r.bytes));
+      const base = await createDoc(r.name || info.name, new Uint8Array(r.bytes), undefined, false, {
+        calibrationKey: documentZoomKey({ name: r.name || info.name, shared: { id: info.id } }),
+      });
       const d: Doc = {
         ...base,
         markups: r.markups,
@@ -1191,22 +1198,21 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
 
   // ---- calibration -----
-  const setCal = async (cal: Calibration, all: boolean) => {
+  const setCal = (cal: Calibration, all: boolean) => {
     if (!active || readOnly) return;
     const document = active;
-    updateDoc(active.id, (d) => {
-      const cals = { ...d.calibrations };
-      if (all) for (let i = 0; i < d.numPages; i++) cals[i] = cal;
-      else cals[d.page] = cal;
-      return { calibrations: cals, dirty: true };
-    });
     setPending(null);
     setTool('select');
     const calibrations = { ...document.calibrations };
     if (all) for (let i = 0; i < document.numPages; i++) calibrations[i] = cal;
     else calibrations[document.page] = cal;
-    const saved = await saveDocument({ ...document, calibrations, dirty: true });
-    if (!saved) say('Scale set, but the PDF was not saved.');
+    updateDoc(document.id, () => ({ calibrations }));
+    const keys = new Set([documentZoomKey(document)]);
+    if (document.path) keys.add(documentZoomKey({ name: document.name, path: document.path }));
+    const saved = [...keys].every((key) => saveDocumentCalibrations(key, calibrations));
+    say(saved
+      ? `Calibration saved for ${document.name} on this device.`
+      : `Calibration is set for this session, but could not be saved for ${document.name} on this device.`);
   };
 
   const goto = (i: number) =>

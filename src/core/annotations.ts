@@ -545,6 +545,7 @@ export async function writeAnnotations(
   for (const page of pages) {
     removeOwnAnnots(page);
     removeLineContent(page);
+    clearPageCalibration(page);
     setPageData(page, { lines: [] });
   }
   const numbers = numberMarkups(markups);
@@ -627,10 +628,6 @@ export async function writeAnnotations(
       page.node.addAnnot(popupRef);
     }
   }
-  pages.forEach((page, i) => {
-    const cal = calibrations[i];
-    if (cal) setPageData(page, { cal });
-  });
 }
 
 /** Removes the last app-generated drawing stream before it is regenerated on save. */
@@ -761,9 +758,16 @@ function pageData(page: PDFPage): { cal?: Calibration; sheet?: SheetMeta; lines?
   }
 }
 
-function setPageData(page: PDFPage, patch: { cal?: Calibration; sheet?: SheetMeta; lines?: Markup[] }) {
+function setPageData(page: PDFPage, patch: { sheet?: SheetMeta; lines?: Markup[] }) {
   const merged = { ...pageData(page), ...patch };
   page.node.set(KEY_PAGE, PDFHexString.fromText(JSON.stringify(merged)));
+}
+
+function clearPageCalibration(page: PDFPage) {
+  const data = pageData(page);
+  if (!Object.hasOwn(data, 'cal')) return;
+  delete data.cal;
+  page.node.set(KEY_PAGE, PDFHexString.fromText(JSON.stringify(data)));
 }
 
 export async function readState(doc: PDFDocument): Promise<DocState> {
@@ -809,7 +813,7 @@ export function writeSheets(doc: PDFDocument, sheets: Record<number, SheetMeta>)
   doc.getPages().forEach((p, i) => sheets[i] && setPageData(p, { sheet: sheets[i] }));
 }
 
-/** Writes markups, calibration, sheet metadata and bookmarks, returning the saved PDF bytes. */
+/** Writes markup appearances using calibration, plus sheet metadata and bookmarks. */
 export async function saveWithState(bytes: Uint8Array, state: DocState): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   await writeAnnotations(doc, state.markups, state.calibrations);

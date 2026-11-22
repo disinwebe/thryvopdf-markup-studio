@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import type { PageObject } from '../core/pageContent';
 import { DocState, readState } from '../core/annotations';
-import { Bookmark, Calibration, Markup, MarkupType, Pt, SheetMeta, uid } from '../core/types';
+import { Bookmark, Calibration, Markup, MarkupType, Pt, SheetMeta, UNITS, uid } from '../core/types';
 import { PDFDocumentProxy, loadPdf } from '../pdf/pdfjs';
 
 export interface Doc {
@@ -82,6 +82,56 @@ export function saveDocumentZoom(key: string, zoom: number, storage: ZoomStore |
   try { storage.setItem(zoomStorageKey(key), String(zoom)); } catch { /* zoom remains session-only when storage is unavailable */ }
 }
 
+const calibrationStorageKey = (key: string) => `thryvopdf-document-calibration-v1:${key}`;
+const isCalibration = (value: unknown): value is Calibration => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return UNITS.some((unit) => unit === candidate.unit) &&
+    typeof candidate.unitsPerPoint === 'number' && Number.isFinite(candidate.unitsPerPoint) && candidate.unitsPerPoint > 0 &&
+    candidate.calibrated === true;
+};
+
+export function loadDocumentCalibrations(key: string, storage: ZoomStore | null = getZoomStore()): Record<number, Calibration> {
+  if (!storage) return {};
+  try {
+    const raw = storage.getItem(calibrationStorageKey(key));
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([page, calibration]) =>
+      /^\d+$/.test(page) && String(Number(page)) === page && Number.isSafeInteger(Number(page)) && isCalibration(calibration),
+    )) as Record<number, Calibration>;
+  } catch {
+    return {};
+  }
+}
+
+export function saveDocumentCalibrations(
+  key: string,
+  calibrations: Record<number, Calibration>,
+  storage: ZoomStore | null = getZoomStore(),
+): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(calibrationStorageKey(key), JSON.stringify(calibrations));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function initialDocumentCalibrations(
+  key: string,
+  pdfCalibrations: Record<number, Calibration>,
+  storage: ZoomStore | null = getZoomStore(),
+): Record<number, Calibration> {
+  const saved = loadDocumentCalibrations(key, storage);
+  if (!Object.keys(saved).length && Object.keys(pdfCalibrations).length) {
+    saveDocumentCalibrations(key, pdfCalibrations, storage);
+  }
+  return { ...pdfCalibrations, ...saved };
+}
+
 export const stateOf = (d: Doc): DocState => ({
   markups: d.markups,
   calibrations: d.calibrations,
@@ -89,7 +139,13 @@ export const stateOf = (d: Doc): DocState => ({
   bookmarks: d.bookmarks,
 });
 
-export async function createDoc(name: string, bytes: Uint8Array, path?: string, dirty = false, options: { fitPage?: boolean } = {}): Promise<Doc> {
+export async function createDoc(
+  name: string,
+  bytes: Uint8Array,
+  path?: string,
+  dirty = false,
+  options: { fitPage?: boolean; calibrationKey?: string } = {},
+): Promise<Doc> {
   const pdf = await loadPdf(bytes);
   let st: DocState = { markups: [], calibrations: {}, sheets: {}, bookmarks: [] };
   try {
@@ -105,6 +161,7 @@ export async function createDoc(name: string, bytes: Uint8Array, path?: string, 
     pdf,
     numPages: pdf.numPages,
     ...st,
+    calibrations: initialDocumentCalibrations(options.calibrationKey ?? documentZoomKey({ name, path }), st.calibrations),
     pageObjects: [],
     undo: [],
     redo: [],

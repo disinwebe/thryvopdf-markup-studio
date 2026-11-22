@@ -22,7 +22,7 @@ const markup = (id: string, x: number): Markup => ({
 });
 
 describe('flattening markups', () => {
-  it('preserves calibration metadata in bytes prepared for saving', async () => {
+  it('does not embed calibration configuration in bytes prepared for saving', async () => {
     const source = await PDFDocument.create();
     source.addPage([200, 200]);
     const calibration = { unit: 'ft' as const, unitsPerPoint: 0.25, calibrated: true };
@@ -32,7 +32,7 @@ describe('flattening markups', () => {
       [],
     );
 
-    expect((await readState(await PDFDocument.load(result.bytes))).calibrations[0]).toEqual(calibration);
+    expect((await readState(await PDFDocument.load(result.bytes))).calibrations[0]).toBeUndefined();
   });
 
   it('bakes selected raster layers into page content and preserves unflattened annotations', async () => {

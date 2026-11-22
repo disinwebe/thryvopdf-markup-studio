@@ -1,4 +1,4 @@
-import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
+import { degrees, PDFDocument, PDFHexString, PDFName, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { readState, saveWithState } from '../src/core/annotations';
 import { applyHandle, constrainToOrtho, handlesOf, hitMarkup, pickTop, wrapText } from '../src/core/geometry';
@@ -37,6 +37,24 @@ const mk = (type: MarkupType, points: [number, number][], extra: Partial<Markup>
 });
 
 describe('annotations round trip', () => {
+  it('removes legacy embedded calibration while preserving other page metadata', async () => {
+    const source = await PDFDocument.load(await makePdf(1));
+    source.getPage(0).node.set(PDFName.of('PMSPage'), PDFHexString.fromText(JSON.stringify({
+      cal: { unit: 'ft', unitsPerPoint: 0.25, calibrated: true },
+      sheet: { number: 'A-101', title: 'Plan' },
+    })));
+    const saved = await saveWithState(await source.save(), {
+      markups: [],
+      calibrations: {},
+      sheets: {},
+      bookmarks: [],
+    });
+
+    const state = await readState(await PDFDocument.load(saved));
+    expect(state.calibrations[0]).toBeUndefined();
+    expect(state.sheets[0]).toEqual({ number: 'A-101', title: 'Plan' });
+  });
+
   it('writes all markup types as real annotations and reloads them', async () => {
     const bytes = await makePdf(2);
     const types: [MarkupType, [number, number][]][] = [
@@ -91,7 +109,7 @@ describe('annotations round trip', () => {
     expect(got.comments[0].text).toBe('ok');
     expect(got.status).toBe('Accepted');
     expect(got.page).toBe(orig.page);
-    expect(back.calibrations[0].unitsPerPoint).toBe(0.25);
+    expect(back.calibrations[0]).toBeUndefined();
     expect(back.sheets[1].number).toBe('A-102');
     expect(back.bookmarks).toEqual([
       { title: 'Intro', page: 0, level: 0 },
@@ -136,7 +154,6 @@ describe('annotations round trip', () => {
   });
 });
 
-import { PDFName } from 'pdf-lib';
 function require_name(n: string) {
   return PDFName.of(n);
 }
