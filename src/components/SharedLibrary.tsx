@@ -85,6 +85,12 @@ const COLLAPSE_KEY = 'pms.sharedLibrary.collapsedGroups';
 
 type Staged = { kind: 'current' } | { kind: 'files'; items: Pick[]; truncated: boolean };
 
+export function closeSharedLibraryOnEscape(event: { key: string; preventDefault(): void }, onClose: () => void): void {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  onClose();
+}
+
 export function fitSharedThumbnail(width: number, height: number, maxWidth = 96, maxHeight = 124) {
   const scale = Math.min(maxWidth / width, maxHeight / height);
   return { scale, width: width * scale, height: height * scale };
@@ -196,6 +202,12 @@ export function SharedLibrary({
   });
   const [editingGroup, setEditingGroup] = useState<string | null>(null);
   const [groupName, setGroupName] = useState('');
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => closeSharedLibraryOnEscape(event, onClose);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const saveCollapsed = (next: string[]) => {
     setCollapsed(next);
@@ -349,7 +361,7 @@ export function SharedLibrary({
   return (
     <div className="modal" role="dialog" aria-label="Shared documents">
       <div className="usermgmt">
-        <div className="row">
+        <div className="row shared-library-header">
           <h2>Shared documents (server)</h2>
           <span className="grow" />
           <button onClick={onClose}>Close</button>
