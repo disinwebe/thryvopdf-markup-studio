@@ -1624,7 +1624,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         if (notification.type === 'registration') actions.manageUsers?.();
         else openSharedLibrary();
       }} />
-      <div className="toolbar-groups" ref={toolbarGroupsRef} hidden={!active}>
+      <div className="toolbar-groups" ref={toolbarGroupsRef}>
         <MovableToolbar id="file" label="File management" boundsRef={appRef} layouts={toolbarLayoutList} onLayoutChange={reportToolbarLayout}>
           <div className="bar">
             <button onClick={open} title="Open PDF (Ctrl+O)"><FolderIcon /><span className="toolbar-command-label">Open…</span></button>

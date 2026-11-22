@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { loadPdf, pageSize, renderToCanvas, type PDFDocumentProxy } from '../pdf/pdfjs';
 import { Pick, UploadRow, filterDocumentsByName, formatReviewStatusCounts, groupByProject, reviewStatusCounts, runUploads, toRows } from '../app/upload';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 
@@ -83,6 +84,59 @@ const NEW = '__new__';
 const COLLAPSE_KEY = 'pms.sharedLibrary.collapsedGroups';
 
 type Staged = { kind: 'current' } | { kind: 'files'; items: Pick[]; truncated: boolean };
+
+export function SharedDocumentThumbnail({ document }: { document: SharedListing }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setVisible(true);
+    }, { rootMargin: '200px' });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible || !canvasRef.current) return;
+    let cancelled = false;
+    let pdf: PDFDocumentProxy | null = null;
+    let task: { cancel(): void; promise: Promise<unknown> } | null = null;
+    setFailed(false);
+    void (async () => {
+      const response = await window.api?.sharedDocs({ op: 'open', id: document.id });
+      if (!response?.ok || cancelled) return;
+      pdf = await loadPdf(new Uint8Array(response.bytes));
+      if (cancelled || !canvasRef.current) return;
+      const size = await pageSize(pdf, 0);
+      if (cancelled || !canvasRef.current) return;
+      task = await renderToCanvas(pdf, 0, 96 / size.w, canvasRef.current);
+      await task.promise;
+    })().catch(() => {
+      if (!cancelled) setFailed(true);
+    });
+    return () => {
+      cancelled = true;
+      task?.cancel();
+      if (pdf) void pdf.destroy();
+    };
+  }, [visible, document.id, document.version]);
+
+  return (
+    <div ref={boxRef} className="shared-document-thumbnail" role="img" aria-label={`Page 1 preview of ${document.name}`}>
+      <canvas ref={canvasRef} />
+      {failed && <span className="muted small" aria-label="Preview unavailable">Preview unavailable</span>}
+    </div>
+  );
+}
 
 export function SharedLibrary({
   me,
@@ -394,7 +448,7 @@ export function SharedLibrary({
         />
         <table>
           <thead>
-            <tr><th>Name</th><th>Uploaded by</th><th>Size</th><th>Markups</th><th>Review status</th><th>Working now</th><th /></tr>
+            <tr><th>Preview</th><th>Name</th><th>Uploaded by</th><th>Size</th><th>Markups</th><th>Review status</th><th>Working now</th><th /></tr>
           </thead>
           <tbody>
             {groupByProject(filterDocumentsByName(docs, search)).map((g) => {
@@ -402,7 +456,7 @@ export function SharedLibrary({
               return (
               <Fragment key={'g:' + g.project}>
                 <tr className="group-row">
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <div className="row">
                       <button aria-expanded={!collapsed.includes(g.project)} aria-label={`${collapsed.includes(g.project) ? 'Expand' : 'Collapse'} ${g.project || 'Ungrouped'}`} onClick={() => saveCollapsed(collapsed.includes(g.project) ? collapsed.filter((p) => p !== g.project) : [...collapsed, g.project])}>
                         <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted">{formatReviewStatusCounts(counts)}</span>
@@ -436,6 +490,7 @@ export function SharedLibrary({
                 </tr>
                 {!collapsed.includes(g.project) && g.docs.map((d) => (
                   <tr key={d.id} className={d.id === activeSharedId ? 'shared-doc-row active' : 'shared-doc-row'}>
+                    <td className="shared-document-preview"><SharedDocumentThumbnail document={d} /></td>
                     <td>
                       {d.rel ? <span className="muted">{d.rel}/</span> : null}{d.name}
                       {d.description ? <div className="muted small">{d.description}</div> : null}
@@ -499,10 +554,10 @@ export function SharedLibrary({
               </Fragment>
             );})}
             {!!docs.length && !filterDocumentsByName(docs, search).length && (
-              <tr><td colSpan={7} className="muted">No filenames match your search.</td></tr>
+              <tr><td colSpan={8} className="muted">No filenames match your search.</td></tr>
             )}
             {!docs.length && !error && (
-              <tr><td colSpan={6} className="muted">No shared documents yet.</td></tr>
+              <tr><td colSpan={8} className="muted">No shared documents yet.</td></tr>
             )}
           </tbody>
         </table>
