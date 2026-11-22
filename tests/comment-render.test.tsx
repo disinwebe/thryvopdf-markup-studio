@@ -13,6 +13,27 @@ const m: Markup = { id: 'm1', type: 'rect', page: 0, points: [{ x: 10, y: 20 }, 
 const stamp: Markup = { ...m, id: 'stamp', type: 'stamp', stamp: 'APPROVED' };
 
 describe('visible review comments', () => {
+  it('renders endpoint arrowheads as editable line properties', () => {
+    const line: Markup = { ...m, id: 'line-arrowheads', type: 'line', comments: [], measurementArrowheads: 'both', measurementArrowSize: 12 };
+    const svg = renderToStaticMarkup(<svg><MarkupShape m={line} cal={DEFAULT_CAL} /></svg>);
+    expect(svg.match(/<polygon/g)).toHaveLength(2);
+    const panel = renderToStaticMarkup(<MarkupsPanel
+      doc={{ id: 'doc', name: 'file.pdf', bytes: new Uint8Array(), pdf: {} as any, numPages: 1, markups: [line], pageObjects: [], undo: [], redo: [], calibrations: {}, sheets: {}, bookmarks: [], dirty: false, page: 0, zoom: 1,
+        viewport: { left: 0, top: 0 }, textCache: new Map() }}
+      selectedId={line.id}
+      author="A"
+      user={{ name: 'A', email: 'a@example.test', role: 'user' }}
+      onSelect={() => {}}
+      onUpdate={() => {}}
+      onDelete={() => {}}
+      onExport={() => {}}
+      commentSize={9}
+      onCommentSize={() => {}}
+    />);
+    expect(panel).toContain('aria-label="Line endpoint arrowheads"');
+    expect(panel).toContain('aria-label="Line arrow size"');
+  });
+
   it('uses the same font sizes, baselines and order for viewer and PDF comment runs', () => {
     const markup: Markup = { ...m, comments: [
       { id: 'one', author: 'Alice', date: '2026-01-01', text: 'First review', fontSize: 18 },

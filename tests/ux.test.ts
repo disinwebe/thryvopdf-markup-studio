@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { COMMENT_SIZE_DEFAULT, COMMENT_SIZE_KEY, clampCommentSize, loadCommentSize, saveCommentSize } from '../src/core/commentSize';
 import { calloutLayout } from '../src/core/callout';
-import { SHARED_REFRESH_MS, focusSearchOnShortcut, historyShortcut, startPolling, toolForKey } from '../src/app/shortcuts';
+import { SHARED_REFRESH_MS, autoSnapShortcut, focusSearchOnShortcut, historyShortcut, orthoShortcut, startPolling, toolForKey } from '../src/app/shortcuts';
 
 const mem = () => {
   const m = new Map<string, string>();
@@ -55,6 +55,20 @@ describe('tool shortcuts', () => {
     expect(toolForKey({ key: 'v' }, 'pen')).toBe('select');
     expect(toolForKey({ key: 'H' }, 'select')).toBe('hand');
     expect(toolForKey({ key: 'h' }, 'hand')).toBe('select');
+  });
+  it('toggles orthogonal mode with unmodified F8', () => {
+    const preventDefault = vi.fn();
+    expect(orthoShortcut({ key: 'F8', preventDefault })).toBe(true);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(orthoShortcut({ key: 'F8', shiftKey: true, preventDefault })).toBe(false);
+    expect(orthoShortcut({ key: 'F7', preventDefault })).toBe(false);
+  });
+  it('toggles auto snap with unmodified F3', () => {
+    const preventDefault = vi.fn();
+    expect(autoSnapShortcut({ key: 'F3', preventDefault })).toBe(true);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(autoSnapShortcut({ key: 'F3', shiftKey: true, preventDefault })).toBe(false);
+    expect(autoSnapShortcut({ key: 'F4', preventDefault })).toBe(false);
   });
   it('ignores modifiers, typing targets and other keys', () => {
     expect(toolForKey({ key: 'v', ctrlKey: true }, 'pen')).toBeNull();

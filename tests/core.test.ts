@@ -1,9 +1,17 @@
 import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { readState, saveWithState } from '../src/core/annotations';
-import { hitMarkup, pickTop, wrapText } from '../src/core/geometry';
+import { applyHandle, constrainToOrtho, handlesOf, hitMarkup, pickTop, wrapText } from '../src/core/geometry';
 import { buildFromPlan, chunkEvery, extractPages, mergePdfs, movePage, parseRanges, rotatePage, splitPdf } from '../src/core/organize';
 import { Markup, MarkupType } from '../src/core/types';
+
+describe('orthogonal movement', () => {
+  it('constrains a point along its dominant horizontal or vertical axis', () => {
+    expect(constrainToOrtho({ x: 10, y: 20 }, { x: 35, y: 27 })).toEqual({ x: 35, y: 20 });
+    expect(constrainToOrtho({ x: 10, y: 20 }, { x: 14, y: 45 })).toEqual({ x: 10, y: 45 });
+    expect(constrainToOrtho({ x: 10, y: 20 }, { x: 15, y: 25 })).toEqual({ x: 15, y: 20 });
+  });
+});
 
 async function makePdf(pages: number, label = 'P', size: [number, number] = [400, 300]): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -148,6 +156,15 @@ describe('hit testing', () => {
   });
   it('wraps text', () => {
     expect(wrapText('aaa bbb ccc', 40, 10).length).toBeGreaterThan(1);
+  });
+});
+
+describe('line endpoint handles', () => {
+  it('exposes and moves either endpoint independently', () => {
+    const line = mk('line', [[10, 20], [90, 40]]);
+    expect(handlesOf(line).map((handle) => handle.p)).toEqual([{ x: 10, y: 20 }, { x: 90, y: 40 }]);
+    expect(applyHandle(line, 0, { x: 5, y: 15 }).points).toEqual([{ x: 5, y: 15 }, { x: 90, y: 40 }]);
+    expect(applyHandle(line, 1, { x: 100, y: 50 }).points).toEqual([{ x: 10, y: 20 }, { x: 100, y: 50 }]);
   });
 });
 

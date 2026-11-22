@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Doc, Style, Tool, makeMarkup } from '../app/model';
-import { applyHandle, boxOf, dist, handlesOf, hitMarkup, pickTop, simplify, splinePoints, translate, HandleKey } from '../core/geometry';
+import { applyHandle, boxOf, constrainToOrtho, dist, handlesOf, hitMarkup, pickTop, simplify, splinePoints, translate, HandleKey } from '../core/geometry';
 import { countNumbers, DEFAULT_CAL } from '../core/measurement';
 import { Markup, MarkupType, Pt } from '../core/types';
 import { pageSize, renderToCanvas, type PdfSpellingMatch, type PdfTextMatch } from '../pdf/pdfjs';
@@ -18,7 +18,11 @@ import { expandGroupedSelection } from '../core/grouping';
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'm-radius', 'm-diameter', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count', 'image'];
 const MULTI: Tool[] = ['cloud', 'polyline', 'm-polylength', 'm-spline', 'm-area', 'm-perimeter', 'm-angle'];
-const SNAP_TOOLS: Tool[] = ['calibrate', 'm-length', 'm-polylength', 'm-radius', 'm-diameter', 'm-spline', 'm-area', 'm-perimeter', 'm-angle'];
+const SNAP_TOOLS: Tool[] = [
+  'calibrate', 'highlight', 'text', 'callout', 'cloud', 'rect', 'ellipse', 'line', 'arrow',
+  'polyline', 'pen', 'stamp', 'image', 'note', 'm-length', 'm-polylength', 'm-spline',
+  'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count',
+];
 
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; sl: number; st: number }
@@ -36,6 +40,8 @@ type Drag =
 export interface PageViewProps {
   doc: Doc;
   tool: Tool;
+  orthoEnabled: boolean;
+  autoSnapEnabled: boolean;
   style: Style;
   author: string;
   user: Actor;
@@ -239,8 +245,8 @@ function PageCanvas(p: PageCanvasProps) {
   const messageRef = useRef(p.onMessage);
   messageRef.current = p.onMessage;
 
-  const snapAt = (point: Pt): Pt => {
-    if (!SNAP_TOOLS.includes(tool) || !snapIndex) {
+  const snapAt = (point: Pt, force = false): Pt => {
+    if (!p.autoSnapEnabled || (!force && !SNAP_TOOLS.includes(tool)) || !snapIndex) {
       setSnapTarget(null);
       return point;
     }
@@ -462,6 +468,10 @@ function PageCanvas(p: PageCanvasProps) {
     const r = pageEl.current!.getBoundingClientRect();
     return { x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
   };
+  const moveDelta = (start: Pt, point: Pt) => {
+    const delta = { x: point.x - start.x, y: point.y - start.y };
+    return p.orthoEnabled ? constrainToOrtho({ x: 0, y: 0 }, delta) : delta;
+  };
 
   const selected = p.selectedMarkupIds.length === 1
     ? doc.markups.find((m) => m.id === p.selectedMarkupIds[0] && m.page === doc.page) ?? null
@@ -659,7 +669,7 @@ function PageCanvas(p: PageCanvasProps) {
     if (TWO_POINT.includes(tool)) {
       const d = draftRef.current;
       if (d && d.length === 1) {
-        finishTwo(d[0], pt);
+        finishTwo(d[0], tool === 'line' && p.orthoEnabled ? constrainToOrtho(d[0], pt) : pt);
         return;
       }
       setDraft([pt]);
@@ -698,6 +708,7 @@ function PageCanvas(p: PageCanvasProps) {
   const finishTwo = (a: Pt, b: Pt) => {
     setDraft(null);
     setCur(null);
+    if (tool === 'line' && p.orthoEnabled) b = constrainToOrtho(a, b);
     if (tool === 'calibrate') {
       if (dist(a, b) > 1) p.onCalibrate(a, b);
       return;
@@ -719,16 +730,19 @@ function PageCanvas(p: PageCanvasProps) {
       sc.scrollTop = dg.st - (e.clientY - dg.sy);
       return;
     }
-    const pt = snapAt(toPt(e));
-    if (draftRef.current) setCur(pt);
+    const rawPoint = snapAt(toPt(e), !!dg && dg.kind !== 'selection-window' && dg.kind !== 'two' && dg.kind !== 'pen');
+    const currentDraft = draftRef.current;
+    const pt = tool === 'line' && p.orthoEnabled && currentDraft?.length === 1
+      ? constrainToOrtho(currentDraft[0], rawPoint)
+      : rawPoint;
+    if (currentDraft) setCur(pt);
     if (!dg) return;
     if (dg.kind === 'selection-window') {
       setSelectionWindow(normalizedRect(dg.start, pt));
       return;
     }
     if (dg.kind === 'move') {
-      const dx = pt.x - dg.start.x,
-        dy = pt.y - dg.start.y;
+      const { x: dx, y: dy } = moveDelta(dg.start, pt);
       if (!dg.began) {
         if (Math.hypot(dx, dy) * zoom < 3) return;
         dg.began = true;
@@ -736,8 +750,7 @@ function PageCanvas(p: PageCanvasProps) {
       }
       p.onLive(doc.markups.map((m) => (m.id === dg.orig.id ? translate(dg.orig, dx, dy) : m)));
     } else if (dg.kind === 'page-object-move') {
-      const dx = pt.x - dg.start.x;
-      const dy = pt.y - dg.start.y;
+      const { x: dx, y: dy } = moveDelta(dg.start, pt);
       p.onPageObjectsChange(doc.pageObjects.map((object) => object.id === dg.orig.id
         ? { ...dg.orig, x: dg.orig.x + dx, y: dg.orig.y + dy }
         : object));
@@ -746,8 +759,7 @@ function PageCanvas(p: PageCanvasProps) {
         ? resizePageObject(dg.orig, pt.x - dg.start.x, pt.y - dg.start.y)
         : object));
     } else if (dg.kind === 'selection-move') {
-      const dx = pt.x - dg.start.x;
-      const dy = pt.y - dg.start.y;
+      const { x: dx, y: dy } = moveDelta(dg.start, pt);
       if (!dg.began) {
         if (Math.hypot(dx, dy) * zoom < 3) return;
         dg.began = true;
@@ -768,8 +780,7 @@ function PageCanvas(p: PageCanvasProps) {
         return original ? { ...original, x: original.x + dx, y: original.y + dy } : object;
       }));
     } else if (dg.kind === 'callout') {
-      const dx = pt.x - dg.start.x,
-        dy = pt.y - dg.start.y;
+      const { x: dx, y: dy } = moveDelta(dg.start, pt);
       if (!dg.began) {
         if (Math.hypot(dx, dy) * zoom < 3) return;
         dg.began = true;
@@ -955,7 +966,7 @@ function PageCanvas(p: PageCanvasProps) {
                 <MarkupShape m={preview} cal={cal} />
               </g>
             )}
-            {snapTarget && SNAP_TOOLS.includes(tool) && (
+            {snapTarget && p.autoSnapEnabled && (
               <g aria-hidden="true" pointerEvents="none" stroke="#1565c0" strokeWidth={1.5 / zoom}>
                 {snapTarget.kind === 'intersection' ? (
                   <>

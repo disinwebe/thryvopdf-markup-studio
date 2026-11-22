@@ -133,6 +133,8 @@ export interface Style {
   stampImage?: import('../core/stamp').StampImage;
   stampLockAspectRatio?: boolean;
   image?: import('../core/stamp').StampImage;
+  measurementArrowheads?: Markup['measurementArrowheads'];
+  measurementArrowSize?: number;
   subject: string;
 }
 
@@ -172,8 +174,20 @@ export function defaultStyle(tool: Tool): Style {
   }
 }
 
-export function toolStyle(tool: Tool, custom: Partial<Style> | undefined, defaults: Partial<Pick<Style, 'color' | 'width' | 'opacity'>>, subject = ''): Style {
-  const style = { ...defaultStyle(tool), ...custom, ...defaults, subject };
+export function toolStyle(
+  tool: Tool,
+  custom: Partial<Style> | undefined,
+  defaults: Partial<Pick<Style, 'color' | 'width' | 'opacity'>>,
+  subject = '',
+  measurementDefaults: Partial<Pick<Style, 'color' | 'width' | 'opacity' | 'measurementArrowheads' | 'measurementArrowSize'>> = {},
+): Style {
+  const style = {
+    ...defaultStyle(tool),
+    ...custom,
+    ...defaults,
+    ...(tool.startsWith('m-') ? measurementDefaults : {}),
+    subject,
+  };
   if (tool === 'highlight') style.opacity = 1;
   return style;
 }
@@ -218,6 +232,10 @@ export function makeMarkup(
   }
   if (style.fill && ['rect', 'ellipse', 'cloud', 'text', 'callout'].includes(type)) m.fill = style.fillColor;
   if (type.startsWith('m-') && style.subject.trim()) m.subject = style.subject.trim();
+  if (type === 'm-length') {
+    if (style.measurementArrowheads !== undefined) m.measurementArrowheads = style.measurementArrowheads;
+    if (style.measurementArrowSize !== undefined) m.measurementArrowSize = style.measurementArrowSize;
+  }
   return m;
 }
 

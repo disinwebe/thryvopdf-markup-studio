@@ -707,6 +707,17 @@ function writeLineContent(page: PDFPage, g: PageGeom, lines: Markup[]) {
       color: rgb(...hex(m.color)),
       opacity: m.opacity,
     });
+    for (const head of measurementArrowheads(m)) {
+      const points = head.map((point) => viewToPdf(point, g));
+      const path = `M ${f(points[0].x)} ${f(-points[0].y)} ` +
+        points.slice(1).map((point) => `L ${f(point.x)} ${f(-point.y)}`).join(' ') + ' Z';
+      page.drawSvgPath(path, {
+        x: 0,
+        y: 0,
+        color: rgb(...hex(m.color)),
+        opacity: m.opacity,
+      });
+    }
   }
   const contents = page.node.Contents();
   if (!(contents instanceof PDFArray)) {
