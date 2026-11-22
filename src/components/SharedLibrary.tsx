@@ -85,11 +85,17 @@ const COLLAPSE_KEY = 'pms.sharedLibrary.collapsedGroups';
 
 type Staged = { kind: 'current' } | { kind: 'files'; items: Pick[]; truncated: boolean };
 
+export function fitSharedThumbnail(width: number, height: number, maxWidth = 96, maxHeight = 124) {
+  const scale = Math.min(maxWidth / width, maxHeight / height);
+  return { scale, width: width * scale, height: height * scale };
+}
+
 export function SharedDocumentThumbnail({ document }: { document: SharedListing }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [visible, setVisible] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -118,7 +124,9 @@ export function SharedDocumentThumbnail({ document }: { document: SharedListing 
       if (cancelled || !canvasRef.current) return;
       const size = await pageSize(pdf, 0);
       if (cancelled || !canvasRef.current) return;
-      task = await renderToCanvas(pdf, 0, 96 / size.w, canvasRef.current);
+      const thumbnail = fitSharedThumbnail(size.w, size.h);
+      setPreviewSize({ width: thumbnail.width, height: thumbnail.height });
+      task = await renderToCanvas(pdf, 0, thumbnail.scale, canvasRef.current);
       await task.promise;
     })().catch(() => {
       if (!cancelled) setFailed(true);
@@ -131,7 +139,13 @@ export function SharedDocumentThumbnail({ document }: { document: SharedListing 
   }, [visible, document.id, document.version]);
 
   return (
-    <div ref={boxRef} className="shared-document-thumbnail" role="img" aria-label={`Page 1 preview of ${document.name}`}>
+    <div
+      ref={boxRef}
+      className="shared-document-thumbnail"
+      style={{ width: previewSize?.width ?? 96, height: previewSize?.height ?? 124 }}
+      role="img"
+      aria-label={`Page 1 preview of ${document.name}`}
+    >
       <canvas ref={canvasRef} />
       {failed && <span className="muted small" aria-label="Preview unavailable">Preview unavailable</span>}
     </div>
