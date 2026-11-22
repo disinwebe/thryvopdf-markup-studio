@@ -924,13 +924,18 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
 
   const saveDocument = async (document: Doc, as = false): Promise<boolean> => {
-    if (viewOnly || document.shared) return false;
+    if (viewOnly) return false;
     try {
       const bytes = await bake(document);
       const path = await saveBytes(document.name, bytes, 'pdf', as ? undefined : document.path);
       if (!path) return false;
-      updateDoc(document.id, () => ({ path, name: baseName(path), dirty: false }));
-      setMsg(`Saved ${baseName(path)} with ${document.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)`);
+      const localCopy = !!document.shared;
+      updateDoc(document.id, () => localCopy
+        ? { path }
+        : { path, name: baseName(path), dirty: false });
+      setMsg(localCopy
+        ? `Saved local copy ${baseName(path)}. The shared server document is unchanged.`
+        : `Saved ${baseName(path)} with ${document.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)`);
       setSavedPdfPath(path);
       return true;
     } catch (e) {
@@ -1200,10 +1205,6 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     const calibrations = { ...document.calibrations };
     if (all) for (let i = 0; i < document.numPages; i++) calibrations[i] = cal;
     else calibrations[document.page] = cal;
-    if (document.shared) {
-      say('Scale set for this session. Save a local copy to retain calibration.');
-      return;
-    }
     const saved = await saveDocument({ ...document, calibrations, dirty: true });
     if (!saved) say('Scale set, but the PDF was not saved.');
   };
