@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
 import AuthGate from '../src/components/AuthGate';
-import { SharedLibrary } from '../src/components/SharedLibrary';
+import { SharedDocumentThumbnail, SharedLibrary } from '../src/components/SharedLibrary';
 import { MarkupShape } from '../src/components/MarkupShape';
 import { NotificationBell } from '../src/components/Notifications';
 import { renamedTab } from '../src/app/model';
@@ -64,6 +64,23 @@ describe('read-only viewer UI', () => {
     expect(html).toMatch(/disabled=""[^>]*>Upload project folder/);
   });
 
+  it('adds a page 1 preview column for shared server documents', () => {
+    const document = {
+      id: 'shared-1',
+      name: 'plan.pdf',
+      owner: 'Reader',
+      size: 1024,
+      created: '2026-11-22T10:00:00Z',
+      version: 1,
+      markups: 0,
+      users: [],
+    };
+    const html = renderToStaticMarkup(<SharedDocumentThumbnail document={document} />);
+    expect(html).toContain('shared-document-thumbnail');
+    expect(html).toContain('role="img"');
+    expect(html).toContain('Page 1 preview of plan.pdf');
+  });
+
   it('allows local tab aliases but never shared tab aliases', () => {
     expect(renamedTab({ name: 'file.pdf' }, ' New name.pdf ')).toBe('New name.pdf');
     expect(renamedTab({ name: 'file.pdf' }, '../file.pdf')).toBeNull();
@@ -98,10 +115,14 @@ describe('read-only viewer UI', () => {
     expect(html).not.toContain('toolbar-logout');
   });
 
-  it('keeps toolbar groups hidden on the welcome screen without restore buttons', () => {
+  it('shows all toolbar groups on the welcome screen without restore buttons', () => {
     const notifications = { state: { notifications: [], unread: 0, error: null }, markRead: vi.fn(), clearAll: vi.fn() };
     const html = renderToStaticMarkup(<App user={user} actions={{ ...actions, notifications }} viewOnly licenseStatus={{ ok: false }} />);
-    expect(html).toContain('<div class="toolbar-groups" hidden="">');
+    expect(html).not.toContain('<div class="toolbar-groups" hidden="">');
+    expect(html).toContain('aria-label="Move File management toolbar"');
+    expect(html).toContain('aria-label="Move Content tools toolbar"');
+    expect(html).toContain('aria-label="Move Markup tools toolbar"');
+    expect(html).toContain('aria-label="Move Measurement tools toolbar"');
     expect(html).toContain('aria-label="0 unread notifications"');
     expect(html).not.toContain('toolbar-group-restore');
     expect(html).not.toContain('Show File management');

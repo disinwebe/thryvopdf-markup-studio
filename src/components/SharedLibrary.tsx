@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { loadPdf, pageSize, renderToCanvas, type PDFDocumentProxy } from '../pdf/pdfjs';
 import { Pick, UploadRow, filterDocumentsByName, formatReviewStatusCounts, groupByProject, reviewStatusCounts, runUploads, toRows } from '../app/upload';
 import { loadCollapsedGroups, saveCollapsedGroups } from '../app/groupCollapse';
 
@@ -8,6 +9,9 @@ export interface SharedListing {
   owner: string;
   ownerEmail?: string;
   members?: string[] | null;
+  groupMembers?: string[];
+  groupAccessConfigured?: boolean;
+  canManageGroupAccess?: boolean;
   size: number;
   created: string;
   version: number;
@@ -81,6 +85,59 @@ const COLLAPSE_KEY = 'pms.sharedLibrary.collapsedGroups';
 
 type Staged = { kind: 'current' } | { kind: 'files'; items: Pick[]; truncated: boolean };
 
+export function SharedDocumentThumbnail({ document }: { document: SharedListing }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setVisible(true);
+    }, { rootMargin: '200px' });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!visible || !canvasRef.current) return;
+    let cancelled = false;
+    let pdf: PDFDocumentProxy | null = null;
+    let task: { cancel(): void; promise: Promise<unknown> } | null = null;
+    setFailed(false);
+    void (async () => {
+      const response = await window.api?.sharedDocs({ op: 'open', id: document.id });
+      if (!response?.ok || cancelled) return;
+      pdf = await loadPdf(new Uint8Array(response.bytes));
+      if (cancelled || !canvasRef.current) return;
+      const size = await pageSize(pdf, 0);
+      if (cancelled || !canvasRef.current) return;
+      task = await renderToCanvas(pdf, 0, 96 / size.w, canvasRef.current);
+      await task.promise;
+    })().catch(() => {
+      if (!cancelled) setFailed(true);
+    });
+    return () => {
+      cancelled = true;
+      task?.cancel();
+      if (pdf) void pdf.destroy();
+    };
+  }, [visible, document.id, document.version]);
+
+  return (
+    <div ref={boxRef} className="shared-document-thumbnail" role="img" aria-label={`Page 1 preview of ${document.name}`}>
+      <canvas ref={canvasRef} />
+      {failed && <span className="muted small" aria-label="Preview unavailable">Preview unavailable</span>}
+    </div>
+  );
+}
+
 export function SharedLibrary({
   me,
   activeName,
@@ -90,6 +147,7 @@ export function SharedLibrary({
   onUpload,
   readOnly = false,
   onChanged,
+  onSessionExpired,
 }: {
   me: AuthUser;
   activeName?: string;
@@ -99,6 +157,7 @@ export function SharedLibrary({
   onUpload: (project: string, description: string, members: string[]) => Promise<{ ok: boolean; message: string }>;
   readOnly?: boolean;
   onChanged: () => void;
+  onSessionExpired?: () => void;
 }) {
   const [docs, setDocs] = useState<SharedListing[]>([]);
   const [error, setError] = useState('');
@@ -113,6 +172,11 @@ export function SharedLibrary({
   const [users, setUsers] = useState<{ name: string; email: string; discipline: string }[]>([]);
   const [members, setMembers] = useState<string[]>([]);
   const [editingAccess, setEditingAccess] = useState<SharedListing | null>(null);
+  const [groupAccessProject, setGroupAccessProject] = useState<string | null>(null);
+  const [groupAccessVaries, setGroupAccessVaries] = useState(false);
+  const sessionExpiredHandled = useRef(false);
+  const sessionExpiredCallback = useRef(onSessionExpired);
+  sessionExpiredCallback.current = onSessionExpired;
   const [collapsed, setCollapsed] = useState<string[]>(() => {
     try { return loadCollapsedGroups(localStorage, COLLAPSE_KEY); } catch { return []; }
   });
@@ -127,14 +191,31 @@ export function SharedLibrary({
   const patch = (key: string, p: Partial<UploadRow>) => setRows((all) => all.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const groups = [...new Set(docs.map((d) => d.project || '').filter(Boolean))].sort((a, b) => a.localeCompare(b));
   const chosenGroup = (groupSel === NEW ? newGroup : groupSel).trim();
+  const inheritedGroupAccess = groupSel && groupSel !== NEW
+    ? docs.find((doc) => doc.project === groupSel && doc.groupAccessConfigured)
+    : undefined;
+  const handleSessionExpired = useCallback(() => {
+    setError('Your server session expired. Sign in again to continue sharing.');
+    if (!sessionExpiredHandled.current) {
+      sessionExpiredHandled.current = true;
+      sessionExpiredCallback.current?.();
+    }
+  }, []);
 
   const load = useCallback(async () => {
-    const r = await window.api!.sharedDocs({ op: 'list' });
-    if (r.ok) {
-      setDocs(r.docs || []);
-      setError('');
-    } else setError(r.expired ? 'Your session expired. Log out and sign in again.' : r.error || 'Could not load shared documents.');
-  }, []);
+    try {
+      const r = await window.api!.sharedDocs({ op: 'list' });
+      if (r.expired) { handleSessionExpired(); return; }
+      if (r.ok) {
+        setDocs(r.docs || []);
+        setError('');
+      } else setError(r.error || 'Could not load shared documents.');
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (message.includes('Sign in to the server to use this feature.')) handleSessionExpired();
+      else setError(`Could not load shared documents: ${message}`);
+    }
+  }, [handleSessionExpired]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -158,12 +239,16 @@ export function SharedLibrary({
     void window.api!.sharedDocs({ op: 'users' }).then((r) => {
       if (!active) return;
       if (r.ok && Array.isArray(r.users)) setUsers(r.users);
+      else if (r.expired) handleSessionExpired();
       else setError(r.error || 'Could not load users for sharing.');
     }).catch((reason: unknown) => {
-      if (active) setError(`Could not load users for sharing: ${reason instanceof Error ? reason.message : String(reason)}`);
+      if (!active) return;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (message.includes('Sign in to the server to use this feature.')) handleSessionExpired();
+      else setError(`Could not load users for sharing: ${message}`);
     });
     return () => { active = false; };
-  }, [readOnly]);
+  }, [handleSessionExpired, readOnly]);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -283,11 +368,21 @@ export function SharedLibrary({
               <textarea spellCheck rows={2} maxLength={500} placeholder="e.g. Issued for construction, Rev B" value={desc} onChange={(e) => setDesc(e.target.value)} />
             </label>
             {!desc.trim() && <div className="muted">No description yet. Adding one helps others identify these files.</div>}
-            <fieldset>
-              <legend>Users allowed to access these documents</legend>
-              <p className="muted">You always have access. Select others to share with; none selected means only you can open them.</p>
-              <UserSelection users={users} ownerEmail={me.email} members={members} onChange={setMembers} />
-            </fieldset>
+            {inheritedGroupAccess ? (
+              <fieldset>
+                <legend>Group access</legend>
+                <p className="muted">These PDFs will inherit the group reviewers and access list. Manage access from the group row to change all current and future PDFs.</p>
+                {Array.isArray(inheritedGroupAccess.groupMembers)
+                  ? <p>{inheritedGroupAccess.groupMembers.map((email) => reviewerDisplayName(email, users)).join(', ') || 'No reviewers assigned; only each PDF uploader can access their own upload.'}</p>
+                  : <p className="muted">The uploader has configured access for this group. Only the uploader can view or change the reviewer list.</p>}
+              </fieldset>
+            ) : (
+              <fieldset>
+                <legend>Users allowed to access these documents</legend>
+                <p className="muted">You always have access. Select others to share with; none selected means only you can open them. For grouped uploads, these selections become the group defaults for future PDFs.</p>
+                <UserSelection users={users} ownerEmail={me.email} members={members} onChange={setMembers} />
+              </fieldset>
+            )}
             <div className="row">
               <button className="primary" disabled={busy || (groupSel === NEW && !newGroup.trim())} onClick={confirmUpload}>Upload</button>
               <button onClick={() => setStaged(null)}>Cancel</button>
@@ -297,6 +392,7 @@ export function SharedLibrary({
         {editingAccess && (
           <div className="upload-form" aria-label="Manage document access">
             <b>Access for {editingAccess.name}</b>
+            {editingAccess.project && editingAccess.groupAccessConfigured && <p className="muted">This changes access for this PDF only. Use Manage group access to update every current and future PDF in “{editingAccess.project}”.</p>}
             {editingAccess.members === null && <p className="muted">This older document is currently accessible to all signed-in users. Saving restricts it to the selected users.</p>}
             <UserSelection users={users} ownerEmail={me.email} members={members} onChange={setMembers} />
             <div className="row">
@@ -308,6 +404,25 @@ export function SharedLibrary({
                 onChanged();
               })}>Save access</button>
               <button onClick={() => setEditingAccess(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {groupAccessProject && (
+          <div className="upload-form" aria-label={`Manage access for group ${groupAccessProject}`}>
+            <b>Access for group “{groupAccessProject}”</b>
+            <p className="muted">Save applies this access list to every PDF currently in the group and to future uploads. Each PDF’s existing access list will be replaced; reviewers removed here will lose access to every PDF in the group.</p>
+            {groupAccessVaries && <p className="danger">Current PDF access differs within this group. Choose the exact reviewer list to apply consistently to all files.</p>}
+            <UserSelection users={users} ownerEmail={me.email} members={members} onChange={setMembers} />
+            <div className="row">
+              <button className="primary" disabled={busy} onClick={() => run(async () => {
+                const r = await window.api!.sharedDocs({ op: 'group-members', project: groupAccessProject, members });
+                if (!r.ok) { setError(r.error || 'Could not update group access.'); return; }
+                setGroupAccessProject(null);
+                setGroupAccessVaries(false);
+                await load();
+                onChanged();
+              })}>Apply to group</button>
+              <button disabled={busy} onClick={() => { setGroupAccessProject(null); setGroupAccessVaries(false); }}>Cancel</button>
             </div>
           </div>
         )}
@@ -333,7 +448,7 @@ export function SharedLibrary({
         />
         <table>
           <thead>
-            <tr><th>Name</th><th>Uploaded by</th><th>Size</th><th>Markups</th><th>Review status</th><th>Working now</th><th /></tr>
+            <tr><th>Preview</th><th>Name</th><th>Uploaded by</th><th>Size</th><th>Markups</th><th>Review status</th><th>Working now</th><th /></tr>
           </thead>
           <tbody>
             {groupByProject(filterDocumentsByName(docs, search)).map((g) => {
@@ -341,7 +456,7 @@ export function SharedLibrary({
               return (
               <Fragment key={'g:' + g.project}>
                 <tr className="group-row">
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <div className="row">
                       <button aria-expanded={!collapsed.includes(g.project)} aria-label={`${collapsed.includes(g.project) ? 'Expand' : 'Collapse'} ${g.project || 'Ungrouped'}`} onClick={() => saveCollapsed(collapsed.includes(g.project) ? collapsed.filter((p) => p !== g.project) : [...collapsed, g.project])}>
                         <span aria-hidden="true">{collapsed.includes(g.project) ? '▶' : '▼'}</span> <b>{g.project || 'Ungrouped'}</b> <span className="muted">{formatReviewStatusCounts(counts)}</span>
@@ -355,6 +470,18 @@ export function SharedLibrary({
                           </form>
                         ) : <button disabled={busy} onClick={() => { setError(''); setEditingGroup(g.project); setGroupName(g.project); }}>Rename group</button>
                       )}
+                      {!readOnly && g.project && g.docs.every((d) => d.canManageGroupAccess) && (
+                        <button disabled={busy} onClick={() => {
+                          const groupDocs = docs.filter((doc) => doc.project === g.project);
+                          const configured = groupDocs.find((doc) => doc.groupAccessConfigured);
+                          const lists = groupDocs.map((doc) => [...(doc.members ?? [])].sort());
+                          const consistent = lists.every((list) => JSON.stringify(list) === JSON.stringify(lists[0] ?? []));
+                          setError('');
+                          setMembers(configured?.groupMembers ?? (consistent ? lists[0] ?? [] : []));
+                          setGroupAccessVaries(!configured && !consistent);
+                          setGroupAccessProject(g.project);
+                        }}>Manage group access</button>
+                      )}
                       {!readOnly && g.project && g.docs[0].canDeleteGroup && g.docs[0].deleteGroupRevision && (
                         <DeleteGroupButton project={g.project} count={g.docs.length} disabled={busy} onConfirm={() => deleteGroup(g.project, g.docs[0].deleteGroupRevision!)} />
                       )}
@@ -363,6 +490,7 @@ export function SharedLibrary({
                 </tr>
                 {!collapsed.includes(g.project) && g.docs.map((d) => (
                   <tr key={d.id} className={d.id === activeSharedId ? 'shared-doc-row active' : 'shared-doc-row'}>
+                    <td className="shared-document-preview"><SharedDocumentThumbnail document={d} /></td>
                     <td>
                       {d.rel ? <span className="muted">{d.rel}/</span> : null}{d.name}
                       {d.description ? <div className="muted small">{d.description}</div> : null}
@@ -426,10 +554,10 @@ export function SharedLibrary({
               </Fragment>
             );})}
             {!!docs.length && !filterDocumentsByName(docs, search).length && (
-              <tr><td colSpan={7} className="muted">No filenames match your search.</td></tr>
+              <tr><td colSpan={8} className="muted">No filenames match your search.</td></tr>
             )}
             {!docs.length && !error && (
-              <tr><td colSpan={6} className="muted">No shared documents yet.</td></tr>
+              <tr><td colSpan={8} className="muted">No shared documents yet.</td></tr>
             )}
           </tbody>
         </table>

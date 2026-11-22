@@ -291,6 +291,9 @@ button.link { background: none; border: 0; color: var(--acc); }
 .shared-document-heading { display: flex; align-items: center; gap: 4px; min-width: 0; width: 100%; }
 .shared-groups .shared-document-name { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .shared-groups .shared-document .muted.small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shared-document-preview { width: 104px; }
+.shared-document-thumbnail { display: flex; width: 96px; min-height: 124px; align-items: center; justify-content: center; box-sizing: border-box; overflow: hidden; border: 1px solid var(--line); border-radius: 3px; background: #fff; }
+.shared-document-thumbnail canvas { display: block; max-width: 96px; max-height: 124px; }
 .shared-document.review-complete { border-left: 3px solid #15803d; background: color-mix(in srgb, #15803d 8%, var(--panel)); }
 .shared-document.review-complete .shared-document-name { color: #15803d; font-weight: 700; }
 .shared-review-check { display: inline-flex; flex: 0 0 auto; flex-direction: row !important; align-items: center; gap: 5px !important; margin: 0; cursor: pointer; color: var(--mut); font-size: 11px; white-space: nowrap; }

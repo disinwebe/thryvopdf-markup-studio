@@ -535,7 +535,8 @@ app.whenReady().then(() => {
       detail: 'PDF review, markup and shared drawing collaboration.\nDeveloped by: TRL 2026', buttons: ['OK'],
     });
   });
-  ipcMain.handle('shared-docs', serverAccess((e, a = {}) => {
+  ipcMain.handle('shared-docs', (e, a = {}) => {
+    if (!auth.current()) return { ok: false, expired: true, error: 'Sign in to the server to use this feature.' };
     if (sharedOperationRequiresLicense(a.op)) requireAccess(auth, license, true);
     if (!auth.docs) return { ok: false, error: 'Shared documents are unavailable.' };
     if (a.op === 'upload' && a.token) {
@@ -549,7 +550,7 @@ app.whenReady().then(() => {
       }
     }
     return auth.docs(a);
-  }));
+  });
   // Password changes must remain available during mandatory first-login changes.
   ipcMain.handle('auth-change-password', (e, a) => auth.changePassword(a || {}));
   ipcMain.handle('auth-notifications', (e, a) => { requireSignIn(auth); return auth.notifications(a || {}); });

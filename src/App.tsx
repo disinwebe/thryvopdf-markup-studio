@@ -53,6 +53,7 @@ import { WatermarksManager } from './components/WatermarksManager';
 import { groupWatermarks } from './core/watermarks';
 import { PrintPreview } from './components/PrintPreview';
 import { FeedbackDialog } from './components/FeedbackDialog';
+import { resetToolbarState } from './components/MovableToolbar';
 
 const MARKUP_TOOLS: Tool[] = ['line', 'highlight', 'text', 'cloud', 'rect', 'ellipse', 'arrow', 'polyline', 'pen', 'stamp', 'image', 'note'];
 const MEASURE_TOOLS: Tool[] = ['m-length', 'm-polylength', 'm-spline', 'm-radius', 'm-diameter', 'm-area', 'm-perimeter', 'm-angle', 'm-count'];
@@ -285,12 +286,21 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         ? { kind: 'signature', signature: selectedSignature }
         : null;
   const logout = async () => {
-    await leaveAll();
+    setLibrary(false);
+    try {
+      await leaveAll();
+    } catch (error) {
+      say('Could not notify shared-document sessions before signing out: ' + (error instanceof Error ? error.message : String(error)));
+    }
     const localDocs = docs.filter((d) => !d.shared);
     setDocs(localDocs);
     if (active?.shared) setActiveId(localDocs.at(-1)?.id ?? '');
     await actions.logout();
   };
+  const handleSharedSessionExpired = useCallback(() => {
+    setLibrary(false);
+    actions.requestSignIn?.(() => setLibrary(true));
+  }, [actions.requestSignIn]);
   const openSharedLibrary = () => {
     if (actions.signedIn) setLibrary(true);
     else if (actions.requestSignIn) actions.requestSignIn(() => setLibrary(true));
@@ -1387,6 +1397,11 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   const menuRef = useRef<(action: string) => void>(() => {});
   menuRef.current = (action) => {
+    if (action === 'toolbar:reset') {
+      for (const id of ['file', 'content', 'markup', 'measure']) resetToolbarState(id);
+      window.dispatchEvent(new Event('toolbar-reset'));
+      return;
+    }
     if (action.startsWith('toolbar:')) {
       const [, id, command] = action.split(':');
       if (['file', 'content', 'markup', 'measure'].includes(id) && (command === 'show' || command === 'hide')) {
@@ -1609,7 +1624,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
         if (notification.type === 'registration') actions.manageUsers?.();
         else openSharedLibrary();
       }} />
-      <div className="toolbar-groups" ref={toolbarGroupsRef} hidden={!active}>
+      <div className="toolbar-groups" ref={toolbarGroupsRef}>
         <MovableToolbar id="file" label="File management" boundsRef={appRef} layouts={toolbarLayoutList} onLayoutChange={reportToolbarLayout}>
           <div className="bar">
             <button onClick={open} title="Open PDF (Ctrl+O)"><FolderIcon /><span className="toolbar-command-label">Open…</span></button>
@@ -2068,7 +2083,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           </button>
         </div>
       )}
-      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} readOnly={readOnly} onChanged={() => setSharedRevision((n) => n + 1)} />}
+      {library && <SharedLibrary me={user} activeName={active && !active.shared ? active.name : undefined} activeSharedId={active?.shared?.id} onClose={() => setLibrary(false)} onOpen={openShared} onUpload={uploadActive} readOnly={readOnly} onChanged={() => setSharedRevision((n) => n + 1)} onSessionExpired={handleSharedSessionExpired} />}
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
       {editingCommentsTarget && active?.id === editingCommentsTarget.docId && (() => {
         const markup = active.markups.find((item) => item.id === editingCommentsTarget.markupId);
