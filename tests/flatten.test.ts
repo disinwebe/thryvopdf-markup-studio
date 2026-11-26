@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { flattenMarkups } from '../src/core/flatten';
 import { readState } from '../src/core/annotations';
 import type { Markup } from '../src/core/types';
+import { flattenStackableLayers } from '../src/app/rasterizeMarkups';
 
 const markup = (id: string, x: number): Markup => ({
   id,
@@ -21,6 +22,19 @@ const markup = (id: string, x: number): Markup => ({
 });
 
 describe('flattening markups', () => {
+  it('does not embed calibration configuration in bytes prepared for saving', async () => {
+    const source = await PDFDocument.create();
+    source.addPage([200, 200]);
+    const calibration = { unit: 'ft' as const, unitsPerPoint: 0.25, calibrated: true };
+    const result = await flattenStackableLayers(
+      await source.save(),
+      { markups: [], calibrations: { 0: calibration }, sheets: {}, bookmarks: [] },
+      [],
+    );
+
+    expect((await readState(await PDFDocument.load(result.bytes))).calibrations[0]).toBeUndefined();
+  });
+
   it('bakes selected raster layers into page content and preserves unflattened annotations', async () => {
     const source = await PDFDocument.create();
     source.addPage([200, 200]);

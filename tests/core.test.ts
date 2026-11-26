@@ -1,9 +1,17 @@
-import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
+import { degrees, PDFDocument, PDFHexString, PDFName, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import { readState, saveWithState } from '../src/core/annotations';
-import { hitMarkup, pickTop, wrapText } from '../src/core/geometry';
+import { applyHandle, constrainToOrtho, handlesOf, hitMarkup, pickTop, wrapText } from '../src/core/geometry';
 import { buildFromPlan, chunkEvery, extractPages, mergePdfs, movePage, parseRanges, rotatePage, splitPdf } from '../src/core/organize';
 import { Markup, MarkupType } from '../src/core/types';
+
+describe('orthogonal movement', () => {
+  it('constrains a point along its dominant horizontal or vertical axis', () => {
+    expect(constrainToOrtho({ x: 10, y: 20 }, { x: 35, y: 27 })).toEqual({ x: 35, y: 20 });
+    expect(constrainToOrtho({ x: 10, y: 20 }, { x: 14, y: 45 })).toEqual({ x: 10, y: 45 });
+    expect(constrainToOrtho({ x: 10, y: 20 }, { x: 15, y: 25 })).toEqual({ x: 15, y: 20 });
+  });
+});
 
 async function makePdf(pages: number, label = 'P', size: [number, number] = [400, 300]): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -29,6 +37,24 @@ const mk = (type: MarkupType, points: [number, number][], extra: Partial<Markup>
 });
 
 describe('annotations round trip', () => {
+  it('removes legacy embedded calibration while preserving other page metadata', async () => {
+    const source = await PDFDocument.load(await makePdf(1));
+    source.getPage(0).node.set(PDFName.of('PMSPage'), PDFHexString.fromText(JSON.stringify({
+      cal: { unit: 'ft', unitsPerPoint: 0.25, calibrated: true },
+      sheet: { number: 'A-101', title: 'Plan' },
+    })));
+    const saved = await saveWithState(await source.save(), {
+      markups: [],
+      calibrations: {},
+      sheets: {},
+      bookmarks: [],
+    });
+
+    const state = await readState(await PDFDocument.load(saved));
+    expect(state.calibrations[0]).toBeUndefined();
+    expect(state.sheets[0]).toEqual({ number: 'A-101', title: 'Plan' });
+  });
+
   it('writes all markup types as real annotations and reloads them', async () => {
     const bytes = await makePdf(2);
     const types: [MarkupType, [number, number][]][] = [
@@ -83,7 +109,7 @@ describe('annotations round trip', () => {
     expect(got.comments[0].text).toBe('ok');
     expect(got.status).toBe('Accepted');
     expect(got.page).toBe(orig.page);
-    expect(back.calibrations[0].unitsPerPoint).toBe(0.25);
+    expect(back.calibrations[0]).toBeUndefined();
     expect(back.sheets[1].number).toBe('A-102');
     expect(back.bookmarks).toEqual([
       { title: 'Intro', page: 0, level: 0 },
@@ -128,7 +154,6 @@ describe('annotations round trip', () => {
   });
 });
 
-import { PDFName } from 'pdf-lib';
 function require_name(n: string) {
   return PDFName.of(n);
 }
@@ -148,6 +173,15 @@ describe('hit testing', () => {
   });
   it('wraps text', () => {
     expect(wrapText('aaa bbb ccc', 40, 10).length).toBeGreaterThan(1);
+  });
+});
+
+describe('line endpoint handles', () => {
+  it('exposes and moves either endpoint independently', () => {
+    const line = mk('line', [[10, 20], [90, 40]]);
+    expect(handlesOf(line).map((handle) => handle.p)).toEqual([{ x: 10, y: 20 }, { x: 90, y: 40 }]);
+    expect(applyHandle(line, 0, { x: 5, y: 15 }).points).toEqual([{ x: 5, y: 15 }, { x: 90, y: 40 }]);
+    expect(applyHandle(line, 1, { x: 100, y: 50 }).points).toEqual([{ x: 10, y: 20 }, { x: 100, y: 50 }]);
   });
 });
 

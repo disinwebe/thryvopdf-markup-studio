@@ -134,12 +134,12 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           <input type="range" min={4} max={80} step={1} value={m.cloudArc ?? 14} onChange={(e) => upd({ cloudArc: +e.target.value }, 'cloud-arc')} />
         </label>
       )}
-      {m.type === 'm-length' && (
+      {(m.type === 'm-length' || m.type === 'line') && (
         <>
           <label>
             Endpoint arrowheads
             <select
-              aria-label="Measurement endpoint arrowheads"
+              aria-label={m.type === 'line' ? 'Line endpoint arrowheads' : 'Measurement endpoint arrowheads'}
               value={m.measurementArrowheads ?? 'none'}
               onChange={(e) => upd({ measurementArrowheads: e.target.value as NonNullable<Markup['measurementArrowheads']> }, 'measurement-arrowheads')}
             >
@@ -153,7 +153,7 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
             <label>
               Arrow size ({m.measurementArrowSize ?? 8} pt)
               <input
-                aria-label="Measurement arrow size"
+                aria-label={m.type === 'line' ? 'Line arrow size' : 'Measurement arrow size'}
                 type="range"
                 min={3}
                 max={24}

@@ -113,6 +113,7 @@ export function snapGeometryFromOperatorList(operatorList: OperatorList, viewpor
         current = start;
       }
     }
+    if (current && start && Math.hypot(current.x - start.x, current.y - start.y) < 1e-4) addCenter();
   };
 
   for (let i = 0; i < operatorList.fnArray.length; i++) {

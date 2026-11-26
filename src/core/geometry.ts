@@ -165,6 +165,14 @@ export function translate(m: Markup, dx: number, dy: number): Markup {
   return { ...m, points: m.points.map((p) => ({ x: p.x + dx, y: p.y + dy })), ...(m.callout ? { callout: { x: m.callout.x + dx, y: m.callout.y + dy } } : {}) };
 }
 
+export function constrainToOrtho(origin: Pt, point: Pt): Pt {
+  const dx = point.x - origin.x;
+  const dy = point.y - origin.y;
+  return Math.abs(dx) >= Math.abs(dy)
+    ? { x: point.x, y: origin.y }
+    : { x: origin.x, y: point.y };
+}
+
 /** Ramer-Douglas-Peucker simplification for freehand strokes. */
 export function simplify(pts: Pt[], eps = 0.6): Pt[] {
   if (pts.length < 3) return pts;
@@ -255,6 +263,7 @@ export interface Handle {
 
 export function handlesOf(m: Markup): Handle[] {
   if (m.type === 'note' || m.type === 'm-count') return [];
+  if (m.type === 'line' || m.type === 'arrow') return m.points.slice(0, 2).map((p, i) => ({ key: i, p }));
   if (isBox(m)) {
     const center = boxCenter(m);
     const hs: Handle[] = rectPoly(boxOf(m)).map((p, i) => ({ key: i, p: m.watermark ? rotateAround(p, center, m.rotation ?? 0) : p }));

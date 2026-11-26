@@ -109,7 +109,7 @@ describe('annotation IDs and comments in the PDF', () => {
     expect(appearanceText('door-1')).toContain('(1) Tj');
     expect(appearanceText('door-2')).toContain('(2) Tj');
     const restored = await readState(doc);
-    expect(restored.calibrations[0]).toEqual(calibration);
+    expect(restored.calibrations[0]).toBeUndefined();
     expect(restored.markups.map((m) => m.type)).toEqual(measurements.map((m) => m.type));
   });
 

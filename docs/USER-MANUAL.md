@@ -254,7 +254,7 @@ Measurements are drawing checks, not review comments: placing one does not open 
 5. Open **Measurements...** to review entries and totals in the **Takeoff** table, choose an output unit, or export the takeoff.
 6. Choose **Export CSV** to save the takeoff. The date column uses local time in `M/D/YYYY HH:mm` format.
 
-The Takeoff table is separate from the Markups panel. Measurement entries are not comments and are not included in markup-comment CSV exports. Page calibration is saved in the PDF, but is not synchronized to other collaborators on a shared document. Coordinate measurement assumptions with your team before sharing quantities.
+The Takeoff table is separate from the Markups panel. Measurement entries are not comments and are not included in markup-comment CSV exports. Page calibration is stored per PDF in this device's application settings; it is not written into the PDF or synchronized to collaborators. Coordinate measurement assumptions with your team before sharing quantities.
 
 The subject remains the default while you continue using the same measurement tool, so repeated Count placements can share a subject such as `D2`. Choosing a different measurement tool clears the subject for the new takeoff type.
 

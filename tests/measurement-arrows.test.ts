@@ -34,6 +34,14 @@ describe('length measurement arrowheads', () => {
     expect(Math.hypot(heads[0][1].x - heads[0][0].x, heads[0][1].y - heads[0][0].y)).toBeCloseTo(16);
   });
 
+  it('creates arrowheads at line markup endpoints', () => {
+    const line: Markup = { ...length, id: 'arrowed-line', type: 'line' };
+    const heads = measurementArrowheads(line);
+    expect(heads).toHaveLength(2);
+    expect(heads[0][0]).toEqual(line.points[0]);
+    expect(heads[1][0]).toEqual(line.points[1]);
+  });
+
   it('persists endpoint arrow settings and renders them into the saved PDF appearance', async () => {
     const source = await PDFDocument.create();
     source.addPage([300, 200]);
@@ -80,6 +88,46 @@ describe('length measurement arrowheads', () => {
       };
       expect(count(24, 60, 22, 20), 'start arrowhead').toBeGreaterThan(20);
       expect(count(174, 60, 22, 20), 'end arrowhead').toBeGreaterThan(20);
+    } finally {
+      await viewer.destroy();
+    }
+  });
+
+  it('persists and draws both line markup arrowheads into saved PDF page content', async () => {
+    const line: Markup = { ...length, id: 'arrowed-line-pdf', type: 'line' };
+    const source = await PDFDocument.create();
+    source.addPage([300, 200]);
+    const bytes = await saveWithState(await source.save(), {
+      markups: [line],
+      calibrations: {},
+      sheets: {},
+      bookmarks: [],
+    });
+    const saved = await PDFDocument.load(bytes);
+    const restored = await readState(saved);
+    expect(restored.markups[0]).toMatchObject({ type: 'line', measurementArrowheads: 'both', measurementArrowSize: 16 });
+
+    const viewer = await getDocument({ data: bytes, standardFontDataUrl }).promise;
+    try {
+      const pdfPage = await viewer.getPage(1);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const context = canvas.getContext('2d');
+      await pdfPage.render({
+        canvasContext: context as unknown as CanvasRenderingContext2D,
+        viewport,
+        annotationMode: AnnotationMode.ENABLE,
+      }).promise;
+      const count = (x: number, y: number) => {
+        const data = context.getImageData(x, y, 16, 8).data;
+        let total = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 1] > 80 && data[i + 1] > data[i] * 1.2) total++;
+        }
+        return total;
+      };
+      expect(count(40, 62), 'start arrowhead').toBeGreaterThan(20);
+      expect(count(164, 62), 'end arrowhead').toBeGreaterThan(20);
     } finally {
       await viewer.destroy();
     }

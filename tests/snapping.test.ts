@@ -76,6 +76,25 @@ describe('measurement snapping', () => {
     expect(geometry.centers).toEqual([{ x: 30, y: 60 }]);
   });
 
+  it('extracts and snaps to the actual center of PDF circles', async () => {
+    const source = await PDFDocument.create();
+    const page = source.addPage([200, 200]);
+    page.drawCircle({ x: 100, y: 100, size: 55, borderWidth: 1 });
+    const pdf = await getDocument({ data: await source.save() }).promise;
+    try {
+      const pdfPage = await pdf.getPage(1);
+      const viewport = pdfPage.getViewport({ scale: 1 });
+      const geometry = snapGeometryFromOperatorList(await pdfPage.getOperatorList(), viewport.transform);
+      expect(geometry.centers).toEqual([{ x: 100, y: 100 }]);
+      expect(snapPoint({ x: 101, y: 99 }, createSnapIndex(geometry), 5)).toEqual({
+        point: { x: 100, y: 100 },
+        kind: 'center',
+      });
+    } finally {
+      await pdf.destroy();
+    }
+  });
+
   it('finds real line endpoints and crossings from a PDF page', async () => {
     const source = await PDFDocument.create();
     const page = source.addPage([200, 200]);

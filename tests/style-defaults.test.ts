@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { toolStyle } from '../src/app/model';
-import { loadMarkupStyleDefaults, MARKUP_STYLE_DEFAULTS_KEY, saveMarkupStyleDefaults } from '../src/app/styleDefaults';
+import { makeMarkup, toolStyle } from '../src/app/model';
+import { loadMarkupStyleDefaults, loadMeasurementStyleDefaults, MARKUP_STYLE_DEFAULTS_KEY, MEASUREMENT_STYLE_DEFAULTS_KEY, saveMarkupStyleDefaults, saveMeasurementStyleDefaults } from '../src/app/styleDefaults';
 import { COMMENT_SIZE_KEY, loadCommentSize, saveCommentSize } from '../src/core/commentSize';
 
 function memoryStore() {
@@ -31,6 +31,25 @@ describe('remembered markup defaults', () => {
     expect(loadMarkupStyleDefaults(storage)).toEqual({ width: 12, opacity: 0.1 });
     storage.setItem(MARKUP_STYLE_DEFAULTS_KEY, '{bad');
     expect(loadMarkupStyleDefaults(storage)).toEqual({});
+  });
+
+  it('applies saved measurement properties to future measurement tools and length markups', () => {
+    const storage = memoryStore();
+    const saved = saveMeasurementStyleDefaults({
+      color: '#334455',
+      width: 7,
+      opacity: 0.65,
+      measurementArrowheads: 'both',
+      measurementArrowSize: 11,
+    }, storage);
+    expect(storage.getItem(MEASUREMENT_STYLE_DEFAULTS_KEY)).toContain('"measurementArrowheads":"both"');
+    expect(loadMeasurementStyleDefaults(storage)).toEqual(saved);
+    const lengthStyle = toolStyle('m-length', undefined, {}, '', saved);
+    const areaStyle = toolStyle('m-area', undefined, {}, '', saved);
+    expect(lengthStyle).toMatchObject({ color: '#334455', width: 7, opacity: 0.65, measurementArrowheads: 'both', measurementArrowSize: 11 });
+    expect(areaStyle).toMatchObject({ color: '#334455', width: 7, opacity: 0.65 });
+    const markup = makeMarkup('m-length', 0, [{ x: 0, y: 0 }, { x: 10, y: 0 }], lengthStyle, 'Test');
+    expect(markup).toMatchObject({ measurementArrowheads: 'both', measurementArrowSize: 11 });
   });
 
   it('persists and clamps the default comment text size', () => {
