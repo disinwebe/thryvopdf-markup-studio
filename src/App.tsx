@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { saveWithState } from './core/annotations';
 import { Calibration, Markup, MarkupType, Pt, SheetMeta, STAMPS, isMeasure, uid } from './core/types';
 import { translate } from './core/geometry';
-import { loadPdf, nextSearchHitIndex, scanPdfSpelling, searchTextMatches, type PdfSpellingIssue, type PdfSpellingMatch, type PdfTextMatch } from './pdf/pdfjs';
+import { loadPdf, nextSearchHitIndex, pageSize,scanPdfSpelling, searchTextMatches, type PdfSpellingIssue, type PdfSpellingMatch, type PdfTextMatch } from './pdf/pdfjs';
 import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups';
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, rotatePage, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
@@ -25,6 +25,7 @@ import { focusSearchOnShortcut, historyShortcut, isTypingTarget, toolForKey } fr
 import { getCommentSize, setCommentSize } from './core/commentSize';
 import { markupCsv } from './core/markupCsv';
 import { importStamp } from './app/stampImport';
+import { imageMarkupSize, type StampImage } from './core/stamp';
 import { LicenseInfo, type LicenseInfoStatus } from './components/LicenseInfo';
 import { PanelToggle } from './components/PanelToggle';
 import { FloatingTools } from './components/FloatingTools';
@@ -38,12 +39,12 @@ import { loadMarkupStyleDefaults, saveMarkupStyleDefaults } from './app/styleDef
 import { CommentPopup } from './components/CommentPopup';
 import { SelectIcon } from './components/SelectIcon';
 import { ContextMenuIcon } from './components/ContextMenuIcon';
-import { SYMBOLS, type PageContentTool, type PageObject, type PdfSymbol } from './core/pageContent';
+import { fitPageText, SYMBOLS, type PageContentTool, type PageObject, type PdfSymbol } from './core/pageContent';
 import { importSignature, loadSignatures, saveSignatures, type SavedSignature } from './app/signatures';
 import { reorderPageLayers } from './core/layerOrder';
 import { markupSelectionBounds } from './core/selection';
 import { groupItems, ungroupItems, expandGroupedSelection } from './core/grouping';
-import { canEditComment } from './core/comments';
+import { canEditComment, ownsMarkup } from './core/comments';
 import { EditCommentsPopup } from './components/EditCommentsPopup';
 import { ActionIcon, type ActionIconName } from './components/ActionIcon';
 import { MovableToolbar, toolbarDockReservations, type ToolbarLayout } from './components/MovableToolbar';
@@ -67,6 +68,7 @@ const TOOL_HINT: Partial<Record<Tool, string>> = {
   select: 'Select (V)',
   hand: 'Pan (H to toggle, or hold Space while using another tool)',
   line: 'Drawing-only line (not a comment)',
+  image: 'Image: choose a PNG or JPEG first, then click the drawing to place it',
   cloud: 'Click to add cloud vertices; press Enter, double-click, or right-click to finish',
   'm-radius': 'Click the circle center, then a point on its edge',
   'm-diameter': 'Click two opposite points on the circle edge',
@@ -100,7 +102,10 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       lastMeasurementTool.current = next;
     }
     setTool(next);
+    if (next === 'image') void pickImageForTool();
   };
+  // The Image tool asks for its picture first; clicks on the page then place it, so it can be placed several times.
+  const [pendingImage, setPendingImage] = useState<StampImage | null>(null);
   const [theme, setTheme] = useTheme();
   const [spellcheckLanguage, setSpellcheckLanguage] = useState<'en-US' | 'en-GB'>('en-US');
   const [spellReviewOpen, setSpellReviewOpen] = useState(false);
@@ -183,6 +188,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [editingPageObjectId, setEditingPageObjectId] = useState<string | null>(null);
   const [editingPageObjectIsNew, setEditingPageObjectIsNew] = useState(false);
   const [pageObjectTextDraft, setPageObjectTextDraft] = useState('');
+  const [pageObjectSizeDraft, setPageObjectSizeDraft] = useState('24');
+  const [pageObjectColorDraft, setPageObjectColorDraft] = useState('#000000');
   const signatureFileInput = useRef<HTMLInputElement>(null);
   const signatureListRef = useRef(signatures);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -460,19 +467,32 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     if (!active || !commentTarget || active.id !== commentTarget.docId || viewOnly) return;
     const markup = active.markups.find((m) => m.id === commentTarget.markupId);
     if (!markup || !isReviewMarkup(markup)) return;
-    updateMarkup(markup.id, { comments: [...markup.comments, { id: uid(), author, authorEmail: user.email, date: new Date().toISOString(), text }] });
+    // A text box is its own comment: what is typed in the popup becomes the text shown in the box.
+    if (markup.type === 'text') updateMarkup(markup.id, { text });
+    else updateMarkup(markup.id, { comments: [...markup.comments, { id: uid(), author, authorEmail: user.email, date: new Date().toISOString(), text }] });
     closeCommentPopup();
   };
   const beginEditComments = (markupId: string) => {
     if (!active || viewOnly) return;
     const markup = active.markups.find((item) => item.id === markupId);
-    if (!markup || !markup.comments.some((comment) => canEditComment(comment, user))) return;
+    if (!markup) return;
+    if (markup.type === 'text') {
+      if (!active.shared || ownsMarkup(markup, user)) setEditingCommentsTarget({ docId: active.id, markupId });
+      return;
+    }
+    if (!markup.comments.some((comment) => canEditComment(comment, user))) return;
     setEditingCommentsTarget({ docId: active.id, markupId });
   };
   const saveEditedComments = (edits: Record<string, string>) => {
     if (!active || !editingCommentsTarget || active.id !== editingCommentsTarget.docId || viewOnly) return;
     const markup = active.markups.find((item) => item.id === editingCommentsTarget.markupId);
     if (!markup) return;
+    if (markup.type === 'text') {
+      const text = edits[markup.id]?.trim();
+      if (text && text !== markup.text) updateMarkup(markup.id, { text });
+      setEditingCommentsTarget(null);
+      return;
+    }
     const editedAt = new Date().toISOString();
     const comments = markup.comments.map((comment) => {
       const text = edits[comment.id]?.trim();
@@ -863,6 +883,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     setContentMode(null);
     if (object.kind === 'text') {
       setPageObjectTextDraft(object.text ?? '');
+      setPageObjectSizeDraft(String(object.fontSize));
+      setPageObjectColorDraft(object.color);
       setEditingPageObjectId(object.id);
       setEditingPageObjectIsNew(true);
     } else {
@@ -877,15 +899,19 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     const object = active?.pageObjects.find((item) => item.id === id);
     if (!object || object.kind !== 'text') return;
     setPageObjectTextDraft(object.text ?? '');
+    setPageObjectSizeDraft(String(object.fontSize));
+    setPageObjectColorDraft(object.color);
     setEditingPageObjectId(id);
     setEditingPageObjectIsNew(false);
   };
-  const savePageObjectText = () => {
+  const savePageObjectText = async () => {
     if (!active || !editingPageObjectId || !pageObjectTextDraft.trim()) return;
     const text = pageObjectTextDraft.trim();
-    updatePageObjects(active.pageObjects.map((object) => object.id === editingPageObjectId && object.kind === 'text'
-      ? { ...object, text, width: Math.max(40, Math.max(...text.split(/\r?\n/).map((line) => line.length)) * object.fontSize * 0.62), height: Math.max(1, text.split(/\r?\n/).length) * object.fontSize * 1.35 }
-      : object));
+    const editing = active.pageObjects.find((object) => object.id === editingPageObjectId && object.kind === 'text');
+    if (!editing) return;
+    const { w: pageWidth } = await pageSize(active.pdf, editing.page);
+    const fontSize = Math.max(6, Math.min(96, Number(pageObjectSizeDraft) || editing.fontSize));
+    updatePageObjects(active.pageObjects.map((object) => object.id === editing.id ? { ...fitPageText(object, text, pageWidth, fontSize), color: pageObjectColorDraft } : object));
     setEditingPageObjectId(null);
     setEditingPageObjectIsNew(false);
     say('PDF text updated. Double-click the text to edit it again.');
@@ -1577,19 +1603,37 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       window.alert(message);
     }
   };
-  const addImageMarkup = async (page: number, point: Pt) => {
-    if (!active || readOnly || !window.api) return;
+  const pickImageForTool = async () => {
+    if (!window.api) return;
     try {
       const [file] = await window.api.openFiles({
         multi: false,
         filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }],
       });
-      if (!file) return;
-      const image = await importStamp(file, () => null);
-      if (!image) return;
-      const scale = Math.min(1, 120 / image.width, 120 / image.height);
-      const width = image.width * scale;
-      const height = image.height * scale;
+      const image = file ? await importStamp(file, () => null) : null;
+      if (!image) {
+        setPendingImage(null);
+        setTool((current) => (current === 'image' ? 'select' : current));
+        say('No image chosen. Choose Image again to pick a PNG or JPEG file.');
+        return;
+      }
+      setPendingImage(image);
+      say('Image ready. Click the drawing where the image should be centered.');
+    } catch (error) {
+      setPendingImage(null);
+      setTool((current) => (current === 'image' ? 'select' : current));
+      say(`Could not load the image: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const addImageMarkup = async (page: number, point: Pt) => {
+    if (!active || readOnly) return;
+    const image = pendingImage;
+    if (!image) {
+      await pickImageForTool();
+      return;
+    }
+    try {
+      const { width, height } = imageMarkupSize(image);
       const markup = makeMarkup('image', page, [
         { x: point.x - width / 2, y: point.y - height / 2 },
         { x: point.x + width / 2, y: point.y + height / 2 },
@@ -1836,6 +1880,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 onPageObjectsChange={updatePageObjects}
                 onEditPageObject={editPageObject}
                 onAddImage={addImageMarkup}
+                placementImage={tool === 'image' ? pendingImage : null}
                 onEditComments={beginEditComments}
                 onCreate={createMarkup}
                 onBeginEdit={beginEdit}
@@ -2087,7 +2132,10 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       {commentTarget && <CommentPopup onSave={saveNewComment} onCancel={closeCommentPopup} />}
       {editingCommentsTarget && active?.id === editingCommentsTarget.docId && (() => {
         const markup = active.markups.find((item) => item.id === editingCommentsTarget.markupId);
-        const comments = markup?.comments.filter((comment) => canEditComment(comment, user)) ?? [];
+        // A text box's comment is its own text, edited here as a single comment.
+        const comments = markup?.type === 'text'
+          ? [{ id: markup.id, author: markup.author, date: markup.date, text: markup.text ?? '' }]
+          : markup?.comments.filter((comment) => canEditComment(comment, user)) ?? [];
         return comments.length ? <EditCommentsPopup comments={comments} onSave={saveEditedComments} onCancel={() => setEditingCommentsTarget(null)} /> : null;
       })()}
       {editingPageObjectId && (
@@ -2095,17 +2143,27 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
           <div className="usermgmt page-text-editor">
             <div className="row between"><b>{editingPageObjectIsNew ? 'Add PDF text' : 'Edit PDF text'}</b><button onClick={cancelPageObjectText}>Cancel</button></div>
             <p className="muted">This is editable PDF page text, not a markup annotation. Double-click it on the page to edit it later.</p>
-            <textarea autoFocus aria-label="PDF text" spellCheck rows={4} value={pageObjectTextDraft} onChange={(e) => setPageObjectTextDraft(e.target.value)} onKeyDown={(e) => {
+            <label className="row page-text-size">
+              <span>Text size</span>
+              <input aria-label="PDF text size" type="number" min={6} max={96} value={pageObjectSizeDraft} onChange={(e) => setPageObjectSizeDraft(e.target.value)} />
+              <span className="muted small">pt</span>
+            </label>
+            <div className="row page-text-color">
+              <span>Text color</span>
+              <StandardColorPicker ariaLabel="Edited PDF text color" value={pageObjectColorDraft} onChange={setPageObjectColorDraft} />
+            </div>
+            <textarea autoFocus aria-label="PDF text" spellCheck rows={6} value={pageObjectTextDraft} onChange={(e) => setPageObjectTextDraft(e.target.value)} onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 e.preventDefault();
                 cancelPageObjectText();
-              } else if (e.key === 'Enter' && !e.shiftKey) {
+              } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
-                savePageObjectText();
+                void savePageObjectText();
               }
             }} />
+            <p className="muted small">Press Enter for a new line, Ctrl+Enter to apply.</p>
             <div className="row">
-              <button className="primary" disabled={!pageObjectTextDraft.trim()} onClick={savePageObjectText}>Apply text</button>
+              <button className="primary" disabled={!pageObjectTextDraft.trim()} onClick={() => void savePageObjectText()}>Apply text</button>
               <button onClick={cancelPageObjectText}>Cancel</button>
             </div>
           </div>
@@ -2278,7 +2336,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       )}
       {licenseInfo && <LicenseInfo status={licenseInfo} onClose={() => setLicenseInfo(null)} onImport={viewOnly ? () => { setLicenseInfo(null); onImportLicense?.(); } : undefined} />}
       {printOpen && active && <PrintPreview document={active} onClose={() => setPrintOpen(false)} />}
-      {feedbackMode && (feedbackMode !== 'inbox' || user.role === 'admin') && <FeedbackDialog mode={feedbackMode} user={user} signedIn={!!actions.serverMode && !!actions.signedIn} onClose={() => setFeedbackMode(null)} onSignIn={() => actions.requestSignIn?.()} />}
+      {feedbackMode && (feedbackMode !== 'inbox' || user.role === 'admin') && <FeedbackDialog mode={feedbackMode} user={user} signedIn={!!actions.serverMode && !!actions.signedIn} onClose={() => setFeedbackMode(null)} onSignIn={() => { setFeedbackMode(null); actions.requestSignIn?.(); }} />}
       {closePromptOpen && (
         <div className="modal close-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="close-confirm-title">
           <div className="usermgmt close-confirm">

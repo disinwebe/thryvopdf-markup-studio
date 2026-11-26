@@ -4,6 +4,7 @@ import App from '../src/App';
 import AuthGate from '../src/components/AuthGate';
 import { SharedDocumentThumbnail, SharedLibrary } from '../src/components/SharedLibrary';
 import { MarkupShape } from '../src/components/MarkupShape';
+import { calloutLayout } from '../src/core/callout';
 import { NotificationBell } from '../src/components/Notifications';
 import { renamedTab } from '../src/app/model';
 import { DEFAULT_CAL } from '../src/core/measurement';
@@ -21,6 +22,21 @@ describe('read-only viewer UI', () => {
     };
     const html = renderToStaticMarkup(<MarkupShape m={markup} cal={DEFAULT_CAL} />);
     expect(html).toContain('opacity="1"');
+  });
+
+  it('draws a text box as its own comment: ID badge on the box and no separate comment box', () => {
+    const textbox = {
+      id: 'textbox-1', type: 'text' as const, page: 0, points: [{ x: 40, y: 40 }, { x: 160, y: 80 }],
+      color: '#202020', width: 1, opacity: 1, status: 'None' as const, author: 'Reader',
+      date: '2026-01-01T00:00:00Z', comments: [{ id: 'old', author: 'Reader', date: '2026-01-01', text: 'Older comment' }], text: 'Check this dimension',
+    };
+    expect(calloutLayout(textbox)).toBeNull();
+    const html = renderToStaticMarkup(<svg><MarkupShape m={textbox} cal={DEFAULT_CAL} tag={3} /></svg>);
+    expect(html).toContain('textbox-tag');
+    expect(html).toContain('>#3</text>');
+    expect(html).toContain('>Check this</tspan>');
+    expect(html).toContain('>dimension</tspan>');
+    expect(html).not.toContain('callout-box');
   });
 
   it('renders the local workspace without showing an account gate', () => {

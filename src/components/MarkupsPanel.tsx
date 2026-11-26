@@ -202,12 +202,16 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
           )}
         </>
       )}
+      {m.type === 'text' && (
+        <div className="comment-id" title="Internal annotation ID, saved as /NM in the PDF"><span className="comment-id-badge">#{numberMarkups(doc.markups).get(m.id)}</span><span className="muted small">Comment ID: {m.id}</span></div>
+      )}
       {(m.type === 'text' || m.type === 'callout' || m.type === 'note') && (
         <textarea
           rows={3}
           spellCheck
-          placeholder="Text"
-          autoFocus={!m.text}
+          aria-label={m.type === 'text' ? 'Comment' : 'Text'}
+          placeholder={m.type === 'text' ? 'Comment (shown in the text box)' : 'Text'}
+          autoFocus={!m.text && !(m.type === 'text' && m.comments.length)}
           value={m.text ?? ''}
           onChange={(e) => upd({ text: e.target.value }, 'text')}
         />
@@ -230,7 +234,19 @@ function Properties({ m, doc, onUpdate, onDelete, author, user, commentSize, onC
       <div className="muted small">
         {m.author} · {new Date(m.date).toLocaleString()}
       </div>
-      {isReviewMarkup(m) && (
+      {m.type === 'text' && m.comments.length > 0 && (
+        <div className="textbox-legacy-comments">
+          <h4>Earlier comments</h4>
+          <p className="muted small">Added before text boxes became their own comment. They are kept and saved with the PDF.</p>
+          {m.comments.map((c) => (
+            <div key={c.id} className="comment" title={'Comment ID ' + c.id}>
+              <b>{c.author}</b> <span className="muted small">{new Date(c.date).toLocaleString()}</span>
+              <div className="comment-text">{c.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {isReviewMarkup(m) && m.type !== 'text' && (
         <>
       <div className="comment-id" title="Internal annotation ID, saved as /NM in the PDF"><span className="comment-id-badge">#{numberMarkups(doc.markups).get(m.id)}</span><span className="muted small">Comment ID: {m.id}</span></div>
       <h4>Comments</h4>

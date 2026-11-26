@@ -33,7 +33,7 @@ describe('Compare document preparation', () => {
       kind: 'text' as const,
       x: 150,
       y: 180,
-      width: 100,
+      width: 120,
       height: 24,
       color: '#202020',
       fontSize: 18,

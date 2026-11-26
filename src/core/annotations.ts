@@ -27,7 +27,7 @@ import {
 import { countNumbers, DEFAULT_CAL, measureLabel } from './measurement';
 import { Bookmark, Calibration, Markup, measurementCircle, Pt, Rect, SheetMeta, uid } from './types';
 import { isReviewMarkup, numberMarkups } from './numbering';
-import { calloutLayout, calloutTextRuns } from './callout';
+import { calloutLayout, calloutTextRuns, textboxTag } from './callout';
 import { measurementArrowheads } from './snapping';
 
 export interface PageGeom {
@@ -399,6 +399,16 @@ export function buildAppearance(
       viewPts = rectPoly(r);
       ops = `${stroke} ${fillC ? fillC.join(' ') + ' rg' : '1 1 1 rg'} ${path(viewPts, true)} B\n`;
       ops += textLines(lines, { x: r.x + 4, y: r.y + 3 }, size, col);
+      if (m.type === 'text' && tag) {
+        // The text box is its own comment, so its review number sits on the box like a comment box's badge.
+        const badge = textboxTag(r, tag);
+        const centre = cv({ x: badge.cx, y: badge.cy });
+        const k = badge.r * 0.5523;
+        const R = badge.r;
+        const circle = `${f(centre.x + R)} ${f(centre.y)} m ${f(centre.x + R)} ${f(centre.y + k)} ${f(centre.x + k)} ${f(centre.y + R)} ${f(centre.x)} ${f(centre.y + R)} c ${f(centre.x - k)} ${f(centre.y + R)} ${f(centre.x - R)} ${f(centre.y + k)} ${f(centre.x - R)} ${f(centre.y)} c ${f(centre.x - R)} ${f(centre.y - k)} ${f(centre.x - k)} ${f(centre.y - R)} ${f(centre.x)} ${f(centre.y - R)} c ${f(centre.x + k)} ${f(centre.y - R)} ${f(centre.x + R)} ${f(centre.y - k)} ${f(centre.x + R)} ${f(centre.y)} c h`;
+        ops += `\nq /GS1 gs 0.882 0.114 0.282 rg ${circle} f BT /F1 ${f(badge.size)} Tf 1 1 1 rg ${tm({ x: badge.x, y: badge.y })} (${latin1(badge.label)}) Tj ET Q`;
+        viewPts = [...viewPts, { x: badge.cx - badge.r, y: badge.cy - badge.r }];
+      }
       if (m.type === 'callout' && m.points[2]) {
         const tip = m.points[2];
         const c = boxCenter(m);
