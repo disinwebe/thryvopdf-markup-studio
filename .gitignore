@@ -7,3 +7,8 @@ server-manager/build
 
 shot.png
 res.json
+
+# Server runtime data: password hashes, the initial admin password, shared documents
+server/data/
+pms-users.json
+ADMIN-INITIAL-PASSWORD.txt
