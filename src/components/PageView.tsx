@@ -8,12 +8,13 @@ import { MarkupShape } from './MarkupShape';
 import { numberMarkups } from '../core/numbering';
 import { CALLOUT_MAX, CALLOUT_MIN_H, CALLOUT_MIN_W, calloutLayout, hitCallout, moveCallout } from '../core/callout';
 import { ownsComment, ownsMarkup, type Actor } from '../core/comments';
-import { resizePageObject, type PageContentTool, type PageObject } from '../core/pageContent';
+import { PAGE_TEXT_LINE_HEIGHT, resizePageObject, wrapPageText, type PageContentTool, type PageObject } from '../core/pageContent';
 import { orderedPageLayers, topPageLayerAt } from '../core/layerOrder';
 import { normalizedRect, selectInWindow } from '../core/selection';
 import { SnapIndex, SnapTarget, snapPoint } from '../core/snapping';
 import { pageSnapIndex } from '../pdf/snapping';
 import { expandGroupedSelection } from '../core/grouping';
+import { imageMarkupSize, type StampImage } from '../core/stamp';
 
 const TWO_POINT: Tool[] = ['highlight', 'text', 'callout', 'rect', 'ellipse', 'line', 'arrow', 'm-length', 'm-radius', 'm-diameter', 'calibrate'];
 const CLICK: Tool[] = ['stamp', 'note', 'm-count', 'image'];
@@ -70,6 +71,8 @@ export interface PageViewProps {
   onPageObjectsChange(objects: PageObject[]): void;
   onEditPageObject(id: string): void;
   onAddImage(page: number, point: Pt): void;
+  /** Picture the Image tool will place; shown under the pointer as a preview. */
+  placementImage?: StampImage | null;
   onEditComments(markupId: string): void;
 }
 
@@ -236,6 +239,7 @@ function PageCanvas(p: PageCanvasProps) {
     setDraftState(d);
   };
   const [cur, setCur] = useState<Pt | null>(null);
+  const [imageHover, setImageHover] = useState<Pt | null>(null);
   const [snapIndex, setSnapIndex] = useState<SnapIndex | null>(null);
   const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null);
   const [selectionWindow, setSelectionWindow] = useState<ReturnType<typeof normalizedRect> | null>(null);
@@ -736,6 +740,7 @@ function PageCanvas(p: PageCanvasProps) {
       ? constrainToOrtho(currentDraft[0], rawPoint)
       : rawPoint;
     if (currentDraft) setCur(pt);
+    if (p.placementImage && tool === 'image') setImageHover(pt);
     if (!dg) return;
     if (dg.kind === 'selection-window') {
       setSelectionWindow(normalizedRect(dg.start, pt));
@@ -756,7 +761,7 @@ function PageCanvas(p: PageCanvasProps) {
         : object));
     } else if (dg.kind === 'page-object-resize') {
       p.onPageObjectsChange(doc.pageObjects.map((object) => object.id === dg.orig.id
-        ? resizePageObject(dg.orig, pt.x - dg.start.x, pt.y - dg.start.y)
+        ? resizePageObject(dg.orig, pt.x - dg.start.x, pt.y - dg.start.y, size?.w)
         : object));
     } else if (dg.kind === 'selection-move') {
       const { x: dx, y: dy } = moveDelta(dg.start, pt);
@@ -849,6 +854,12 @@ function PageCanvas(p: PageCanvasProps) {
         p.onEditComments(markup.id);
         return;
       }
+      // A text box is its own comment, so double-clicking the box edits that comment.
+      const textbox = [...doc.markups].reverse().find((item) => item.page === doc.page && item.type === 'text' && hitMarkup(item, point, 6 / zoom));
+      if (textbox) {
+        p.onEditComments(textbox.id);
+        return;
+      }
     }
     if (p.selectedPageObjectIds.length === 1) {
       const object = doc.pageObjects.find((item) => item.id === p.selectedPageObjectIds[0] && item.page === doc.page);
@@ -895,6 +906,14 @@ function PageCanvas(p: PageCanvasProps) {
     preview = makeMarkup('pen', doc.page, draft, style, p.author);
   }
 
+  // Image tool: a faded copy of the chosen picture, centered on the pointer, where a click will place it.
+  const imagePreview = p.placementImage && tool === 'image' && imageHover
+    ? (() => {
+      const { width, height } = imageMarkupSize(p.placementImage);
+      return { data: p.placementImage.data, x: imageHover.x - width / 2, y: imageHover.y - height / 2, width, height };
+    })()
+    : null;
+
   const cursor =
     p.contentTool ? 'crosshair' : tool === 'hand' ? 'grab' : tool === 'select' ? 'default' : 'crosshair';
   const hs = selected && tool === 'select' && !p.selectionOnly && (!doc.shared || ownsMarkup(selected, p.user)) ? handlesOf(selected) : [];
@@ -930,7 +949,7 @@ function PageCanvas(p: PageCanvasProps) {
                 : layer.value.kind === 'symbol'
                   ? <text key={layer.value.id} x={layer.value.x + layer.value.width / 2} y={layer.value.y + layer.value.height * .82} textAnchor="middle" fontSize={layer.value.height} fill={layer.value.color}>{symbolGlyph(layer.value.symbol)}</text>
                   : <text key={layer.value.id} x={layer.value.x} y={layer.value.y + layer.value.fontSize} fontSize={layer.value.fontSize} fill={layer.value.color} fontFamily="Helvetica, Arial, sans-serif">
-                    {(layer.value.text ?? '').split(/\r?\n/).map((line, index) => <tspan key={index} x={layer.value.x} dy={index === 0 ? 0 : layer.value.fontSize * 1.2}>{line}</tspan>)}
+                    {wrapPageText(layer.value.text ?? '', layer.value.width, layer.value.fontSize).map((line, index) => <tspan key={index} x={layer.value.x} dy={index === 0 ? 0 : layer.value.fontSize * PAGE_TEXT_LINE_HEIGHT}>{line}</tspan>)}
                   </text>
             )}
             {pageMarkups.filter((markup) => markup.type !== 'stamp').map((markup) => (
@@ -961,6 +980,12 @@ function PageCanvas(p: PageCanvasProps) {
                 />
               ))}
             </g>
+            {imagePreview && (
+              <g aria-hidden="true" pointerEvents="none">
+                <image href={imagePreview.data} x={imagePreview.x} y={imagePreview.y} width={imagePreview.width} height={imagePreview.height} preserveAspectRatio="none" opacity={0.6} />
+                <rect x={imagePreview.x} y={imagePreview.y} width={imagePreview.width} height={imagePreview.height} fill="none" stroke="#1976d2" strokeWidth={1 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} />
+              </g>
+            )}
             {preview && (
               <g opacity={0.85}>
                 <MarkupShape m={preview} cal={cal} />
@@ -1026,6 +1051,7 @@ function PageCanvas(p: PageCanvasProps) {
             style={{ cursor }}
             onPointerDown={onDown}
             onPointerMove={onMove}
+            onPointerLeave={() => setImageHover(null)}
             onPointerUp={onUp}
             onDoubleClick={onDouble}
             onContextMenu={(e) => {

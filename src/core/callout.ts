@@ -101,8 +101,22 @@ export function defaultCalloutPos(m: Pick<Markup, 'points'>): Pt {
   return { x: b.x + b.w + 30, y: b.y - 10 };
 }
 
+/** A markup text box is its own comment: its text is the comment, so it never gets a separate comment box. */
+export const isTextboxComment = (m: Pick<Markup, 'type'>): boolean => m.type === 'text';
+
+export interface TextboxTag { label: string; cx: number; cy: number; r: number; x: number; y: number; size: number }
+
+/** The review number badge on a text box's top-left corner, styled like the one on comment boxes. */
+export function textboxTag(box: { x: number; y: number }, tag: number, fs: number = clampCommentSize(getCommentSize())): TextboxTag {
+  const label = `#${tag}`;
+  const r = Math.max(fs * 0.7, (approxTextWidth(label, fs) + 2) / 2);
+  const cx = box.x - r;
+  const cy = box.y - r;
+  return { label, cx, cy, r, x: cx - approxTextWidth(label, fs) / 2, y: cy + fs * 0.35, size: fs };
+}
+
 export function calloutLayout(m: Markup, fs: number = clampCommentSize(m.commentSize ?? getCommentSize())): CalloutLayout | null {
-  if (!isReviewMarkup(m) || !m.comments.length || m.calloutHidden) return null;
+  if (!isReviewMarkup(m) || isTextboxComment(m) || !m.comments.length || m.calloutHidden) return null;
   const HEAD = (fs * 13) / 9;
   const LINE = (fs * 11) / 9;
   const pos = m.callout ?? defaultCalloutPos(m);

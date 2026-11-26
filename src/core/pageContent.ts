@@ -1,7 +1,65 @@
-import { degrees, PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { degrees, PDFDocument, rgb, StandardFontEmbedder, StandardFonts } from 'pdf-lib';
 import type { SavedSignature } from '../app/signatures';
 import { pageGeom, viewToPdf } from './annotations';
 import type { Pt } from './types';
+
+// Page text is drawn in Helvetica; measure with the same metrics pdf-lib uses so on-screen wrapping matches the saved PDF.
+const helvetica = StandardFontEmbedder.for(StandardFonts.Helvetica as unknown as Parameters<typeof StandardFontEmbedder.for>[0]);
+export const PAGE_TEXT_LINE_HEIGHT = 1.2;
+const PAGE_TEXT_PAD = 1.35 - PAGE_TEXT_LINE_HEIGHT;
+const PAGE_EDGE_MARGIN = 8;
+
+export const pageTextWidth = (text: string, size: number) => helvetica.widthOfTextAtSize(text, size);
+
+/** Break text into lines no wider than maxWidth, wrapping at spaces and splitting words that are too long on their own. */
+export function wrapPageText(text: string, maxWidth: number, size: number): string[] {
+  const fits = (value: string) => pageTextWidth(value, size) <= maxWidth + 0.01;
+  const lines: string[] = [];
+  for (const paragraph of text.split(/\r?\n/)) {
+    let line = '';
+    for (const word of paragraph.split(' ')) {
+      const candidate = line ? line + ' ' + word : word;
+      if (fits(candidate)) { line = candidate; continue; }
+      if (line) lines.push(line);
+      line = '';
+      let rest = word;
+      while (rest && !fits(rest)) {
+        let cut = 1;
+        while (cut < rest.length && fits(rest.slice(0, cut + 1))) cut++;
+        lines.push(rest.slice(0, cut));
+        rest = rest.slice(cut);
+      }
+      line = rest;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+/**
+ * Size a text box for new or edited text. A box is as wide as its longest line but never past the page's
+ * right edge, so long text moves to the next line. A box that already wraps, or whose width was set by
+ * resizing it, keeps that width so new words wrap there too. Changing the size never scales the box.
+ */
+export function fitPageText(object: PageObject, text: string, pageWidth: number, fontSize = object.fontSize): PageObject {
+  const longest = (value: string, size: number) => Math.max(...value.split(/\r?\n/).map((line) => pageTextWidth(line, size)));
+  const limitToEdge = maxPageTextWidth(object, pageWidth, fontSize);
+  const wrapsNow = !!object.text && longest(object.text, object.fontSize) > object.width + 0.01;
+  const keepWidth = !!object.fixedWidth || wrapsNow;
+  const width = keepWidth
+    ? Math.min(object.width, limitToEdge)
+    : Math.max(Math.min(40, limitToEdge), Math.min(longest(text, fontSize), limitToEdge));
+  const textHeight = pageTextHeight(text, width, fontSize);
+  return { ...object, text, fontSize, width, height: object.fixedWidth ? Math.max(object.height, textHeight) : textHeight };
+}
+
+/** Height that fits every wrapped line of text in a box of the given width. */
+export const pageTextHeight = (text: string, width: number, fontSize: number) =>
+  wrapPageText(text, width, fontSize).length * fontSize * PAGE_TEXT_LINE_HEIGHT + fontSize * PAGE_TEXT_PAD;
+
+/** Widest a text box may be: up to the page's right edge, but always room for at least one character. */
+const maxPageTextWidth = (object: PageObject, pageWidth: number, fontSize: number) =>
+  Math.max(fontSize, pageWidth - object.x - PAGE_EDGE_MARGIN);
 
 export const SYMBOLS = [
   { value: 'check', label: 'Check mark', glyph: '✓' },
@@ -31,15 +89,26 @@ export interface PageObject {
   signature?: SavedSignature;
   zOrder?: number;
   groupId?: string;
+  /** Text only: the box width was set by resizing, so edits wrap at it instead of fitting the text. */
+  fixedWidth?: boolean;
 }
 
-export function resizePageObject(object: PageObject, dx: number, dy: number): PageObject {
+/**
+ * Text boxes resize without changing the text size: the width sets where lines wrap (up to the page's
+ * right edge) and the height can grow but never cut off a line. Symbols and signatures scale evenly.
+ */
+export function resizePageObject(object: PageObject, dx: number, dy: number, pageWidth = Infinity): PageObject {
+  if (object.kind === 'text') {
+    const width = Math.max(object.fontSize, Math.min(object.width + dx, maxPageTextWidth(object, pageWidth, object.fontSize)));
+    const height = Math.max(pageTextHeight(object.text ?? '', width, object.fontSize), object.height + dy);
+    return { ...object, width, height, fixedWidth: true };
+  }
   const scale = Math.max(0.1, Math.max((object.width + dx) / object.width, (object.height + dy) / object.height));
   return {
     ...object,
     width: object.width * scale,
     height: object.height * scale,
-    fontSize: object.kind === 'text' ? Math.max(6, object.fontSize * scale) : object.fontSize,
+    fontSize: object.fontSize,
   };
 }
 
@@ -54,7 +123,7 @@ export async function bakePageObjects(bytes: Uint8Array, objects: PageObject[]):
     (a.object.zOrder ?? a.index) - (b.object.zOrder ?? b.index) || a.index - b.index);
   for (const { object } of sortedObjects) {
     if (object.kind === 'text') {
-      result = await addPdfText(result, object.page, { x: object.x, y: object.y }, object.text ?? '', object.fontSize, object.color);
+      result = await addPdfText(result, object.page, { x: object.x, y: object.y }, object.text ?? '', object.fontSize, object.color, object.width);
     } else if (object.kind === 'symbol' && object.symbol) {
       result = await addPdfSymbol(result, object.page, { x: object.x + object.width / 2, y: object.y + object.height / 2 }, object.symbol, Math.min(object.width, object.height), object.color);
     } else if (object.kind === 'signature' && object.signature) {
@@ -84,18 +153,19 @@ export async function addPdfText(
   text: string,
   size: number,
   color: string,
+  maxWidth?: number,
 ): Promise<Uint8Array> {
   const value = text.trim();
   if (!value) throw new Error('Enter text before placing it on the PDF.');
   const { pdf, page, geom } = await loadTarget(bytes, pageIndex);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const lines = value.split(/\r?\n/);
+  const lines = maxWidth ? wrapPageText(value, maxWidth, size) : value.split(/\r?\n/);
   const baseline = viewToPdf({ x: position.x, y: position.y + size }, geom);
   page.drawText(lines.join('\n'), {
     x: baseline.x,
     y: baseline.y,
     size,
-    lineHeight: size * 1.2,
+    lineHeight: size * PAGE_TEXT_LINE_HEIGHT,
     font,
     color: pdfColor(color),
     rotate: degrees(-geom.rotation),

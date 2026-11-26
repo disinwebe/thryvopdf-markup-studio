@@ -5,7 +5,8 @@ import { degrees, PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream } from '
 import { AnnotationMode, getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 import { readState, saveWithState } from '../src/core/annotations';
-import { CALLOUT_PAD, calloutLayout, calloutTextRuns } from '../src/core/callout';
+import { CALLOUT_PAD, calloutLayout, calloutTextRuns, textboxTag } from '../src/core/callout';
+import { boxOf } from '../src/core/geometry';
 import { isReviewMarkup } from '../src/core/numbering';
 import type { Markup, MarkupType } from '../src/core/types';
 
@@ -201,6 +202,13 @@ describe('saved PDF annotation appearances', () => {
           const red = (r: number, g: number, b: number) => r > 170 && g < 130 && b < 140;
           for (const markup of markups) {
             const { x, y } = markup.points[0];
+            if (markup.type === 'text') {
+              // A text box is its own comment: no separate comment box, just its ID badge on the box corner.
+              expect(calloutLayout(markup)).toBeNull();
+              const badge = textboxTag(boxOf(markup), markups.indexOf(markup) + 1);
+              expect(pixels(ctx, Math.floor(badge.cx - badge.r), Math.floor(badge.cy - badge.r), Math.ceil(badge.r * 2), Math.ceil(badge.r * 2), red), 'text box ID badge').toBeGreaterThan(badge.r * badge.r);
+              continue;
+            }
             const box = calloutLayout(markup)!;
             expect(pixels(ctx, x - 8, y - 8, 16, 16, red), `${markup.type} markup-corner ID`).toBeLessThan(45);
             expect(pixels(ctx, box.x, box.y - 1, box.w, 3, red), `${markup.type} border`).toBeGreaterThan(box.w * 0.8);
@@ -257,7 +265,11 @@ describe('saved PDF annotation appearances', () => {
               await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, viewport, annotationMode: AnnotationMode.ENABLE }).promise;
               const red = (r: number, g: number, b: number) => r > 170 && g < 130 && b < 140;
               const box = calloutLayout(markup);
-              if (isReviewMarkup(markup)) {
+              if (markup.type === 'text') {
+                expect(box).toBeNull();
+                const badge = textboxTag(boxOf(markup), index + 1);
+                expect(pixels(ctx, Math.floor(badge.cx - badge.r), Math.floor(badge.cy - badge.r), Math.ceil(badge.r * 2), Math.ceil(badge.r * 2), red), 'text box ID badge').toBeGreaterThan(badge.r * badge.r);
+              } else if (isReviewMarkup(markup)) {
                 expect(box).not.toBeNull();
                 expect(pixels(ctx, 32, 32, 16, 16, red), `${markup.type} markup-corner ID`).toBeLessThan(45);
                 expect(pixels(ctx, box!.x, box!.y - 1, box!.w, 3, red), `${markup.type} top`).toBeGreaterThan(box!.w * 0.8);

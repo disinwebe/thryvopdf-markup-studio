@@ -132,8 +132,8 @@ Open the print preview with **Ctrl+P** or **File > Print**. Printing is availabl
    - **Pen:** click and drag to draw freehand.
    - **Polyline:** click to add points, then press **Enter**, double-click, or right-click to finish.
    - **Angle:** click three points to finish.
-   - **Stamp**, **Image**, and **Note:** click to place. For Image, choose a PNG or JPEG file; the image is added as a review markup and opens the comment dialog.
-3. For a Text box, edit the displayed text in the properties panel.
+   - **Stamp**, **Image**, and **Note:** click to place. For Image, choose a PNG or JPEG file first, then click to place it; the image is added as a review markup and opens the comment dialog.
+3. A Text box is its own comment. After you draw it, the **Add comment** dialog opens; what you enter becomes the text shown in the box. Change it later by double-clicking the box, or in the **Comment** field in the properties panel. The box carries its comment ID badge (for example **#3**) on its top-left corner, like a comment box, and no separate comment box is drawn.
 4. To choose another color, width, or opacity, set it in the toolbar before drawing or select the markup and change its properties in the right panel. Color controls include a **Standard** palette as well as custom colors.
 5. After placing a review markup, the **Add comment** dialog appears. Enter a comment and choose **Add comment**; press **Enter** to submit or **Shift+Enter** for a new line. **Cancel** leaves the markup without a comment.
 
@@ -183,9 +183,10 @@ Supported stamp sources include common image formats and PDF files up to 20 MB. 
 ### Image markups
 
 1. Choose **Image** in the Markup toolbar.
-2. Click the page where the image should be centered, then choose a PNG or JPEG file.
-3. Enter a comment in the dialog to describe the image; canceling leaves the image markup without a comment.
-4. Select the image to move or resize it. Its aspect ratio is preserved.
+2. Choose a PNG or JPEG file in the dialog that opens. Canceling it switches back to Select.
+3. Click the page where the image should be centered. The Image tool stays active with the same picture, so you can click again to place more copies; choose **Image** again to pick a different picture.
+4. Enter a comment in the dialog to describe the image; canceling leaves the image markup without a comment.
+5. Select the image to move or resize it. Its aspect ratio is preserved.
 
 The image is embedded in the markup and saved into the PDF, so the annotation does not depend on the original image file. Image markups can also be shared in shared documents.
 
@@ -215,7 +216,7 @@ With the **Select** tool active, hold **Ctrl** (or **Command** on macOS) and cli
 
 The **Text**, **Symbol**, and **Signatures** buttons are in the **Content tools** toolbar group, alongside Select and Pan. These tools write to PDF page content rather than creating markup annotations, so they do not appear in the Markups list or markup count. Use them on local PDFs; live shared documents do not support these page-content edits.
 
-- **Text:** Choose its size and color, then click the page to create a text object and enter its content. Press **Enter** to apply it; use **Shift+Enter** for a new line. Select and drag it to move, drag its corner to resize, and double-click to edit. It is regular PDF text content, not a text-box annotation, and can be searched or edited with a PDF editor that supports editing page content.
+- **Text:** Choose its size and color, then click the page to create a text object and enter its content. Press **Enter** for a new line and **Ctrl+Enter** (or **Apply text**) to apply it; change **Text size** and **Text color** (standard colors) in the same dialog. The box is as wide as its longest line but stops at the page's right edge, and longer text wraps to the next line. Select and drag it to move, drag its corner to set the box width and height (the text size stays the same and the text rewraps), and double-click to edit. It is regular PDF text content, not a text-box annotation, and can be searched or edited with a PDF editor that supports editing page content.
 - **Symbol:** Choose a check, X, star, circle, plus/minus, question mark, or exclamation mark, set its size and color, then click the page. Select and drag the symbol to move or drag its corner to resize it. Symbols are flattened into page graphics when saved.
 - **Signatures:** Choose **Signatures**, then upload one or more PNG files. For an image with a white paper background, select **Remove white background from uploaded PNGs** before uploading; white and near-white pixels become transparent. Leave it unchecked for PNGs that already have transparency or contain white ink. Manage the saved names and entries on this device. Choose **Place selected signature**, then click the page. Select and drag the signature to move or drag its corner to resize it. Signatures are flattened into PDF page content when saved.
 - **Cut, copy, and paste:** Right-click a selected Text, Symbol, Signature, Stamp, or markup and choose **Cut**, **Copy**, or **Paste**. **Ctrl/Cmd+X**, **Ctrl/Cmd+C**, and **Ctrl/Cmd+V** work for the current selection too. A right-click Paste places the copied items around the clicked point; keyboard Paste offsets them from their original position.

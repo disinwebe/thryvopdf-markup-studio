@@ -9,6 +9,12 @@ export interface StampImage {
   height: number;
 }
 
+/** Size of a newly placed image markup: its own size, shrunk to fit within 120 x 120 points. */
+export function imageMarkupSize(image: StampImage): { width: number; height: number } {
+  const scale = Math.min(1, 120 / image.width, 120 / image.height);
+  return { width: image.width * scale, height: image.height * scale };
+}
+
 export function validStampImage(image: StampImage): boolean {
   return !!image && Number.isInteger(image.width) && image.width > 0 && image.width <= MAX_STAMP_SIDE &&
     Number.isInteger(image.height) && image.height > 0 && image.height <= MAX_STAMP_SIDE &&

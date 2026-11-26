@@ -1,7 +1,7 @@
 import { arrowHead, boxCenter, boxOf, cloudPointsFromPath, rectPoly, splinePoints, wrapText, approxTextWidth, rotateAround } from '../core/geometry';
 import { measureLabel } from '../core/measurement';
 import { Calibration, Markup, measurementCircle, Pt } from '../core/types';
-import { calloutLayout, calloutTextRuns } from '../core/callout';
+import { calloutLayout, calloutTextRuns, textboxTag } from '../core/callout';
 import { measurementArrowheads } from '../core/snapping';
 
 const pts = (p: Pt[]) => p.map((q) => `${q.x},${q.y}`).join(' ');
@@ -232,12 +232,20 @@ export function MarkupShape({ m, cal, countNo, tag }: { m: Markup; cal: Calibrat
     }
   }
   const co = calloutLayout(m);
+  // A text box's review number is drawn at full opacity, like a comment box's, so it stays readable.
+  const badge = m.type === 'text' && tag ? textboxTag(boxOf(m), tag) : null;
   return (
     <g>
       <g
         opacity={m.type === 'highlight' ? 1 : m.type === 'm-area' || m.type === 'm-count' ? Math.max(0.5, m.opacity) : m.opacity}
         transform={m.watermark && m.rotation ? `rotate(${m.rotation} ${boxCenter(m).x} ${boxCenter(m).y})` : undefined}
       >{body}</g>
+      {badge && (
+        <g className="textbox-tag">
+          <circle cx={badge.cx} cy={badge.cy} r={badge.r} fill="#e11d48" />
+          <text x={badge.x} y={badge.y} fontSize={badge.size} fontWeight={700} fill="#fff" fontFamily="Helvetica, Arial, sans-serif">{badge.label}</text>
+        </g>
+      )}
       {co && (
         <g className="callout-box">
           <line x1={co.edge.x} y1={co.edge.y} x2={co.anchor.x} y2={co.anchor.y} stroke="#e11d48" strokeWidth={1.2} />
