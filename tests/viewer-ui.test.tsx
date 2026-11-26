@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
 import AuthGate from '../src/components/AuthGate';
-import { SharedDocumentThumbnail, SharedLibrary } from '../src/components/SharedLibrary';
+import { closeSharedLibraryOnEscape, fitSharedThumbnail, SharedDocumentThumbnail, SharedLibrary } from '../src/components/SharedLibrary';
 import { MarkupShape } from '../src/components/MarkupShape';
 import { NotificationBell } from '../src/components/Notifications';
 import { renamedTab } from '../src/app/model';
@@ -79,6 +79,23 @@ describe('read-only viewer UI', () => {
     expect(html).toContain('shared-document-thumbnail');
     expect(html).toContain('role="img"');
     expect(html).toContain('Page 1 preview of plan.pdf');
+  });
+
+  it('fits shared page previews to their orientation without changing aspect ratio', () => {
+    expect(fitSharedThumbnail(1200, 600)).toEqual({ scale: 0.08, width: 96, height: 48 });
+    expect(fitSharedThumbnail(600, 1200)).toEqual({ scale: 0.10333333333333333, width: 62, height: 124 });
+  });
+
+  it('keeps the shared library header identifiable and closes it on Escape', () => {
+    const html = renderToStaticMarkup(<SharedLibrary me={user} onClose={vi.fn()} onOpen={vi.fn()} onUpload={vi.fn()} onChanged={vi.fn()} />);
+    expect(html).toContain('shared-library-header');
+    const onClose = vi.fn();
+    const preventDefault = vi.fn();
+    closeSharedLibraryOnEscape({ key: 'Enter', preventDefault }, onClose);
+    expect(onClose).not.toHaveBeenCalled();
+    closeSharedLibraryOnEscape({ key: 'Escape', preventDefault }, onClose);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(preventDefault).toHaveBeenCalledOnce();
   });
 
   it('allows local tab aliases but never shared tab aliases', () => {

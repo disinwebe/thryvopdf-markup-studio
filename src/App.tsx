@@ -8,7 +8,7 @@ import { flattenStackableLayers, rasterizeMarkups } from './app/rasterizeMarkups
 import { PagePlan, buildFromPlan, mergePdfs, parseRanges, rotatePage, splitPdf } from './core/organize';
 import { PDFDocument } from 'pdf-lib';
 import { readState } from './core/annotations';
-import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, documentZoomKey, downloadName, loadDocumentZoom, makeMarkup, pickFiles, saveBytes, saveDocumentZoom, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
+import { Doc, Style, TOOL_LABEL, Tool, createDoc, defaultStyle, documentZoomKey, downloadName, loadDocumentZoom, makeMarkup, pickFiles, saveBytes, saveDocumentCalibrations, saveDocumentZoom, shouldResetMeasurementSubject, stateOf, toolStyle as resolveToolStyle } from './app/model';
 import { PageView } from './components/PageView';
 import { BookmarksPanel, Thumbnails } from './components/Thumbnails';
 import { MarkupsPanel } from './components/MarkupsPanel';
@@ -21,7 +21,7 @@ import { SharedLibrary, SharedListing } from './components/SharedLibrary';
 import { useSharedSync } from './app/useSharedSync';
 import { batchChanges, syncedOf } from './app/shared';
 import { useTheme } from './app/theme';
-import { focusSearchOnShortcut, historyShortcut, isTypingTarget, toolForKey } from './app/shortcuts';
+import { autoSnapShortcut, focusSearchOnShortcut, historyShortcut, isTypingTarget, orthoShortcut, toolForKey } from './app/shortcuts';
 import { getCommentSize, setCommentSize } from './core/commentSize';
 import { markupCsv } from './core/markupCsv';
 import { importStamp } from './app/stampImport';
@@ -34,7 +34,7 @@ import { normalizePdfFilename } from './app/filename';
 import { isReviewMarkup } from './core/numbering';
 import { NotificationBell, type NotificationsApi } from './components/Notifications';
 import { TabNameEditor } from './components/TabNameEditor';
-import { loadMarkupStyleDefaults, saveMarkupStyleDefaults } from './app/styleDefaults';
+import { loadMarkupStyleDefaults, loadMeasurementStyleDefaults, saveMarkupStyleDefaults, saveMeasurementStyleDefaults } from './app/styleDefaults';
 import { CommentPopup } from './components/CommentPopup';
 import { SelectIcon } from './components/SelectIcon';
 import { ContextMenuIcon } from './components/ContextMenuIcon';
@@ -88,9 +88,12 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [view, setView] = useState<'viewer' | 'compare'>('viewer');
   const [tool, setTool] = useState<Tool>('select');
+  const [orthoEnabled, setOrthoEnabled] = useState(false);
+  const [autoSnapEnabled, setAutoSnapEnabled] = useState(true);
   const [toolbarLayouts, setToolbarLayouts] = useState<Record<string, ToolbarLayout>>({});
   const [styles, setStyles] = useState<Record<string, Style>>({});
   const [styleDefaults, setStyleDefaults] = useState(loadMarkupStyleDefaults);
+  const [measurementStyleDefaults, setMeasurementStyleDefaults] = useState(loadMeasurementStyleDefaults);
   const [subject, setSubject] = useState('');
   const lastMeasurementTool = useRef<Tool | null>(null);
   const author = user.name;
@@ -449,6 +452,27 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       return commit(active.id, active.markups.map((markup) =>
         markup.id === id || (!!watermarkId && markup.watermarkId === watermarkId) ? { ...markup, ...patch } : markup), key);
     })();
+  const rememberMeasurementStyle = (markup: Markup) => {
+    const saved = saveMeasurementStyleDefaults({
+      color: markup.color,
+      width: markup.width,
+      opacity: markup.opacity,
+      ...(markup.type === 'm-length' ? {
+        measurementArrowheads: markup.measurementArrowheads ?? 'none',
+        ...(markup.measurementArrowSize !== undefined ? { measurementArrowSize: markup.measurementArrowSize } : {}),
+      } : {}),
+    });
+    setMeasurementStyleDefaults(saved);
+  };
+  const updateMeasurementMarkup = (id: string, patch: Partial<Markup>, key?: string) => {
+    const current = active?.markups.find((markup) => markup.id === id);
+    if (current && isMeasure(current.type) && !viewOnly &&
+        (patch.color !== undefined || patch.width !== undefined || patch.opacity !== undefined ||
+          patch.measurementArrowheads !== undefined || patch.measurementArrowSize !== undefined)) {
+      rememberMeasurementStyle({ ...current, ...patch });
+    }
+    updateMarkup(id, patch, key);
+  };
 
   const closeCommentPopup = () => {
     setCommentTarget(null);
@@ -900,13 +924,23 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
 
   const saveDocument = async (document: Doc, as = false): Promise<boolean> => {
-    if (viewOnly || document.shared) return false;
+    if (viewOnly) return false;
     try {
       const bytes = await bake(document);
       const path = await saveBytes(document.name, bytes, 'pdf', as ? undefined : document.path);
       if (!path) return false;
-      updateDoc(document.id, () => ({ path, name: baseName(path), dirty: false }));
-      setMsg(`Saved ${baseName(path)} with ${document.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)`);
+      const localCopy = !!document.shared;
+      const hasCalibration = Object.keys(document.calibrations).length > 0;
+      const calibrationSaved = !hasCalibration || saveDocumentCalibrations(
+        documentZoomKey({ name: baseName(path), path }),
+        document.calibrations,
+      );
+      updateDoc(document.id, () => localCopy
+        ? { path }
+        : { path, name: baseName(path), dirty: false });
+      setMsg(localCopy
+        ? `Saved local copy ${baseName(path)}. The shared server document is unchanged.${calibrationSaved ? '' : ' Calibration settings could not be saved on this device.'}`
+        : `Saved ${baseName(path)} with ${document.markups.filter((markup) => markup.type !== 'stamp').length} markup annotation(s)${calibrationSaved ? '' : '. Calibration settings could not be saved on this device.'}`);
       setSavedPdfPath(path);
       return true;
     } catch (e) {
@@ -981,7 +1015,9 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     const r = await window.api!.sharedDocs({ op: 'open', id: info.id });
     if (!r.ok) return say(r.expired ? 'Session expired. Log out and sign in again.' : 'Could not open shared document: ' + (r.error || 'unknown error'));
     try {
-      const base = await createDoc(r.name || info.name, new Uint8Array(r.bytes));
+      const base = await createDoc(r.name || info.name, new Uint8Array(r.bytes), undefined, false, {
+        calibrationKey: documentZoomKey({ name: r.name || info.name, shared: { id: info.id } }),
+      });
       const d: Doc = {
         ...base,
         markups: r.markups,
@@ -1164,15 +1200,19 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   // ---- calibration -----
   const setCal = (cal: Calibration, all: boolean) => {
     if (!active || readOnly) return;
-    updateDoc(active.id, (d) => {
-      const cals = { ...d.calibrations };
-      if (all) for (let i = 0; i < d.numPages; i++) cals[i] = cal;
-      else cals[d.page] = cal;
-      return { calibrations: cals, dirty: true };
-    });
+    const document = active;
     setPending(null);
     setTool('select');
-    say(`Scale set: 100 pt = ${(cal.unitsPerPoint * 100).toFixed(3)} ${cal.unit}`);
+    const calibrations = { ...document.calibrations };
+    if (all) for (let i = 0; i < document.numPages; i++) calibrations[i] = cal;
+    else calibrations[document.page] = cal;
+    updateDoc(document.id, () => ({ calibrations }));
+    const keys = new Set([documentZoomKey(document)]);
+    if (document.path) keys.add(documentZoomKey({ name: document.name, path: document.path }));
+    const saved = [...keys].every((key) => saveDocumentCalibrations(key, calibrations));
+    say(saved
+      ? `Calibration saved for ${document.name} on this device.`
+      : `Calibration is set for this session, but could not be saved for ${document.name} on this device.`);
   };
 
   const goto = (i: number) =>
@@ -1347,6 +1387,18 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
     }
     if (view === 'viewer' && active && focusSearchOnShortcut(e, searchInputRef.current)) return;
     if (isTypingTarget(e.target)) return;
+    if (active && view === 'viewer' && orthoShortcut(e)) {
+      const next = !orthoEnabled;
+      setOrthoEnabled(next);
+      say(`Ortho ${next ? 'on' : 'off'}.`);
+      return;
+    }
+    if (active && view === 'viewer' && autoSnapShortcut(e)) {
+      const next = !autoSnapEnabled;
+      setAutoSnapEnabled(next);
+      say(`Auto snap ${next ? 'on' : 'off'}.`);
+      return;
+    }
     if (view === 'compare' && !mod && (key === 'v' || key === 'h' || e.code === 'Space')) return;
     const next = active && !readOnly ? toolForKey(e, tool) : null;
     const history = active && !readOnly ? historyShortcut(e) : null;
@@ -1525,7 +1577,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
 
   // ---- style editing -----
   const selected = active?.markups.find((m) => m.id === selectedId) ?? null;
-  const toolStyle: Style = resolveToolStyle(tool, styles[tool], styleDefaults, subject);
+  const toolStyle: Style = resolveToolStyle(tool, styles[tool], styleDefaults, subject, measurementStyleDefaults);
   const editingSelected = !!selected && tool === 'select';
   const shown = editingSelected
     ? { ...toolStyle, color: selected!.color, width: selected!.width, opacity: selected!.opacity, fill: !!selected!.fill, fillColor: selected!.fill ?? '#ffffff' }
@@ -1537,6 +1589,18 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       ...(patch.opacity !== undefined ? { opacity: patch.opacity } : {}),
     });
     setStyleDefaults(savedDefaults);
+    if ((tool.startsWith('m-') || (editingSelected && selected && isMeasure(selected.type))) &&
+        (patch.color !== undefined || patch.width !== undefined || patch.opacity !== undefined ||
+          patch.measurementArrowheads !== undefined || patch.measurementArrowSize !== undefined)) {
+      const savedMeasurementDefaults = saveMeasurementStyleDefaults({
+        ...(patch.color !== undefined ? { color: patch.color } : {}),
+        ...(patch.width !== undefined ? { width: patch.width } : {}),
+        ...(patch.opacity !== undefined ? { opacity: patch.opacity } : {}),
+        ...(patch.measurementArrowheads !== undefined ? { measurementArrowheads: patch.measurementArrowheads } : {}),
+        ...(patch.measurementArrowSize !== undefined ? { measurementArrowSize: patch.measurementArrowSize } : {}),
+      });
+      setMeasurementStyleDefaults(savedMeasurementDefaults);
+    }
     if (editingSelected && selected) {
       const mp: Partial<Markup> = {};
       if (patch.color !== undefined) mp.color = patch.color;
@@ -1812,6 +1876,8 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 key={active.id}
                 doc={active}
                 tool={readOnly ? 'select' : tool}
+                orthoEnabled={orthoEnabled}
+                autoSnapEnabled={autoSnapEnabled}
                 selectionOnly={readOnly}
                 style={toolStyle}
                 author={author}
@@ -1871,6 +1937,17 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
               />
               <div className="viewer-controls" aria-label="Page and zoom controls">
                 <FloatingTools tool={tool} theme={theme} onTool={(t) => { chooseTool(t); setPending(null); }} />
+                <span className="sep" />
+                <button className={orthoEnabled ? 'on' : ''} aria-pressed={orthoEnabled} onClick={() => {
+                  const next = !orthoEnabled;
+                  setOrthoEnabled(next);
+                  say(`Ortho ${next ? 'on' : 'off'}.`);
+                }} title="Toggle orthogonal drawing and movement (F8)">Ortho {orthoEnabled ? 'On' : 'Off'}</button>
+                <button className={autoSnapEnabled ? 'on' : ''} aria-pressed={autoSnapEnabled} onClick={() => {
+                  const next = !autoSnapEnabled;
+                  setAutoSnapEnabled(next);
+                  say(`Auto snap ${next ? 'on' : 'off'}.`);
+                }} title="Toggle snapping to PDF geometry (F3)">Auto snap {autoSnapEnabled ? 'On' : 'Off'}</button>
                 <span className="sep" />
                 <button onClick={() => goto(active.page - 1)} title="Previous page" aria-label="Previous page"><ActionIcon name="left" className="tool-icon" /></button>
                 <input className="pg" type="number" aria-label="Page number" min={1} max={active.numPages} value={active.page + 1} onChange={(e) => goto((+e.target.value || 1) - 1)} />
@@ -1954,7 +2031,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                         goto(measurement.page);
                       }
                     }}
-                    onUpdate={updateMarkup}
+                    onUpdate={updateMeasurementMarkup}
                     onDelete={deleteMarkup}
                     onExport={() => undefined}
                   />

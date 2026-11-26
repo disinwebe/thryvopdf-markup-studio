@@ -22,6 +22,18 @@ export function historyShortcut(e: { key: string; ctrlKey?: boolean; metaKey?: b
   return key === 'y' && !e.shiftKey ? 'redo' : null;
 }
 
+export function orthoShortcut(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; preventDefault(): void }): boolean {
+  if (e.key !== 'F8' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
+  e.preventDefault();
+  return true;
+}
+
+export function autoSnapShortcut(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean; preventDefault(): void }): boolean {
+  if (e.key !== 'F3' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
+  e.preventDefault();
+  return true;
+}
+
 /** Tool selected by a plain key press (no Ctrl/Alt/Meta), or null. H toggles Pan back to Select. */
 export function toolForKey(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; target?: EventTarget | null }, current: Tool): Tool | null {
   if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target ?? null)) return null;

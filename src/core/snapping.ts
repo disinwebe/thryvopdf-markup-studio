@@ -132,7 +132,7 @@ export function snapPoint(point: Pt, index: SnapIndex, tolerance: number): SnapT
 }
 
 export function measurementArrowheads(markup: Pick<Markup, 'type' | 'points' | 'measurementArrowheads' | 'measurementArrowSize'>) {
-  if (markup.type !== 'm-length' || markup.points.length < 2) return [];
+  if ((markup.type !== 'm-length' && markup.type !== 'line') || markup.points.length < 2) return [];
   const style = markup.measurementArrowheads ?? 'none';
   if (style === 'none') return [];
   const [start, end] = markup.points;
