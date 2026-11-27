@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { promisify } = require('util');
 const { createClient } = require('./client.cjs');
+const { createAi } = require('./ai.cjs');
 const { menuTemplate, applyNativeTheme } = require('./menu.cjs');
 const { createLicenseStore, MAX_LICENSE_BYTES } = require('./license.cjs');
 const { renamePdfFile, writeSavedFile } = require('./fileOps.cjs');
@@ -270,7 +271,7 @@ function createWindow() {
   }
 }
 
-let auth, license, spellChecker;
+let auth, license, spellChecker, ai;
 const guard = (fn) => (...a) => {
   requireAccess(auth, license, true);
   return fn(...a);
@@ -408,6 +409,22 @@ app.whenReady().then(() => {
         if (!win.isDestroyed()) win.webContents.send('notifications-update', snapshot);
       }
     },
+  });
+  ai = createAi({
+    configFile: path.join(ud, 'ai.json'),
+    keyFile: path.join(ud, 'ai-key.bin'),
+    safeStorage,
+    fetch: net.fetch.bind(net),
+  });
+  const aiSender = (e) => {
+    if (e.sender !== mainWindow?.webContents) throw new Error('This AI request is not allowed.');
+  };
+  ipcMain.handle('ai-status', (e) => { aiSender(e); return ai.status(); });
+  ipcMain.handle('ai-configure', (e, a) => { aiSender(e); return ai.configure(a || {}); });
+  ipcMain.handle('ai-generate', (e, a) => {
+    aiSender(e);
+    requireAccess(auth, license, true);
+    return ai.generate(a || {});
   });
   ipcMain.handle('license-status', () => license.status());
   ipcMain.handle('spellchecker-language', () => {

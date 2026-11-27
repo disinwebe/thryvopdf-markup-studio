@@ -68,4 +68,7 @@ contextBridge.exposeInMainWorld('api', {
   feedbackDelete: (id) => ipcRenderer.invoke('auth-feedback-delete', id),
   testServer: (url) => ipcRenderer.invoke('auth-test', url),
   configureAuth: (args) => ipcRenderer.invoke('auth-configure', args),
+  aiStatus: () => ipcRenderer.invoke('ai-status'),
+  aiConfigure: (args) => ipcRenderer.invoke('ai-configure', args),
+  aiGenerate: (args) => ipcRenderer.invoke('ai-generate', args),
 });

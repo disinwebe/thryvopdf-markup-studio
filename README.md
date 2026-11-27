@@ -13,6 +13,19 @@ A Windows desktop app for construction/drawing PDFs: markups, measurements, revi
 - **Compare**: choose two PDFs/pages; overlay (removed = red, added = blue, unchanged = gray), ghost and side-by-side modes, tolerance, auto-align plus manual nudge, export as PNG or PDF.
 - **Organize**: reorder (drag), rotate, delete, duplicate pages; extract, split, merge, insert pages from another PDF; bookmarks; sheet index (number, title, discipline, revision) with CSV; text search across open documents; project panel for ordering/renaming/merging open sets.
 
+## AI Assistant (Google Gemini)
+
+Open it with the **AI Assistant** toolbar button, **View > AI Assistant (Gemini)...** (Ctrl+Shift+A) or the **AI** tab in the right panel. It needs a licensed device and a Gemini API key.
+
+- **Ask**: ask questions about the open document in plain language. The answer lists the pages it used (click to jump there); when Gemini locates the answer on an attached page image, **Cloud it** marks the spot. The text layer of every page is sent (the most relevant pages are chosen for very large sets), plus images of the current page or up to 6 relevant pages.
+- **Sheet index**: reads title blocks and proposes sheet number, title, discipline and revision for pages without a sheet number, the current page, or all pages. Review the proposals, untick any you do not want, then **Apply ticked rows**. Only fields the AI read are filled; existing values are never blanked.
+- **Spec check**: checks the current page, or up to 25 pages, against a checklist or pasted spec clauses (saved on this PC). Findings are listed by severity; those with a location can be added as cloud markups (red high, amber medium, blue low) with the finding as the first comment and the subject "AI review".
+- **Compare summary**: pick an old and new page (from two open PDFs or the same one) for a plain-language change summary. Copy it, or cloud the located changes on the new revision (blue added, red removed, amber modified).
+
+**Setup**: create a key in Google AI Studio and paste it in **AI Assistant > Settings**, where it is stored encrypted with Windows DPAPI (Electron safeStorage) in the userData folder as `ai-key.bin`. Alternatively set the `GEMINI_API_KEY` environment variable, which takes precedence. The model defaults to `gemini-3.8-flash` and can be changed in Settings (saved in `ai.json`). Requests are made from the Electron main process; the key never reaches the renderer.
+
+**Privacy**: page images and text you analyse are sent to Google. Google may store Generate Content requests on paid-tier projects by default; review your project's data-logging settings in Google AI Studio before using it on confidential drawings. AI output can be wrong: treat answers, sheet data and markups as suggestions to check.
+
 ## Usage
 
 ```
