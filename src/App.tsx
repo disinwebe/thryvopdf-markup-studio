@@ -16,6 +16,7 @@ import { MeasurePanel } from './components/MeasurePanel';
 import { OrganizePanel } from './components/OrganizePanel';
 import { SearchPanel, SheetsPanel } from './components/SheetsPanel';
 import { ComparePanel } from './components/ComparePanel';
+import { AiPanel } from './components/AiPanel';
 import { ProjectPanel } from './components/ProjectPanel';
 import { SharedLibrary, SharedListing } from './components/SharedLibrary';
 import { useSharedSync } from './app/useSharedSync';
@@ -75,7 +76,7 @@ const TOOL_HINT: Partial<Record<Tool, string>> = {
 };
 const HISTORY_LIMIT = 100;
 
-type RightTab = 'markups' | 'measure' | 'watermarks' | 'organize' | 'sheets' | 'search';
+type RightTab = 'markups' | 'measure' | 'watermarks' | 'organize' | 'sheets' | 'search' | 'ai';
 type LeftTab = 'pages' | 'bookmarks' | 'project';
 type ViewerContextMenu = { x: number; y: number; markupId: string | null; calloutId: string | null; pageObjectId: string | null; stackId: string | null; point: Pt; calloutOnly: boolean };
 
@@ -141,6 +142,9 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
   };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rightTab, setRightTab] = useState<RightTab>('markups');
+  // The AI panel stays mounted once opened so its results survive switching tabs.
+  const aiMounted = useRef(false);
+  if (rightTab === 'ai') aiMounted.current = true;
   const [leftTab, setLeftTab] = useState<LeftTab>('project');
   const [leftPanelVisible, setLeftPanelVisible] = useState(true);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
@@ -1548,6 +1552,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
       case 'organizePanel': setRightTab('organize'); break;
       case 'sheetsPanel': setRightTab('sheets'); break;
       case 'searchPanel': setRightTab('search'); break;
+      case 'aiPanel': if (active) { setView('viewer'); setRightTab('ai'); setRightPanelVisible(true); } break;
       case 'spellcheckPdf': void runPdfSpellCheck(); break;
       case 'zoomIn':
         if (view === 'viewer') zoomBy(1.25);
@@ -1745,6 +1750,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
             <span className="sep" />
             <button className={view === 'viewer' ? 'on' : ''} onClick={() => setView('viewer')} title="Viewer"><ActionIcon name="page" className="tool-icon" /><span className="toolbar-command-label">Viewer</span></button>
             <button className={view === 'compare' ? 'on' : ''} onClick={() => setView('compare')} disabled={readOnly || docs.length === 0} title="Compare"><ActionIcon name="compare" className="tool-icon" /><span className="toolbar-command-label">Compare</span></button>
+            <button className={rightTab === 'ai' ? 'on' : ''} onClick={() => { setView('viewer'); setRightTab('ai'); setRightPanelVisible(true); }} disabled={!active} title="AI Assistant (Gemini): ask questions, fill the sheet index, check specs, summarise revisions (Ctrl+Shift+A)"><ActionIcon name="search" className="tool-icon" /><span className="toolbar-command-label">AI Assistant</span></button>
             {viewOnly && <><span className="muted">Unlicensed viewing — editing is disabled.</span><button onClick={() => licenseStatus && setLicenseInfo(licenseStatus)} title="License information"><ActionIcon name="key" className="tool-icon" /><span className="toolbar-command-label">License information…</span></button><button onClick={onImportLicense} title="Import license"><ActionIcon name="open" className="tool-icon" /><span className="toolbar-command-label">Import license…</span></button></>}
           </div>
         </MovableToolbar>
@@ -2013,6 +2019,7 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                 <button className={rightTab === 'markups' ? 'on' : ''} onClick={() => setRightTab('markups')}>Markups ({countOf})</button>
                 <button className={rightTab === 'measure' ? 'on' : ''} onClick={() => setRightTab('measure')}>Measurements ({measurementCount})</button>
                 <button className={rightTab === 'watermarks' ? 'on' : ''} onClick={() => setRightTab('watermarks')}>Watermarks ({watermarkCount})</button>
+                <button className={rightTab === 'ai' ? 'on' : ''} onClick={() => setRightTab('ai')} title="AI Assistant (Gemini)">AI</button>
               </div>
               {rightTab === 'markups' && (
                 <MarkupsPanel
@@ -2106,8 +2113,40 @@ export default function App({ user, actions, viewOnly = false, licenseStatus, on
                   onDelete={deleteMarkup}
                 />
               )}
+              {aiMounted.current && (
+                <div className="ai-wrap" hidden={rightTab !== 'ai'}>
+                  <AiPanel
+                    doc={active}
+                    docs={docs}
+                    author={author}
+                    readOnly={readOnly}
+                    onApplySheets={(docId, patches) =>
+                      updateDoc(docId, (d) => {
+                        const sheets = { ...d.sheets };
+                        for (const [page, patch] of Object.entries(patches))
+                          sheets[+page] = { ...({ number: '', title: '', discipline: '', revision: '' } as SheetMeta), ...d.sheets[+page], ...patch };
+                        return { sheets, dirty: true };
+                      })
+                    }
+                    onAddMarkups={(docId, markups) => {
+                      const target = docsRef.current.find((d) => d.id === docId);
+                      if (!target || !markups.length) return;
+                      const stamped = markups.map((m) => ({ ...m, authorEmail: user.email, comments: m.comments.map((c) => ({ ...c, authorEmail: user.email })) }));
+                      commit(docId, [...target.markups, ...stamped]);
+                      setActiveId(docId);
+                      updateDoc(docId, () => ({ page: stamped[0].page }));
+                      setRightPanelVisible(true);
+                    }}
+                    onGoto={(id, page) => {
+                      setActiveId(id);
+                      updateDoc(id, () => ({ page }));
+                    }}
+                    onMessage={say}
+                  />
+                </div>
+              )}
             </div>
-            {rightTab !== 'markups' && rightTab !== 'measure' && rightTab !== 'watermarks' && (
+            {rightTab !== 'markups' && rightTab !== 'measure' && rightTab !== 'watermarks' && rightTab !== 'ai' && (
               <div className="modal" role="dialog" aria-modal="true" aria-label="Document tools">
                 <div className="usermgmt tool-dialog">
                   <div className="row between"><b>{rightTab === 'organize' ? 'Organize pages' : rightTab === 'sheets' ? 'Sheet index' : 'Search documents'}</b><button onClick={() => setRightTab('markups')}>Close</button></div>

@@ -29,6 +29,9 @@ interface AuthStatus {
   sessionError?: string;
 }
 type AuthResult = { ok: true; user: AuthUser; pending?: undefined; remembered?: boolean; rememberError?: string } | { ok: true; pending: true; message: string; user?: undefined } | { ok: false; error: string };
+interface AiStatus { configured: boolean; source: 'env' | 'saved' | null; model: string; defaultModel: string; canSaveKey: boolean }
+type AiPart = { text: string } | { image: { mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; data: string } };
+type AiResult = { ok: true; text: string; model: string; usage: unknown } | { ok: false; error: string; notConfigured?: boolean };
 interface Window {
   api?: {
     localUserName: string;
@@ -79,6 +82,9 @@ interface Window {
     feedbackDelete(id: string): Promise<{ ok: boolean; error?: string }>;
     testServer(url: string): Promise<{ ok: boolean; error?: string; url?: string; hasUsers?: boolean }>;
     configureAuth(args: { mode: 'server' | 'local'; serverUrl?: string }): Promise<{ ok: boolean; error?: string }>;
+    aiStatus(): Promise<AiStatus>;
+    aiConfigure(args: { apiKey?: string; clearKey?: boolean; model?: string }): Promise<{ ok: true; status: AiStatus } | { ok: false; error: string }>;
+    aiGenerate(args: { parts: AiPart[]; system?: string; json?: boolean; temperature?: number }): Promise<AiResult>;
     register(args: { name: string; email: string; discipline: string; password: string; confirm: string }): Promise<AuthResult>;
     login(args: { email: string; password: string }): Promise<AuthResult>;
     logout(): Promise<{ ok: true; warning?: string }>;
